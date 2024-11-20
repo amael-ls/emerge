@@ -28,24 +28,45 @@ rm(list = setdiff(ls(), "inra_arbres"))
 setDT(inra_arbres)
 
 ## Keep only column of interest and rename them
-inra_arbres = unique(inra_arbres[, .(nom_fichier, essence, c130, h_tot, v_tronc_verif, v_br_verif, v_menu_verif)])
+inra_arbres = unique(inra_arbres[, .(nom_fichier, essence, c130, h_tot, v_tronc_verif, v_br_verif, v_menu_verif, genre)])
 inra_arbres = na.omit(inra_arbres)
 
-setnames(inra_arbres, new = c("unique_id", "speciesName_sci", "circumference_cm", "height", "trunk_vol", "branch_vol", "twig_vol"))
+setnames(inra_arbres, new = c("unique_id", "speciesName_sci", "circumference_cm", "height", "trunk_vol", "branch_vol", "twig_vol", "genus"))
 
-species = "Fagus sylvatica"
-inra_arbres = inra_arbres[speciesName_sci == species]
+inra_arbres[, is_broadleaf := TRUE]
+inra_arbres[genus %in% c("Abies", "Cedrus", "Larix", "Picea", "Pinus", "Pseudotsuga", "Thuya", "Tsuga"),
+	is_broadleaf := FALSE]
 
 ## Compute total volume
 inra_arbres[, tot_vol := trunk_vol + branch_vol + twig_vol]
+setkey(inra_arbres, is_broadleaf, speciesName_sci, unique_id)
 inra_arbres[, .N, by = speciesName_sci]
+
+## Indices
+# Conifer and broadleaf
+lim_broadleaf = range(which(inra_arbres[, is_broadleaf]))
+if (lim_broadleaf[1] == 1)
+	lim_broadleaf = lim_broadleaf[2] + 1 # Last broadleaf + 1 = first conifer
+
+if ((length(lim_broadleaf) == 2) && (lim_broadleaf[2] == inra_arbres[, .N])) # First broadleaf
+	lim_broadleaf = lim_broadleaf[1]
+
+if (length(lim_broadleaf) != 1)
+	stop("Error in lim_broadleaf")
+
+# Find start and end indices for each species
+ind_species = inra_arbres[, .(start = .I[1], end = .I[.N]), by = .(speciesName_sci)]
 
 ## Stan data
 stanData = list(
-	N = inra_arbres[speciesName_sci == species, .N],
-	height = inra_arbres[speciesName_sci == species, height],
-	circumference_m = inra_arbres[speciesName_sci == species, circumference_cm/100],
-	volume_m3 = inra_arbres[speciesName_sci == species, tot_vol/1000]
+	N = inra_arbres[, .N],
+	S = ind_species[, .N],
+	ind_start_sp = ind_species[, start],
+	ind_end_sp = ind_species[, end],
+	lim_broadleaf = lim_broadleaf,
+	height = inra_arbres[, height],
+	circumference_m = inra_arbres[, circumference_cm/100],
+	volume_m3 = inra_arbres[, tot_vol/1000]
 )
 
 #### Tool functions
@@ -53,7 +74,7 @@ source("./dummy/toolFunctions.R")
 
 ## Function to compute tree volume according to model
 vol_fct = function(params_vec, predictor_mat, corrected_cyl_vol)
-	return ((predictor_mat %*% params_vec) * corrected_cyl_vol)
+	return((predictor_mat %*% params_vec) * corrected_cyl_vol)
 
 #### Run model
 # ## lm
