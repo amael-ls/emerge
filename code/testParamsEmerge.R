@@ -274,7 +274,7 @@ fake_dt[, beta2 := rnorm(1, unique(b2), sigma_beta2), by = species]
 # fake_dt[, table(b2)]
 
 # fake_dt[, fake_mu := beta0 + b1*fake_hdn + beta2*fake_slenderness]
-fake_dt[, fake_mu := beta0 + b1*fake_hdn + b2*fake_slenderness]
+fake_dt[, fake_mu := b0 + b1*fake_hdn + beta2*fake_slenderness]
 fake_dt[, cor(fake_hdn, fake_slenderness)]
 # fake_dt[, fake_vol := rnorm(.N, fake_mu, sigma)]
 
@@ -346,3 +346,13 @@ lazyTrace(fit$draws("b1[1]"))
 beta0_draws = fit$draws("beta0")
 round(apply(X = beta0_draws, MARGIN = 3, FUN = mean), 2)
 fake_dt[, unique(round(beta0, 2)), by = species]
+
+beta2_draws = fit$draws("beta2")
+round(apply(X = beta2_draws, MARGIN = 3, FUN = mean), 2)
+
+ind_species[, beta2_estimate := round(apply(X = beta2_draws, MARGIN = 3, FUN = mean), 2)]
+ind_species[, beta2_real := fake_dt[, unique(round(beta2, 2)), by = species][, V1]]
+
+b2_draws = fit$draws("b2")
+round(apply(X = b2_draws, MARGIN = 3, FUN = mean), 2)
+b2
