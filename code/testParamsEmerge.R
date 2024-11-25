@@ -215,87 +215,119 @@ params_deleuze_fag = c(beta0 = 0.542, beta1 = 0.661, beta2 = -0.002)
 
 
 #### Is my model correctly set-up?
-b0 = c(conif = 0.2, broad = 0.53)
-b1 = c(conif = 0.27, broad = 0.14)
-b2 = c(conif = 0.4, broad = 0.21)
+rm(list = ls())
+graphics.off()
 
-sigma_beta0 = 0.18
-sigma_beta2 = 0.1
-sigma = 1.2
+options(max.print = 500)
 
-S = ind_species[, .N]
+library(data.table)
+library(cmdstanr)
+library(stringi)
 
-n_broad = ind_species[, sum(is_broadleaf)]
-n_conif = S - n_broad
+source("./dummy/toolFunctions.R")
 
 set.seed(1969 - 08 - 18) # Woodstock seed
-params_dt = data.table(species = ind_species[, speciesName_sci],
+
+b0 = c(conif = 0.2, broad = 5.3)
+b1 = c(conif = 0.27, broad = 1.4)
+b2 = c(conif = 4, broad = 0.21)
+
+sigma_beta0 = 4.2
+sigma_beta2 = 6.98
+sigma = 1.2
+
+n = 3e3
+S = 30 # Number of species
+
+generate_random_partition = function(n, k)
+{
+	if (n < k)
+		stop("n should be larger than k")
+	parts = c(0, sort(sample(1:(n - 1), k - 1)), n)
+	return(diff(parts))
+}
+
+rep_species = generate_random_partition(n, S)
+
+lim_broadleaf = sum(rep_species[1:15]) + 1
+
+n_conif = lim_broadleaf - 1
+n_broad = n - n_conif
+
+fake_dt = data.table(
+	species = rep(paste0("sp_", 1:S), times = rep_species),
+	type = c(rep("conif", n_conif), rep("broad", n_broad)),
+	fake_hdn = runif(n = n, min = -10, max = 50),
+	fake_slenderness = rnorm(n = n, mean = 0, sd = 20),
 	b0 = c(rep(b0["conif"], n_conif), rep(b0["broad"], n_broad)),
 	b1 = c(rep(b1["conif"], n_conif), rep(b1["broad"], n_broad)),
 	b2 = c(rep(b2["conif"], n_conif), rep(b2["broad"], n_broad)))
-params_dt[, beta0 := rnorm(b0, sigma_beta0)]
-params_dt[, beta2 := rnorm(b2, sigma_beta2)]
-setkey(params_dt, species)
 
-# The parameters to use are: beta0, b1, and beta2
-inra_arbres[, fake_hdn := runif(.N, min(hdn), max(hdn))]
-inra_arbres[, fake_slenderness := runif(.N, min(slenderness), max(slenderness))]
+fake_dt[, beta0 := rnorm(1, unique(b0), sigma_beta0), by = species]
+fake_dt[, beta2 := rnorm(1, unique(b2), sigma_beta2), by = species]
 
-cor(inra_arbres[, hdn], inra_arbres[, slenderness])
-cor(inra_arbres[, fake_hdn], inra_arbres[, fake_slenderness])
+# fake_dt[, table(round(beta0, 2))]
+# fake_dt[, table(round(beta2, 2))]
 
-inra_arbres[, fake_mu := params_dt[speciesName_sci, beta0] + params_dt[speciesName_sci, b1]*fake_hdn +
-	params_dt[speciesName_sci, beta2]*fake_slenderness, by = speciesName_sci]
+# fake_dt[, table(b0)]
+# fake_dt[, table(b1)]
+# fake_dt[, table(b2)]
 
-inra_arbres[, fake_mu := params_dt[1, b0] + params_dt[1, b1]*fake_hdn + params_dt[1, b2]*fake_slenderness]
+# fake_dt[, fake_mu := beta0 + b1*fake_hdn + beta2*fake_slenderness]
+fake_dt[, fake_mu := beta0 + b1*fake_hdn + b2*fake_slenderness]
+fake_dt[, cor(fake_hdn, fake_slenderness)]
+# fake_dt[, fake_vol := rnorm(.N, fake_mu, sigma)]
 
-inra_arbres[, fake_vol := rnorm(.N, mean = fake_mu, sd = sigma)]
+for (i in 1:n)
+	fake_dt[i, fake_vol := rnorm(1, fake_mu, sigma)]
 
-## Stan data
-# stanData = list(
-# 	N = inra_arbres[, .N],
-# 	S = ind_species[, .N],
-# 	ind_start_sp = ind_species[, start],
-# 	ind_end_sp = ind_species[, end],
-# 	lim_broadleaf = lim_broadleaf,
-# 	height = inra_arbres[, height],
-# 	circumference_m = inra_arbres[, circumference_m],
-# 	fake_hdn = inra_arbres[, fake_hdn],
-# 	fake_slenderness = inra_arbres[, fake_slenderness],
-# 	volume_m3 = inra_arbres[, fake_vol]
-# )
+fake_dt[, sd(fake_mu), by = species]
 
-fake_hdn = runif(1e4, 0, 100)
-fake_slenderness = runif(1e4, 0, 100)
-lim_broadleaf = 3657
+ind_species = fake_dt[, .(start = .I[1], end = .I[.N]), by = .(species)]
+ind_species[, n_indiv := end - start + 1, by = species]
+ind_species[, sum(n_indiv)] == n
 
 stanData = list(
-	N = 1e4,
+	N = fake_dt[, .N],
+	S = S,
+	ind_start_sp = ind_species[, start],
+	ind_end_sp = ind_species[, end],
 	lim_broadleaf = lim_broadleaf,
-	fake_hdn = fake_hdn,
-	fake_slenderness = fake_slenderness,
-	volume_m3 = c(
-		rnorm(lim_broadleaf - 1, b0[1] + b1[1]*fake_hdn[1:(lim_broadleaf - 1)] +
-			b2[1]*fake_slenderness[1:(lim_broadleaf - 1)], sigma),
-		rnorm(1e4 - lim_broadleaf + 1, b0[2] + b1[2]*fake_hdn[lim_broadleaf:1e4] +
-			b2[2]*fake_slenderness[lim_broadleaf:1e4], sigma))
+	fake_hdn = fake_dt[, fake_hdn],
+	fake_slenderness = fake_dt[, fake_slenderness],
+	volume_m3 = fake_dt[, fake_vol]
 )
 
-plot(stanData$volume_m3)
+# plot(1:n_conif, fake_dt[type == "conif", fake_vol], pch = 19,
+# 	col = "#FFAF3766", xlim = c(0, n), xlab = "", ylab = "")
+# points((n_conif + 1):n, fake_dt[type == "broad", fake_vol], pch = 19, col = "#AA228866")
+# abline(v = c(ind_species[, start], ind_species[.N, end]), lwd = 2, col = "#CD212A")
+
+# fake_dt[, colour := ifelse(type == "conif", "#FFAF3799", "#AA228808")]
+# plot(fake_dt[, fake_mu], fake_dt[, fake_vol], pch = 19,
+# 	col = fake_dt[, colour], xlab = "", ylab = "")
+
+tt = lm(fake_dt[, fake_vol] ~ 0 + fake_dt[, fake_mu])
+summary(tt)$sigma # Should be close to sigma
+summary(tt)$coefficients[, "Estimate"] # Should be close to 1
+
+## nlme test
+# nlme_test = nlme(formTotNew ~ a + b*hdn + d*slenderness, data = inra_arbres,
+# 	start = c(a = 0.4, 0, b = 1.5, 0, d = 0.0005, 0),
+# 	fixed = list(a + b + d ~ feuil.res), random = a + d ~ 1|speciesName_sci)
 
 ## Common variables
 n_chains = 4
-woodstock_seed = 1969 - 08 - 18
 
 ## Compile
 # model = cmdstan_model("./emerge_vtot.stan")
-model = cmdstan_model("./test.stan")
+model = cmdstan_model("./emerge_vtot.stan")
 
 ## Fit
 if (!file.exists("fit_test.rds"))
 {
 	fit = model$sample(data = stanData, chains = n_chains, parallel_chains = ifelse(n_chains < 4, n_chains, 4),
-		refresh = 200, max_treedepth = 12, save_warmup = FALSE)
+		refresh = 200, max_treedepth = 12, save_warmup = TRUE, iter_warmup = 500, iter_sampling = 1500, adapt_delta = 0.8)
 	fit$save_output_files(dir = "./", basename = paste0("groupEffect_gamma"), random = FALSE)
 	saveRDS(fit, "fit_test_groupEffect_gamma.rds")
 } else {
@@ -305,4 +337,12 @@ if (!file.exists("fit_test.rds"))
 fit$cmdstan_diagnose()
 fit$summary()
 
-lazyTrace(fit$draws("sigma"))
+lazyTrace(fit$draws("sigma", inc_warmup = FALSE))
+lazyTrace(fit$draws("b0[1]", inc_warmup = TRUE))
+lazyTrace(fit$draws("b0[2]", inc_warmup = TRUE))
+
+lazyTrace(fit$draws("b1[1]"))
+
+beta0_draws = fit$draws("beta0")
+round(apply(X = beta0_draws, MARGIN = 3, FUN = mean), 2)
+fake_dt[, unique(round(beta0, 2)), by = species]
