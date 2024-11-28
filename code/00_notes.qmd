@@ -59,7 +59,15 @@ The model `Modele_mai2` should be understood as follows, for an individual of he
 	d_{i, j} &\sim \N(\delta_i, \sigma_{\delta}),
 \end{aligned}
 \end{equation}
-where $\alpha_i$ and $\delta_i$ are the 'group intercepts' (common values within conifers and broadleaves). Therefore, it seems to be a GLMM, and I am not sure `nlme` is relevant here. In the next sections, I will try to reproduce their model with generated data. I will do it step-by-step.
+where $\alpha_i$ and $\delta_i$ are the 'group intercepts' (common values within conifers and broadleaves). Therefore, it seems to be a GLMM, and I am not sure `nlme` is relevant here. In the next sections, I will try to reproduce their model with generated data. I will do it step-by-step. Before that, I rewrite the equations with new variable names and without the indices $i$ and $j$, in order to correspond to stan code:
+\begin{equation} \label{eq::deleuze-modified}
+\begin{aligned}
+	\F &\sim \N(\mu, \sigma) \\
+	\mu &= \beta_0 + b_1 \frac{\sqrt{c}}{h} + \beta_2 \frac{h}{c} \\
+	\beta_0 &\sim \N(b_0, \sigma_0) \\
+	\beta_2 &\sim \N(b_2, \sigma_2),
+\end{aligned}
+\end{equation}
 
 ## Generating data
 ### Packages and helpers
@@ -165,6 +173,11 @@ fake_dt[, fake_vol_no_randeff := rnorm(.N, b0 + b1*fake_hdn + b2*fake_slendernes
 ind_species = fake_dt[, .(start = .I[1], end = .I[.N]), by = .(species)]
 ind_species[, n_indiv := end - start + 1, by = species]
 ind_species[, sum(n_indiv)] == n
+ind_species = merge.data.table(ind_species, unique(fake_dt[, .(species, type)]))
+setorder(ind_species, start)
+
+n_sp = ind_species[, .N, by = type]
+setkey(n_sp, type)
 
 temporary = lm(fake_dt[, fake_vol] ~ 0 + fake_dt[, fake_mu])
 sig_est = round(summary(temporary)$sigma, 3)
@@ -172,19 +185,19 @@ sig_est = round(summary(temporary)$sigma, 3)
 
 Here is a summary of the parameters value $\beta_0$ and $\beta_2$ (simulated), and $b_0$ and $b_2$, which are supposed to be the mean of $\beta_0$s and $\beta_2$s:
 
-| **Parameter**            | **Conifer**             | **Broadleaf**           |
-|-------------------------:|:------------------------|:------------------------|
-| $b_0$                    | `{r} b0["conif"]`       | `{r} b0["broad"]`       |
-| $\beta_0$                | `{r} b0m["conif", V1]`  | `{r} b0m["broad", V1]`  |
-| $\sigma_{\alpha}$        | `{r} sigma_beta0`       | `{r} sigma_beta0`       |
-| $\sigma_{\alpha}$ (data) | `{r} b0m["conif", sig]` | `{r} b0m["broad", sig]` |
-| $b_1$                    | `{r} b1["conif"]`       | `{r} b1["broad"]`       |
-| $b_2$                    | `{r} b2["conif"]`       | `{r} b2["broad"]`       |
-| $\beta_2$                | `{r} b2m["conif", V1]`  | `{r} b2m["broad", V1]`  |
-| $\sigma_{\delta}$        | `{r} sigma_beta2`       | `{r} sigma_beta2`       |
-| $\sigma_{\delta}$ (data) | `{r} b2m["conif", sig]` | `{r} b2m["broad", sig]` |
-| $\sigma$                 | `{r} sigma`             | `{r} sigma`             |
-| $\sigma$ (lm)            | `{r} sig_est`           | `{r} sig_est`           |
+| **Parameter**     | **Conifer**             | **Broadleaf**           |
+|------------------:|:------------------------|:------------------------|
+| $b_0$             | `{r} b0["conif"]`       | `{r} b0["broad"]`       |
+| $\beta_0$         | `{r} b0m["conif", V1]`  | `{r} b0m["broad", V1]`  |
+| $\sigma_0$        | `{r} sigma_beta0`       | `{r} sigma_beta0`       |
+| $\sigma_0$ (data) | `{r} b0m["conif", sig]` | `{r} b0m["broad", sig]` |
+| $b_1$             | `{r} b1["conif"]`       | `{r} b1["broad"]`       |
+| $b_2$             | `{r} b2["conif"]`       | `{r} b2["broad"]`       |
+| $\beta_2$         | `{r} b2m["conif", V1]`  | `{r} b2m["broad", V1]`  |
+| $\sigma_2$        | `{r} sigma_beta2`       | `{r} sigma_beta2`       |
+| $\sigma_2$ (data) | `{r} b2m["conif", sig]` | `{r} b2m["broad", sig]` |
+| $\sigma$          | `{r} sigma`             | `{r} sigma`             |
+| $\sigma$ (lm)     | `{r} sig_est`           | `{r} sig_est`           |
 : Parameters value for both functional groups {.borderless .hover}
 
 As can be seen, the data do not necessarily represent the true parameters value very well.
@@ -252,8 +265,12 @@ Prepare the data for Stan,
 stanData = list(
 	N = fake_dt[, .N],
 	S = S,
-	ind_start_sp = ind_species[, start],
-	ind_end_sp = ind_species[, end],
+	n_sp_conif = n_sp["conif", N],
+	n_sp_broad = n_sp["broad", N],
+	ind_start_conif = ind_species[type == "conif", start],
+	ind_start_broad = ind_species[type == "broad", start],
+	ind_end_conif = ind_species[type == "conif", end],
+	ind_end_broad = ind_species[type == "broad", end],
 	lim_broadleaf = lim_broadleaf,
 	fake_hdn = fake_dt[, fake_hdn],
 	fake_slenderness = fake_dt[, fake_slenderness],
@@ -302,3 +319,133 @@ info_dt |>
 	)
 ```
 
+### Hierarchical model, group effect variances provided
+A slightly more complex model, this time with a group effect (\ie random effect $\beta_0$s and $\beta_2$s to estimate), but the two variances $\sigma_0$ and $\sigma_2$ are provided: 
+```{stan output.var = "model_var_provided", cache = TRUE}
+data {
+	// Dimensions and indices
+	int N; // Number of individuals
+	int S; // Number of species
+	int<lower = 0, upper = S> n_sp_conif; // number of conifer species
+	int<lower = S - n_sp_conif, upper = S - n_sp_conif> n_sp_broad; // number of broadleaf species
+	array[n_sp_conif] int ind_start_conif; // Conifer species index start
+	array[n_sp_broad] int ind_start_broad; // Broadleaf species index start
+	array[n_sp_conif] int ind_end_conif; // Conifer species index end
+	array[n_sp_broad] int ind_end_broad; // Broadleaf species index end
+
+	// Predictors
+	vector [N] fake_hdn;
+	vector [N] fake_slenderness;
+
+	// Response variable
+	vector[N] volume_m3;
+}
+
+parameters {
+	// Fixed effects
+	vector[2] b0;
+	vector[2] b1;
+	vector[2] b2;
+	
+	vector[S] beta0;
+	vector[S] beta2;
+
+	// Variance
+	real<lower = 0> sigma; // sd residuals
+}
+
+model {
+	// Priors
+	target += normal_lpdf(b0 | 0, 10);
+	target += normal_lpdf(b1 | 0, 10);
+	target += normal_lpdf(b2 | 0, 10);
+
+	target += inv_gamma_lpdf(sigma | 1, 1);
+
+	for (i in 1:n_sp_conif)
+	{
+		// Hierarchy
+		target += normal_lpdf(beta0[i] | b0[1], 4.2);
+		target += normal_lpdf(beta2[i] | b2[1], 6.98);
+		
+		// Likelihood conifers
+		target += normal_lpdf(volume_m3[ind_start_conif[i]:ind_end_conif[i]] | b0[1] +
+			b1[1]*fake_hdn[ind_start_conif[i]:ind_end_conif[i]] +
+			b2[1]*fake_slenderness[ind_start_conif[i]:ind_end_conif[i]], sigma);
+	}
+
+	for (i in 1:n_sp_broad)
+	{
+		// Hierarchy
+		target += normal_lpdf(beta0[n_sp_conif + i] | b0[2], 4.2);
+		target += normal_lpdf(beta2[n_sp_conif + i] | b2[2], 6.98);
+
+		// Likelihood broadleaves
+		target += normal_lpdf(volume_m3[ind_start_broad[i]:ind_end_broad[i]] | b0[2] +
+			b1[2]*fake_hdn[ind_start_broad[i]:ind_end_broad[i]] +
+			b2[2]*fake_slenderness[ind_start_broad[i]:ind_end_broad[i]], sigma);
+	}
+}
+```
+and run the hierarchical model:
+```{r, cache = TRUE}
+#| output: false
+#| echo: false
+fit = model_var_provided$sample(data = stanData, chains = n_chains, parallel_chains = ifelse(n_chains < 4, n_chains, 4),
+	refresh = 200, iter_warmup = iter_warmup, iter_sampling = iter_sampling)
+fit$save_output_files(dir = "./", basename = paste0("model_var_provided"), random = FALSE)
+```
+
+This gives the fillowing results:
+```{r}
+#| html-table-processing: none
+info_dt = pretty_summary(fit = fit, params = c("b0", "b1", "b2", "sigma")) # -1 to remove lp__
+info_dt |>
+	gt() |>
+	cols_label(
+		params_name = "Parameter",
+		mean_params = "Mean",
+		sd_params = "Std. dev",
+		r_hat_params = "r hat"
+	) |>
+	fmt_number(
+		n_sigfig = 2
+	) |>
+	tab_style(
+		style = cell_borders(sides = "all", style = NULL),
+		locations = cells_body()
+	) |>
+	tab_style(
+		style = cell_text(weight = "bold"),
+		locations = list(cells_column_labels(), cells_column_spanners())
+	) |>
+	tab_style(
+		style = cell_text(align = "right"),
+		locations = cells_body(columns = params_name)
+	)
+```
+
+<!-- ```{r}
+unique(fake_dt[, .(species, beta0, beta2)]) |>
+	gt() |>
+	cols_label(
+		species = "Species",
+		beta0 = "Beta 0",
+		beta2 = "Beta 2",
+	) |>
+	fmt_number(
+		n_sigfig = 2
+	) |>
+	tab_style(
+		style = cell_borders(sides = "all", style = NULL),
+		locations = cells_body()
+	) |>
+	tab_style(
+		style = cell_text(weight = "bold"),
+		locations = list(cells_column_labels(), cells_column_spanners())
+	) |>
+	tab_style(
+		style = cell_text(align = "right"),
+		locations = cells_body(columns = species)
+	)
+``` -->
