@@ -95,7 +95,6 @@ generate_random_partition = function(n, k)
 ### Parameters
 I define the following parameters, that will be used to generate data according to equation \eqref{eq::deleuze}:
 ```{r}
-
 #### Define parameters
 set.seed(1969 - 08 - 18) # Woodstock seed
 
@@ -117,9 +116,10 @@ We aim to recover them later with a statiscal model.
 
 ### Data
 ```{r}
+#| output: false
 rep_species = generate_random_partition(n, S)
 
-lim_broadleaf = sum(rep_species[1:15]) + 1
+lim_broadleaf = sum(rep_species[1:19]) + 1
 
 n_conif = lim_broadleaf - 1
 n_broad = n - n_conif
@@ -136,23 +136,31 @@ fake_dt = data.table(
 fake_dt[, beta0 := rnorm(1, unique(b0), sigma_beta0), by = species]
 fake_dt[, beta2 := rnorm(1, unique(b2), sigma_beta2), by = species]
 
-# fake_dt[, table(round(beta0, 2))]
-# fake_dt[, table(round(beta2, 2))]
+b0m = fake_dt[, round(mean(unique(beta0)), 3), by = type]
+b0m[, sig := fake_dt[, round(sd(unique(beta0)), 3)]]
+setkey(b0m, type)
 
-# fake_dt[, table(b0)]
-# fake_dt[, table(b1)]
-# fake_dt[, table(b2)]
+b2m = fake_dt[, round(mean(unique(beta2)), 3), by = type]
+b2m[, sig := fake_dt[, round(sd(unique(beta2)), 3)]]
+setkey(b2m, type)
 
 fake_dt[, fake_mu := beta0 + b1*fake_hdn + beta2*fake_slenderness]
-fake_dt[, cor(fake_hdn, fake_slenderness)]
-# fake_dt[, fake_vol := rnorm(.N, fake_mu, sigma)]
-
-for (i in 1:n)
-	fake_dt[i, fake_vol := rnorm(1, fake_mu, sigma)]
-
-fake_dt[, sd(fake_mu), by = species]
+fake_dt[, fake_vol := rnorm(.N, fake_mu, sigma)]
 
 ind_species = fake_dt[, .(start = .I[1], end = .I[.N]), by = .(species)]
 ind_species[, n_indiv := end - start + 1, by = species]
 ind_species[, sum(n_indiv)] == n
 ```
+
+Here is a summary of the parameters value $\beta_0$ and $\beta_2$ (simulated), and $b_0$ and $b_2$, which are supposed to be the mean of $\beta_0$s and $\beta_2$s:
+
+| **Parameter** | **Conifer**            | **Broadleaf**          | $\boldsymbol{\sigma}$   |
+|--------------:|:-----------------------|:-----------------------|:------------------------|
+| $b_0$         | `{r} b0["conif"]`      | `{r} b0["broad"]`      | `{r} sigma_beta0`       |
+| $b_2$         | `{r} b2["conif"]`      | `{r} b2["broad"]`      | `{r} sigma_beta2`       |
+| $\beta_0$     | `{r} b0m["conif", V1]` | `{r} b0m["broad", V1]` | `{r} b0m["broad", sig]` |
+| $\beta_2$     | `{r} b2m["conif", V1]` | `{r} b2m["broad", V1]` | `{r} b2m["broad", sig]` |
+: Parameters value for both functional groups {.borderless .hover}
+
+As can be seen, the data do not necessarily represent the true parameters value very well.
+
