@@ -592,3 +592,49 @@ gamma_sum_approx = function(x, order, shape_vec, scale_vec, tol = sqrt(.Machine$
 
 	return(results)
 }
+
+## Function to print pretty summary CmdStanR model for quarto
+pretty_summary = function(fit, params)
+{
+	draws = fit$draws(params)
+	var_names = dimnames(draws)$variable
+
+	if (length(var_names) != length(params))
+		warning("Watch out, some params were vectors in stan model")
+
+	# See Bayesian Data Analysis, 3rd ed., p. 283-285 for explanation
+	# B is the between sequence variance
+	# W is the within sequence variance
+	n_iter = fit$metadata()$iter_sampling
+	n = floor(n_iter/2)
+	m = 2*fit$num_chains()
+
+	info_dt = data.table(params_name = var_names, mean_params = apply(X = draws, MARGIN = 3, FUN = mean),
+		sd_params = apply(X = draws, MARGIN = 3, FUN = sd), r_hat_params = 0.0)
+	setkey(info_dt, params_name)
+	for (current_var in var_names)
+	{
+		split_chains = vector(mode = "list", length = m)
+		for (cc in seq_len(fit$num_chains()))
+		{
+			split_chains[[2*cc - 1]] = draws[1:n, cc, current_var]
+			split_chains[[2*cc]] = draws[(n + 1):n_iter, cc, current_var]
+		}
+
+		mean_within_seq = sapply(X = split_chains, FUN = mean)
+		mean_btw_seq = mean(mean_within_seq)
+		B = n/(m - 1) * sum((mean_within_seq - mean_btw_seq))
+
+		s_j = numeric(length = m)
+		for (j in seq_len(m))
+			s_j[j] = 1/(n - 1) * sum((split_chains[[j]] - mean_within_seq[j])^2)
+
+		W = mean(s_j)
+
+		# Estimate marginal posterior variance with weighted sum
+		var_plus = (n - 1)/n*W + 1/n*B
+		info_dt[(current_var), r_hat_params := sqrt(var_plus/W)]
+	}
+
+	return(info_dt)
+}
