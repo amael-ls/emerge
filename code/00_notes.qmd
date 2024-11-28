@@ -8,6 +8,7 @@ filters:
 execute:
   error: true
 bibliography: references.bib
+css: style.css
 format:
   html:
     toc: true
@@ -20,9 +21,10 @@ format:
     margin: 5% 0;
   pdf:
     keep-tex: true
+    pdf-engine: lualatex
     include-in-header:
       - text: |
-          \usepackage{siunitx}
+          \usepackage{unicode-math}
 ---
 
 \newcommand{\ie}{*i.e.,*}
@@ -72,9 +74,20 @@ options(max.print = 500)
 
 library(data.table)
 library(cmdstanr)
+	register_knitr_engine(override = TRUE)
 library(stringi)
 library(gt)
 ```
+
+::: {.callout-tip}
+## Available on Gitlab
+By default, Quarto uses the knitr's built-in stan engine `rstan`. To override it so that all stan chunks are processed with `CmdStanR`, I need to specify:
+```{r}
+#| eval: false
+#| code-fold: false
+register_knitr_engine(override = TRUE)
+```
+:::
 
 Then, I define useful functions:
 ```{r}
@@ -117,6 +130,7 @@ We aim to recover them later with a statiscal model.
 ### Data
 ```{r}
 #| output: false
+#| hold: true
 rep_species = generate_random_partition(n, S)
 
 lim_broadleaf = sum(rep_species[1:19]) + 1
@@ -146,21 +160,145 @@ setkey(b2m, type)
 
 fake_dt[, fake_mu := beta0 + b1*fake_hdn + beta2*fake_slenderness]
 fake_dt[, fake_vol := rnorm(.N, fake_mu, sigma)]
+fake_dt[, fake_vol_no_randeff := rnorm(.N, b0 + b1*fake_hdn + b2*fake_slenderness, sigma)]
 
 ind_species = fake_dt[, .(start = .I[1], end = .I[.N]), by = .(species)]
 ind_species[, n_indiv := end - start + 1, by = species]
 ind_species[, sum(n_indiv)] == n
+
+temporary = lm(fake_dt[, fake_vol] ~ 0 + fake_dt[, fake_mu])
+sig_est = round(summary(temporary)$sigma, 3)
 ```
 
 Here is a summary of the parameters value $\beta_0$ and $\beta_2$ (simulated), and $b_0$ and $b_2$, which are supposed to be the mean of $\beta_0$s and $\beta_2$s:
 
-| **Parameter** | **Conifer**            | **Broadleaf**          | $\boldsymbol{\sigma}$   |
-|--------------:|:-----------------------|:-----------------------|:------------------------|
-| $b_0$         | `{r} b0["conif"]`      | `{r} b0["broad"]`      | `{r} sigma_beta0`       |
-| $b_2$         | `{r} b2["conif"]`      | `{r} b2["broad"]`      | `{r} sigma_beta2`       |
-| $\beta_0$     | `{r} b0m["conif", V1]` | `{r} b0m["broad", V1]` | `{r} b0m["broad", sig]` |
-| $\beta_2$     | `{r} b2m["conif", V1]` | `{r} b2m["broad", V1]` | `{r} b2m["broad", sig]` |
+| **Parameter**            | **Conifer**             | **Broadleaf**           |
+|-------------------------:|:------------------------|:------------------------|
+| $b_0$                    | `{r} b0["conif"]`       | `{r} b0["broad"]`       |
+| $\beta_0$                | `{r} b0m["conif", V1]`  | `{r} b0m["broad", V1]`  |
+| $\sigma_{\alpha}$        | `{r} sigma_beta0`       | `{r} sigma_beta0`       |
+| $\sigma_{\alpha}$ (data) | `{r} b0m["conif", sig]` | `{r} b0m["broad", sig]` |
+| $b_1$                    | `{r} b1["conif"]`       | `{r} b1["broad"]`       |
+| $b_2$                    | `{r} b2["conif"]`       | `{r} b2["broad"]`       |
+| $\beta_2$                | `{r} b2m["conif", V1]`  | `{r} b2m["broad", V1]`  |
+| $\sigma_{\delta}$        | `{r} sigma_beta2`       | `{r} sigma_beta2`       |
+| $\sigma_{\delta}$ (data) | `{r} b2m["conif", sig]` | `{r} b2m["broad", sig]` |
+| $\sigma$                 | `{r} sigma`             | `{r} sigma`             |
+| $\sigma$ (lm)            | `{r} sig_est`           | `{r} sig_est`           |
 : Parameters value for both functional groups {.borderless .hover}
 
 As can be seen, the data do not necessarily represent the true parameters value very well.
+
+## Parameter recovery
+
+::: {.callout-tip}
+## Caching execution
+To store some results that could be slow to obtain, or to avoid the recompilation of stan code, use the option `cache = TRUE`.
+:::
+
+### Simplest model
+I first define the simplest possible model, where there is no hierarchy, and I only try to estimate $b_0$, $b_1$, $b_2$, and the residual variance $\sigma$:
+
+::: {#lst-simple_mod}
+
+```{stan output.var = "simplest_model", cache = TRUE}
+data {
+	// Dimensions and indices
+	int N; // Number of individuals
+	int lim_broadleaf; // Number of individuals
+
+	// Predictors
+	vector [N] fake_hdn;
+	vector [N] fake_slenderness;
+
+	// Response variable
+	vector[N] volume_m3;
+}
+
+parameters {
+	// Fixed effects
+	vector[2] b0;
+	vector[2] b1;
+	vector[2] b2;
+
+	// Variance
+	real<lower = 0> sigma; // sd residuals
+}
+
+model {
+	// Priors
+	target += normal_lpdf(b0 | 0, 10);
+	target += normal_lpdf(b1 | 0, 10);
+	target += normal_lpdf(b2 | 0, 10);
+
+	target += inv_gamma_lpdf(sigma | 1, 1);
+
+	target += normal_lpdf(volume_m3[1:(lim_broadleaf - 1)] | b0[1] +
+		b1[1]*fake_hdn[1:(lim_broadleaf - 1)] +
+		b2[1]*fake_slenderness[1:(lim_broadleaf - 1)], sigma);
+
+	target += normal_lpdf(volume_m3[lim_broadleaf:N] | b0[2] +
+		b1[2]*fake_hdn[lim_broadleaf:N] +
+		b2[2]*fake_slenderness[lim_broadleaf:N], sigma);
+}
+```
+
+:::
+
+Prepare the data for Stan,
+```{r}
+#### Stan data
+## Data list
+stanData = list(
+	N = fake_dt[, .N],
+	S = S,
+	ind_start_sp = ind_species[, start],
+	ind_end_sp = ind_species[, end],
+	lim_broadleaf = lim_broadleaf,
+	fake_hdn = fake_dt[, fake_hdn],
+	fake_slenderness = fake_dt[, fake_slenderness],
+	volume_m3 = fake_dt[, fake_vol_no_randeff]
+)
+
+## Common variables
+n_chains = 4
+iter_warmup = 500
+iter_sampling = 1500
+```
+and run the simplest model (see @lst-simple_mod):
+```{r, cache = TRUE}
+#| output: false
+#| echo: false
+fit = simplest_model$sample(data = stanData, chains = n_chains, parallel_chains = ifelse(n_chains < 4, n_chains, 4),
+	refresh = 200, iter_warmup = iter_warmup, iter_sampling = iter_sampling)
+fit$save_output_files(dir = "./", basename = paste0("simplest_model"), random = FALSE)
+```
+
+```{r}
+#| html-table-processing: none
+info_dt = pretty_summary(fit = fit, params = fit$metadata()$model_params[-1]) # -1 to remove lp__
+info_dt |>
+	gt() |>
+	cols_label(
+		params_name = "Parameter",
+		mean_params = "Mean",
+		sd_params = "Std. dev",
+		r_hat_params = "r hat"
+	) |>
+	fmt_number(
+		n_sigfig = 2
+	) |>
+	tab_style(
+		style = cell_borders(sides = "all", style = NULL),
+		locations = cells_body()
+	) |>
+	tab_style(
+		style = cell_text(weight = "bold"),
+		locations = list(cells_column_labels(), cells_column_spanners())
+	) |>
+	tab_style(
+		style = cell_text(align = "right"),
+		locations = cells_body(columns = params_name)
+	)
+```
 
