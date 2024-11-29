@@ -22,7 +22,13 @@ Then, to get the html, just run:
 ```sh
 quarto render notes.qmd --to html
 ```
-in the shell. I guess it is also possible to do this directly from R, with the quarto package, but it sometimes gives unexpected results/bugs...
+in the shell.
+
+it is also possible to do this directly from R, with the quarto package:
+```r
+quarto_render(input = "00_notes.qmd", output_format = "html", cache = TRUE, cache_refresh = FALSE)
+```
+If there is a bug with some R variables, try to set `cache_refresh = TRUE`.
 
 ## Data
-The data are stored on the shared host ... The folder `data_origin` is protected and contains the data as provided by Christine Deleuze on 17 September 2024.
+The original data are stored on the shared host `smb://del1509N015/2024_FairCarbon/data_origin`. Note that from R, maybe the `smb://` is not necessary. The folder `data_origin` is protected and contains the data as provided by Christine Deleuze on 17 September 2024.
