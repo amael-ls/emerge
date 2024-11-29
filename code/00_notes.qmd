@@ -456,9 +456,15 @@ boxplot(x = fit$draws("beta0[5]"))
 ::: {.callout-important}
 ## Quick and dirty way (which does not work)
 
-```{stan, eval = FALSE}
-target += inv_gamma_lpdf(sigma | 1, 1);
+Simply adding two priors on $\sigma_0$ and $\sigma_2$ like bellow will not work:
+
 ```
+target += inv_gamma_lpdf(sigma_beta0 | 1, 1);
+target += inv_gamma_lpdf(sigma_beta2 | 1, 1);
+```
+
+It seems that this renders the model unidentifiable. Therefore, I am going to try a [non-centred parametrisation](https://betanalpha.github.io/assets/case_studies/hierarchical_modeling.html). Another example is [available here](https://betanalpha.github.io/assets/case_studies/factor_modeling.html#3_Overlapping_Multifactor_Models).
+
 :::
 
 ```{stan output.var = "full_model", cache = TRUE}
