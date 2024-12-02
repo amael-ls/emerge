@@ -1,4 +1,3 @@
-
 data {
 	// Dimensions and indices
 	int N; // Number of individuals
@@ -31,13 +30,26 @@ parameters {
 	vector[2] b2;
 	
 	// Random effects (group parameters)
-	vector[S] beta0;
-	vector[S] beta2;
+	vector[S] eta0;
+	vector[S] eta2;
+	// vector[S] beta0;
+	// vector[S] beta2;
 
 	// Variances
 	real<lower = 0> sigma; // sd residuals
 	real<lower = 0> sigma_beta0; // sd random effect beta0
 	real<lower = 0> sigma_beta2; // sd random effect beta2
+}
+
+transformed parameters {
+	vector[S] beta0;
+	vector[S] beta2;
+	
+	beta0[1:n_sp_broad] = b0[1] + eta0[1:n_sp_broad]*sigma_beta0;
+	beta0[(n_sp_broad + 1):S] = b0[2] + eta0[(n_sp_broad + 1):S]*sigma_beta0;
+	
+	beta2[1:n_sp_broad] = b2[1] + eta2[1:n_sp_broad]*sigma_beta2;
+	beta2[(n_sp_broad + 1):S] = b2[2] + eta2[(n_sp_broad + 1):S]*sigma_beta2;
 }
 
 model {
@@ -57,10 +69,12 @@ model {
 	// target += gamma_lpdf(sigma_beta2 | 0.1, 0.1);
 
 	// Hierarchy
-	target += normal_lpdf(beta0[1:n_sp_broad] | b0[1], sigma_beta0);
-	target += normal_lpdf(beta0[(n_sp_broad + 1):S] | b0[2], sigma_beta0);
-	target += normal_lpdf(beta2[1:n_sp_broad] | b2[1], sigma_beta2);
-	target += normal_lpdf(beta2[(n_sp_broad + 1):S] | b2[2], sigma_beta2);
+	// target += normal_lpdf(beta0[1:n_sp_broad] | b0[1], sigma_beta0);
+	// target += normal_lpdf(beta0[(n_sp_broad + 1):S] | b0[2], sigma_beta0);
+	// target += normal_lpdf(beta2[1:n_sp_broad] | b2[1], sigma_beta2);
+	// target += normal_lpdf(beta2[(n_sp_broad + 1):S] | b2[2], sigma_beta2);
+	target += normal_lpdf(eta0 | 0, 1);
+	target += normal_lpdf(eta2 | 0, 1);
 
 	// Likelihood broadleaves, i = species
 	for (i in 1:n_sp_broad)
