@@ -95,7 +95,7 @@ options(device='x11')
 ```
 
 ::: {.callout-tip}
-## Available on Gitlab
+## Stan engine
 By default, Quarto uses the knitr's built-in stan engine `rstan`. To override it so that all stan chunks are processed with `CmdStanR`, I need to specify:
 ```{r}
 #| eval: false
@@ -140,7 +140,7 @@ sigma = 1.2
 n = 3e3
 S = 30 # Number of species
 ```
-We aim to recover them later with a statiscal model.
+We aim to recover them later with a statiscal model (the values are stored in @tbl-params).
 
 ### Data
 ```{r}
@@ -205,7 +205,7 @@ Here is a summary of the parameters value $\beta_0$ and $\beta_2$ (simulated), a
 | $\sigma_2$ (data) | `{r} b2m["conif", sig]` | `{r} b2m["broad", sig]` |
 | $\sigma$          | `{r} sigma`             | `{r} sigma`             |
 | $\sigma$ (lm)     | `{r} sig_est`           | `{r} sig_est`           |
-: Parameters value for both functional groups {.borderless .hover}
+: Parameters value for both functional groups {#tbl-params .borderless .hover}
 
 As can be seen, the data do not necessarily represent the true parameters value very well.
 
@@ -295,10 +295,9 @@ and run the simplest model (see @lst-simple_mod):
 #| echo: false
 fit = simplest_model$sample(data = stanData, chains = n_chains, parallel_chains = ifelse(n_chains < 4, n_chains, 4),
 	refresh = 200, iter_warmup = iter_warmup, iter_sampling = iter_sampling)
-fit$save_output_files(dir = "./", basename = paste0("simplest_model"), random = FALSE)
 ```
 
-It gives the following results:
+It gives the following results (see @tbl-params for real values):
 ```{r}
 #| html-table-processing: none
 #| echi: false
@@ -425,10 +424,9 @@ and now run the hierarchical model:
 #| output: false
 fit = hierarchical_model$sample(data = stanData, chains = n_chains, parallel_chains = ifelse(n_chains < 4, n_chains, 4),
 	refresh = 200, iter_warmup = iter_warmup, iter_sampling = iter_sampling)
-fit$save_output_files(dir = "./", basename = paste0("hierarchical_model"), random = FALSE)
 ```
 
-This gives the fillowing results:
+This gives the following results (see @tbl-params for real values):
 ```{r}
 #| html-table-processing: none
 #| hold: true
@@ -490,3 +488,85 @@ lazyTrace(draws = fit$draws("sigma_beta0"), val1 = sigma_beta0, label1 = "Real v
 lazyPosterior(draws = fit$draws("sigma_beta0"))
 boxplot(x = fit$draws("sigma_beta0"))
 ```
+
+## Data with correlations
+Now, we consider the same model, but with a correlation between slenderness and hardiness, and we run the same hierarchical model.
+```{r}
+#| output: false
+set.seed(1969 - 08 - 18) # Woodstock seed
+fake_dt[, fake_slenderness_cor := rnorm(n = .N, mean = 1.2 - 0.5*fake_hdn, sd = 15)]
+
+fake_dt[, fake_mu_cor := beta0 + b1*fake_hdn + beta2*fake_slenderness_cor]
+fake_dt[, fake_vol_cor := rnorm(.N, fake_mu_cor, sigma)]
+
+stanData[["fake_slenderness"]] = fake_dt[, fake_slenderness_cor]
+stanData[["volume_m3"]] = fake_dt[, fake_vol_cor]
+
+fit = hierarchical_model$sample(data = stanData, chains = n_chains, parallel_chains = ifelse(n_chains < 4, n_chains, 4),
+	refresh = 200, iter_warmup = iter_warmup, iter_sampling = iter_sampling, adapt_delta = 0.95)
+```
+
+With a correlation of `{r} round(fake_dt[, cor(fake_hdn, fake_slenderness_cor)], 2)` (-0.51 in the real data), we get the following results (see @tbl-params for real values):
+```{r}
+#| html-table-processing: none
+#| hold: true
+#| echo: false
+#| warning: false
+info_dt = pretty_summary(fit = fit, params = c("b0", "b1", "b2", "sigma", "sigma_beta0", "sigma_beta2"))
+info_dt |>
+	gt() |>
+	cols_label(
+		params_name = "Parameter",
+		mean_params = "Mean",
+		sd_params = "Std. dev",
+		r_hat_params = "r hat"
+	) |>
+	fmt_number(
+		n_sigfig = 2
+	) |>
+	tab_style(
+		style = cell_borders(sides = "all", style = NULL),
+		locations = cells_body()
+	) |>
+	tab_style(
+		style = cell_text(weight = "bold"),
+		locations = list(cells_column_labels(), cells_column_spanners())
+	) |>
+	tab_style(
+		style = cell_text(align = "right"),
+		locations = cells_body(columns = params_name)
+	)
+```
+
+Which still works in our case...
+```{r}
+#| label: fig-posterior_model2-beta0_cor
+#| fig-cap: "Trace plot and posterior of $\\beta_0$ for the fifth species"
+#| fig-subcap: 
+#|   - "Trace plot"
+#|   - "Posterior"
+#|   - "Boxplot"
+#| layout: [[100], [45,-10, 45]]
+#| echo: false
+#| output: false
+lazyTrace(draws = fit$draws("beta0[5]"), val1 = beta_dt[species == "sp_5", beta0], label1 = "Real v.", xlab = "beta0")
+lazyPosterior(draws = fit$draws("beta0[5]"), fun = dnorm, mean = 0, sd = 10)
+boxplot(x = fit$draws("beta0[5]"))
+```
+
+```{r}
+#| label: fig-posterior_model2-sigma_beta0_cor
+#| fig-cap: "Trace plot and posterior of $\\sigma_0$"
+#| fig-subcap: 
+#|   - "Trace plot"
+#|   - "Posterior"
+#|   - "Boxplot"
+#| layout: [[100], [45,-10, 45]]
+#| echo: false
+#| output: false
+lazyTrace(draws = fit$draws("sigma_beta0"), val1 = sigma_beta0, label1 = "Real v.", xlab = "sigma_beta0")
+lazyPosterior(draws = fit$draws("sigma_beta0"))
+boxplot(x = fit$draws("sigma_beta0"))
+```
+
+Note that I made the test with $\sigma = 35$ (instead of $\sigma = `{r} sigma`$). In other words, I put the data less informative. It was  still working, although the parameters' variance increased a lot (makes sense!). I do not show these results.
