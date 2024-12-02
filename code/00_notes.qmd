@@ -326,9 +326,24 @@ info_dt |>
 	)
 ```
 
-### Hierarchical model, group effect variances provided
-A slightly more complex model, this time with a group effect (\ie random effect $\beta_0$s and $\beta_2$s to estimate), but the two variances $\sigma_0$ and $\sigma_2$ are provided: 
-```{stan output.var = "model_var_provided", cache = TRUE}
+### Hierarchical model
+
+::: {.callout-important}
+## Quick and dirty way (which does not work)
+
+Simply adding two priors on $\sigma_0$ and $\sigma_2$ like bellow does not necessarily work:
+
+```
+target += inv_gamma_lpdf(sigma_beta0 | 1, 1);
+target += inv_gamma_lpdf(sigma_beta2 | 1, 1);
+```
+
+When there is not enough groups to describe the population parameters $b_0$, $\sigma_0$ and $b_2$, $\sigma_2$ the model can turn unidentifiable. In this case, a solution can be a [non-centred parametrisation](https://betanalpha.github.io/assets/case_studies/hierarchical_modeling.html). Another example is [available here](https://betanalpha.github.io/assets/case_studies/factor_modeling.html#3_Overlapping_Multifactor_Models). Similarily, when the local data (\ie within each group) is not 'informative enough', then the individual likelihood functions can degenerate (paragraph 3 of the non-centred parametrisation link).
+
+:::
+
+A slightly more complex model, this time with a group effect (\ie random effect $\beta_0$s and $\beta_2$s to estimate), and the associated two variances $\sigma_0$ and $\sigma_2$:
+```{stan output.var = "hierarchical_model", cache = TRUE}
 data {
 	// Dimensions and indices
 	int N; // Number of individuals
@@ -359,6 +374,8 @@ parameters {
 
 	// Variance
 	real<lower = 0> sigma; // sd residuals
+	real<lower = 0> sigma_beta0; // sd random effect beta0
+	real<lower = 0> sigma_beta2; // sd random effect beta2
 }
 
 model {
@@ -368,12 +385,14 @@ model {
 	target += normal_lpdf(b2 | 0, 10);
 
 	target += inv_gamma_lpdf(sigma | 1, 1);
+	target += inv_gamma_lpdf(sigma_beta0 | 1, 1);
+	target += inv_gamma_lpdf(sigma_beta2 | 1, 1);
 
 	for (i in 1:n_sp_conif)
 	{
 		// Hierarchy
-		target += normal_lpdf(beta0[i] | b0[1], 4.2);
-		target += normal_lpdf(beta2[i] | b2[1], 6.98);
+		target += normal_lpdf(beta0[i] | b0[1], sigma_beta0);
+		target += normal_lpdf(beta2[i] | b2[1], sigma_beta2);
 		
 		// Likelihood conifers
 		target += normal_lpdf(volume_m3[ind_start_conif[i]:ind_end_conif[i]] | beta0[i] +
@@ -384,8 +403,8 @@ model {
 	for (i in 1:n_sp_broad)
 	{
 		// Hierarchy
-		target += normal_lpdf(beta0[n_sp_conif + i] | b0[2], 4.2);
-		target += normal_lpdf(beta2[n_sp_conif + i] | b2[2], 6.98);
+		target += normal_lpdf(beta0[n_sp_conif + i] | b0[2], sigma_beta0);
+		target += normal_lpdf(beta2[n_sp_conif + i] | b2[2], sigma_beta2);
 
 		// Likelihood broadleaves
 		target += normal_lpdf(volume_m3[ind_start_broad[i]:ind_end_broad[i]] | beta0[n_sp_conif + i] +
@@ -402,9 +421,9 @@ and now run the hierarchical model:
 ```{r, cache = TRUE}
 #| output: false
 #| echo: false
-fit = model_var_provided$sample(data = stanData, chains = n_chains, parallel_chains = ifelse(n_chains < 4, n_chains, 4),
+fit = hierarchical_model$sample(data = stanData, chains = n_chains, parallel_chains = ifelse(n_chains < 4, n_chains, 4),
 	refresh = 200, iter_warmup = iter_warmup, iter_sampling = iter_sampling)
-fit$save_output_files(dir = "./", basename = paste0("model_var_provided"), random = FALSE)
+fit$save_output_files(dir = "./", basename = paste0("hierarchical_model"), random = FALSE)
 ```
 
 This gives the fillowing results:
@@ -413,7 +432,7 @@ This gives the fillowing results:
 #| hold: true
 #| echo: false
 #| warning: false
-info_dt = pretty_summary(fit = fit, params = c("b0", "b1", "b2", "sigma")) # -1 to remove lp__
+info_dt = pretty_summary(fit = fit, params = c("b0", "b1", "b2", "sigma", "sigma_beta0", "sigma_beta2"))
 beta_dt = unique(fake_dt[, .(species, beta0, beta2)])
 info_dt |>
 	gt() |>
@@ -441,7 +460,7 @@ info_dt |>
 ```
 
 ```{r}
-#| label: fig-posterior_model2
+#| label: fig-posterior_model2-beta0
 #| fig-cap: "Trace plot and posterior of $\\beta_0$ for the fifth species"
 #| fig-subcap: 
 #|   - "Trace plot"
@@ -455,18 +474,17 @@ lazyPosterior(draws = fit$draws("beta0[5]"), fun = dnorm, mean = 0, sd = 10)
 boxplot(x = fit$draws("beta0[5]"))
 ```
 
-### Complete model, where nothing is provided
-
-::: {.callout-important}
-## Quick and dirty way (which does not work)
-
-Simply adding two priors on $\sigma_0$ and $\sigma_2$ like bellow will not work:
-
+```{r}
+#| label: fig-posterior_model2-sigma_beta0
+#| fig-cap: "Trace plot and posterior of $\\sigma_0$"
+#| fig-subcap: 
+#|   - "Trace plot"
+#|   - "Posterior"
+#|   - "Boxplot"
+#| layout: [[100], [45,-10, 45]]
+#| echo: false
+#| output: false
+lazyTrace(draws = fit$draws("sigma_beta0"), val1 = sigma_beta0, label1 = "Real v.", xlab = "sigma_beta0")
+lazyPosterior(draws = fit$draws("sigma_beta0"))
+boxplot(x = fit$draws("sigma_beta0"))
 ```
-target += inv_gamma_lpdf(sigma_beta0 | 1, 1);
-target += inv_gamma_lpdf(sigma_beta2 | 1, 1);
-```
-
-It seems that this renders the model unidentifiable. Therefore, I am going to try a [non-centred parametrisation](https://betanalpha.github.io/assets/case_studies/hierarchical_modeling.html). Another example is [available here](https://betanalpha.github.io/assets/case_studies/factor_modeling.html#3_Overlapping_Multifactor_Models).
-
-:::
