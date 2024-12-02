@@ -298,8 +298,10 @@ fit = simplest_model$sample(data = stanData, chains = n_chains, parallel_chains 
 fit$save_output_files(dir = "./", basename = paste0("simplest_model"), random = FALSE)
 ```
 
+It gives the following results:
 ```{r}
 #| html-table-processing: none
+#| echi: false
 info_dt = pretty_summary(fit = fit, params = fit$metadata()$model_params[-1]) # -1 to remove lp__
 info_dt |>
 	gt() |>
@@ -329,9 +331,9 @@ info_dt |>
 ### Hierarchical model
 
 ::: {.callout-important}
-## Quick and dirty way (which does not work)
+## Quick and dirty way (which does not always work)
 
-Simply adding two priors on $\sigma_0$ and $\sigma_2$ like bellow does not necessarily work:
+Simply adding two priors on $\sigma_0$ and $\sigma_2$ like bellow does not necessarily work (it does in my case because the data are informative enough):
 
 ```
 target += inv_gamma_lpdf(sigma_beta0 | 1, 1);
@@ -364,15 +366,16 @@ data {
 }
 
 parameters {
-	// Fixed effects
+	// Fixed effects (population parameters)
 	vector[2] b0;
 	vector[2] b1;
 	vector[2] b2;
 	
+	// Random effects (group parameters)
 	vector[S] beta0;
 	vector[S] beta2;
 
-	// Variance
+	// Variances
 	real<lower = 0> sigma; // sd residuals
 	real<lower = 0> sigma_beta0; // sd random effect beta0
 	real<lower = 0> sigma_beta2; // sd random effect beta2
@@ -380,20 +383,24 @@ parameters {
 
 model {
 	// Priors
+	// --- Population parameters
 	target += normal_lpdf(b0 | 0, 10);
 	target += normal_lpdf(b1 | 0, 10);
 	target += normal_lpdf(b2 | 0, 10);
 
-	target += inv_gamma_lpdf(sigma | 1, 1);
+	// --- Residual variance and population variance
+	target += inv_gamma_lpdf(sigma | 1, 1); // Uses shape and scale
 	target += inv_gamma_lpdf(sigma_beta0 | 1, 1);
 	target += inv_gamma_lpdf(sigma_beta2 | 1, 1);
 
+	// Hierarchy
+	target += normal_lpdf(beta0[1:n_sp_conif] | b0[1], sigma_beta0);
+	target += normal_lpdf(beta2[1:n_sp_conif] | b2[1], sigma_beta2);
+	target += normal_lpdf(beta0[(n_sp_conif + 1):S] | b0[2], sigma_beta0);
+	target += normal_lpdf(beta2[(n_sp_conif + 1):S] | b2[2], sigma_beta2);
+
 	for (i in 1:n_sp_conif)
-	{
-		// Hierarchy
-		target += normal_lpdf(beta0[i] | b0[1], sigma_beta0);
-		target += normal_lpdf(beta2[i] | b2[1], sigma_beta2);
-		
+	{	
 		// Likelihood conifers
 		target += normal_lpdf(volume_m3[ind_start_conif[i]:ind_end_conif[i]] | beta0[i] +
 			b1[1]*fake_hdn[ind_start_conif[i]:ind_end_conif[i]] +
@@ -402,10 +409,6 @@ model {
 
 	for (i in 1:n_sp_broad)
 	{
-		// Hierarchy
-		target += normal_lpdf(beta0[n_sp_conif + i] | b0[2], sigma_beta0);
-		target += normal_lpdf(beta2[n_sp_conif + i] | b2[2], sigma_beta2);
-
 		// Likelihood broadleaves
 		target += normal_lpdf(volume_m3[ind_start_broad[i]:ind_end_broad[i]] | beta0[n_sp_conif + i] +
 			b1[2]*fake_hdn[ind_start_broad[i]:ind_end_broad[i]] +
@@ -420,7 +423,6 @@ stanData[["volume_m3"]] = fake_dt[, fake_vol]
 and now run the hierarchical model:
 ```{r, cache = TRUE}
 #| output: false
-#| echo: false
 fit = hierarchical_model$sample(data = stanData, chains = n_chains, parallel_chains = ifelse(n_chains < 4, n_chains, 4),
 	refresh = 200, iter_warmup = iter_warmup, iter_sampling = iter_sampling)
 fit$save_output_files(dir = "./", basename = paste0("hierarchical_model"), random = FALSE)
