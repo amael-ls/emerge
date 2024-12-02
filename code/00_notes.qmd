@@ -195,12 +195,12 @@ Here is a summary of the parameters value $\beta_0$ and $\beta_2$ (simulated), a
 | **Parameter**     | **Conifer**             | **Broadleaf**           |
 |------------------:|:------------------------|:------------------------|
 | $b_0$             | `{r} b0["conif"]`       | `{r} b0["broad"]`       |
-| $\beta_0$         | `{r} b0m["conif", V1]`  | `{r} b0m["broad", V1]`  |
+| $\beta_0$ (data)  | `{r} b0m["conif", V1]`  | `{r} b0m["broad", V1]`  |
 | $\sigma_0$        | `{r} sigma_beta0`       | `{r} sigma_beta0`       |
 | $\sigma_0$ (data) | `{r} b0m["conif", sig]` | `{r} b0m["broad", sig]` |
 | $b_1$             | `{r} b1["conif"]`       | `{r} b1["broad"]`       |
 | $b_2$             | `{r} b2["conif"]`       | `{r} b2["broad"]`       |
-| $\beta_2$         | `{r} b2m["conif", V1]`  | `{r} b2m["broad", V1]`  |
+| $\beta_2$ (data)  | `{r} b2m["conif", V1]`  | `{r} b2m["broad", V1]`  |
 | $\sigma_2$        | `{r} sigma_beta2`       | `{r} sigma_beta2`       |
 | $\sigma_2$ (data) | `{r} b2m["conif", sig]` | `{r} b2m["broad", sig]` |
 | $\sigma$          | `{r} sigma`             | `{r} sigma`             |
@@ -376,9 +376,9 @@ model {
 		target += normal_lpdf(beta2[i] | b2[1], 6.98);
 		
 		// Likelihood conifers
-		target += normal_lpdf(volume_m3[ind_start_conif[i]:ind_end_conif[i]] | b0[1] +
+		target += normal_lpdf(volume_m3[ind_start_conif[i]:ind_end_conif[i]] | beta0[i] +
 			b1[1]*fake_hdn[ind_start_conif[i]:ind_end_conif[i]] +
-			b2[1]*fake_slenderness[ind_start_conif[i]:ind_end_conif[i]], sigma);
+			beta2[i]*fake_slenderness[ind_start_conif[i]:ind_end_conif[i]], sigma);
 	}
 
 	for (i in 1:n_sp_broad)
@@ -388,13 +388,17 @@ model {
 		target += normal_lpdf(beta2[n_sp_conif + i] | b2[2], 6.98);
 
 		// Likelihood broadleaves
-		target += normal_lpdf(volume_m3[ind_start_broad[i]:ind_end_broad[i]] | b0[2] +
+		target += normal_lpdf(volume_m3[ind_start_broad[i]:ind_end_broad[i]] | beta0[n_sp_conif + i] +
 			b1[2]*fake_hdn[ind_start_broad[i]:ind_end_broad[i]] +
-			b2[2]*fake_slenderness[ind_start_broad[i]:ind_end_broad[i]], sigma);
+			beta2[n_sp_conif + i]*fake_slenderness[ind_start_broad[i]:ind_end_broad[i]], sigma);
 	}
 }
 ```
-and run the hierarchical model:
+This time, the model needs the data generated with the random effects:
+```{r}
+stanData[["volume_m3"]] = fake_dt[, fake_vol]
+```
+and now run the hierarchical model:
 ```{r, cache = TRUE}
 #| output: false
 #| echo: false
@@ -466,72 +470,3 @@ target += inv_gamma_lpdf(sigma_beta2 | 1, 1);
 It seems that this renders the model unidentifiable. Therefore, I am going to try a [non-centred parametrisation](https://betanalpha.github.io/assets/case_studies/hierarchical_modeling.html). Another example is [available here](https://betanalpha.github.io/assets/case_studies/factor_modeling.html#3_Overlapping_Multifactor_Models).
 
 :::
-
-```{stan output.var = "full_model", cache = TRUE}
-data {
-	// Dimensions and indices
-	int N; // Number of individuals
-	int S; // Number of species
-	int<lower = 0, upper = S> n_sp_conif; // number of conifer species
-	int<lower = S - n_sp_conif, upper = S - n_sp_conif> n_sp_broad; // number of broadleaf species
-	array[n_sp_conif] int ind_start_conif; // Conifer species index start
-	array[n_sp_broad] int ind_start_broad; // Broadleaf species index start
-	array[n_sp_conif] int ind_end_conif; // Conifer species index end
-	array[n_sp_broad] int ind_end_broad; // Broadleaf species index end
-
-	// Predictors
-	vector [N] fake_hdn;
-	vector [N] fake_slenderness;
-
-	// Response variable
-	vector[N] volume_m3;
-}
-
-parameters {
-	// Fixed effects
-	vector[2] b0;
-	vector[2] b1;
-	vector[2] b2;
-	
-	vector[S] beta0;
-	vector[S] beta2;
-
-	// Variance
-	real<lower = 0> sigma; // sd residuals
-	real<lower = 0> sigma_beta0; // sd random effect on intercept
-	real<lower = 0> sigma_beta2; // sd random effect on slenderness slope
-}
-
-model {
-	// Priors
-	target += normal_lpdf(b0 | 0, 10);
-	target += normal_lpdf(b1 | 0, 10);
-	target += normal_lpdf(b2 | 0, 10);
-
-	target += inv_gamma_lpdf(sigma | 1, 1);
-
-	for (i in 1:n_sp_conif)
-	{
-		// Hierarchy
-		target += normal_lpdf(beta0[i] | b0[1], sigma_beta0);
-		target += normal_lpdf(beta2[i] | b2[1], sigma_beta2);
-		
-		// Likelihood conifers
-		target += normal_lpdf(volume_m3[ind_start_conif[i]:ind_end_conif[i]] | b0[1] +
-			b1[1]*fake_hdn[ind_start_conif[i]:ind_end_conif[i]] +
-			b2[1]*fake_slenderness[ind_start_conif[i]:ind_end_conif[i]], sigma);
-	}
-
-	for (i in 1:n_sp_broad)
-	{
-		// Hierarchy
-		target += normal_lpdf(beta0[n_sp_conif + i] | b0[2], 4.2);
-		target += normal_lpdf(beta2[n_sp_conif + i] | b2[2], 6.98);
-
-		// Likelihood broadleaves
-		target += normal_lpdf(volume_m3[ind_start_broad[i]:ind_end_broad[i]] | b0[2] +
-			b1[2]*fake_hdn[ind_start_broad[i]:ind_end_broad[i]] +
-			b2[2]*fake_slenderness[ind_start_broad[i]:ind_end_broad[i]], sigma);
-	}
-}
-```
