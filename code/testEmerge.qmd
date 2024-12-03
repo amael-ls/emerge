@@ -1,0 +1,68 @@
+---
+title: "Reproducing the Emerge parametrisation by C. Deleuze"
+date: today
+author: Amaël Le Squin
+date-format: iso
+filters:
+  - fontawesome
+execute:
+  error: true
+bibliography: references.bib
+css: style.css
+knitr:
+  opts_chunk: 
+    dev: ragg_png
+format:
+  html:
+    toc: true
+    include-in-header: mathjax.html
+    code-fold: true
+    df-print: paged
+    theme:
+      light: cerulean
+      dark: darkly
+    margin: 5% 0;
+  pdf:
+    keep-tex: true
+    pdf-engine: lualatex
+    include-in-header:
+      - text: |
+          \usepackage{unicode-math}
+---
+
+\newcommand{\ie}{*i.e.,*}
+\newcommand{\F}{\mathscr{F}}
+\newcommand{\N}{\mathbfscr{N}}
+
+## Introduction
+
+The original model can be found in @Deleuze2014. In their scripts, they used the following code:
+```{r}
+#| eval: false
+Modele_mai2 = nlme(formTotNew ~ a + b*hdn + d*hsurd, data = Grdata.PV,
+	start = c(a = 0.4, 0, b = 1.5, 0, d = 0.0005, 0),
+	fixed = list(a + b + d ~ feuil.res), random = a + d ~ 1|nomessence2)
+```
+
+The model `Modele_mai2` computes the form factor $\F$ for an individual of height $h$ and circumference at breast height $c$, of species $j$ and functional group (conifer or broadleaf) $i$ as:
+\begin{equation} \label{eq::deleuze}
+\begin{aligned}
+	\F &\sim \N(\mu, \sigma) \\
+	\mu_{i, j} &= a_{i, j} + b_i \frac{\sqrt{c}}{h} + d_{i, j} \frac{h}{c} \\
+	a_{i, j} &\sim \N(\alpha_i, \sigma_{\alpha}) \\
+	d_{i, j} &\sim \N(\delta_i, \sigma_{\delta}),
+\end{aligned}
+\end{equation}
+where $\alpha_i$ and $\delta_i$ are the 'group intercepts' (common values within conifers and broadleaves). Therefore, it seems to be a GLMM, and I am not sure `nlme` is relevant here. In the next sections, I will try to reproduce their model with real data. A previous analysis was done in the file `00_notes.qmd`.
+
+I rewrite the equations with new variable names and without the indices $i$ and $j$, in order to correspond to stan code:
+\begin{equation} \label{eq::deleuze-modified}
+\begin{aligned}
+	\F &\sim \N(\mu, \sigma) \\
+	\mu &= \beta_0 + b_1 \frac{\sqrt{c}}{h} + \beta_2 \frac{h}{c} \\
+	\beta_0 &\sim \N(b_0, \sigma_0) \\
+	\beta_2 &\sim \N(b_2, \sigma_2),
+\end{aligned}
+\end{equation}
+
+## Prepare the 
