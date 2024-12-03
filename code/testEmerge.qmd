@@ -12,12 +12,18 @@ css: style.css
 knitr:
   opts_chunk: 
     dev: ragg_png
+    crop: null
+    out.width: "70%"
+    fig.width: 6
+    fig.asp: 0.618
+    fig.align: "center"
 format:
   html:
     toc: true
     include-in-header: mathjax.html
     code-fold: true
     df-print: paged
+    number-sections: true
     theme:
       light: cerulean
       dark: darkly
@@ -65,4 +71,252 @@ I rewrite the equations with new variable names and without the indices $i$ and 
 \end{aligned}
 \end{equation}
 
-## Prepare the 
+## Prepare the data
+### Packages and helpers
+First, I load the necessary packages:
+```{r}
+#| output: false
+#### Clear space and load packages
+rm(list = ls())
+graphics.off()
+
+options(max.print = 500)
+
+library(data.table)
+library(MetBrewer)
+library(cmdstanr)
+	register_knitr_engine(override = TRUE)
+library(stringi)
+library(curl)
+library(nlme)
+library(gt)
+
+setHook(packageEvent("grDevices", "onLoad"),
+function(...) grDevices::X11.options(type='cairo'))
+options(device='x11')
+```
+
+::: {.callout-tip}
+## Stan engine
+By default, Quarto uses the knitr's built-in stan engine `rstan`. To override it so that all stan chunks are processed with `CmdStanR`, I need to specify:
+```{r}
+#| eval: false
+#| code-fold: false
+register_knitr_engine(override = TRUE)
+```
+:::
+
+Then, I define useful functions:
+```{r}
+#### Tool functions
+## Tools
+source("./toolFunctions.R")
+
+## Function to compute tree volume according to model
+vol_fct = function(params_vec, predictor_mat, corrected_cyl_vol)
+	return((predictor_mat %*% params_vec) * corrected_cyl_vol)
+```
+
+### Data
+The data are saved remotely on the remote server `smb://del1509n015/` in the folder `2024_faircarbon/data_orig/`. On Linux, it is first necessary to mount locally the folder, so that R can access the files:
+
+1. Switch to super user where you replace `JohnField-Admin` by your admin name (typically, your IGN id followed by `-Admin`):
+```{sh}
+#| eval: false
+#| code-fold: false
+su JohnField-Admin
+```
+Your **admin** password will be asked
+
+2. Create a directory where you will mount the remote folder. By default I like to put it in `/mnt/local_share`. You need to be super user to write in `/mnt/`:
+```{sh}
+#| eval: false
+#| code-fold: false
+mkdir /mnt/local_share
+```
+
+3. Mount the remote folder `smb://del1509n015/2024_faircarbon/`, where you replace `your_name` by your **usual** IGN id (NOT the admin one):
+```{sh}
+#| eval: false
+#| code-fold: false
+sudo mount -t cifs -o username=your_name,domain=ign,uid=your_name //del1509n015/2024_faircarbon /mnt/local_share/
+```
+Maybe two passwords will be asked, first your **admin** password to execute the `sudo`, and then your **usual** password.
+
+4. Check that it worked:
+```{sh}
+#| eval: false
+#| code-fold: false
+ls /mnt/local_share/
+```
+The content of the remote folder should appear. You can close your admin session by using `ctrl + d` or `Cmd + d`
+
+Now that the data are available to {{< fa brands r-project >}}, it is time to prepare them:
+```{r}
+#### Prepare data
+## Loading
+os = Sys.info()[['sysname']]
+mnt_point = "/mnt/local_share/"
+if (os == "Linux" || os == "Darwin")
+{
+	if (!dir.exists(mnt_point))
+		stop(paste0("The mounting point <", mnt_point, "> does not exist"))
+} else if (os == "Windows") {
+	stop("TO DO!!! No idea how that works on Windows!")
+} else {
+	stop(paste("Unknown Operating System:", os))
+}
+
+path_data = paste0(mnt_point, "/data_orig/")
+if (!dir.exists(path_data))
+	stop(paste0("Folder <", path_data, "> does not exist! Are you sure you mounted the good remote folder?"))
+
+if (list.files(path = path_data) != "EMERGE.RData")
+	stop("There should be only the file <EMERGE.RData> in the data_orig folder")
+
+load(paste0(path_data, "EMERGE.RData"))
+rm(list = setdiff(ls(), "inra_arbres"))
+setDT(inra_arbres)
+
+## Keep only column of interest and rename them
+inra_arbres[, tot_vol := v_tronc_verif + v_fourche_verif + v_fourche2_verif + v_br_verif + v_menu_verif]
+inra_arbres = unique(inra_arbres[, .(nom_fichier, essence, c130, h_tot, tot_vol, genre)])
+inra_arbres = na.omit(inra_arbres)
+
+setnames(inra_arbres, new = c("unique_id", "speciesName_sci", "circumference_cm", "height", "tot_vol", "genus"))
+
+inra_arbres[, fct_type := "broadleaf"] # Functional type, either broadleaf or conifer
+inra_arbres[genus %in% c("Abies", "Cedrus", "Larix", "Picea", "Pinus", "Pseudotsuga", "Thuya", "Tsuga"),
+	fct_type := "conifer"]
+
+inra_arbres[, unique_id := as.character(unique_id)]
+inra_arbres[, speciesName_sci := as.character(speciesName_sci)]
+inra_arbres[, genus := as.character(genus)]
+
+inra_arbres[, nb_indiv := .N, by = speciesName_sci]
+# inra_arbres = inra_arbres[nb_indiv > 20]
+
+## Compute (total) volume in m³, circumference in m, hardiness, and slenderness
+inra_arbres[, volume_m3 := tot_vol/1e3]
+inra_arbres[, circumference_m := circumference_cm/100]
+inra_arbres[, hdn := sqrt(circumference_m)/height]
+inra_arbres[, slenderness := height/circumference_m]
+
+## In the original model, there are the variables formTot, and formTotNew. I need to rebuild them
+inra_arbres[, formTot := 4*pi*volume_m3/(height*circumference_m^2)]
+inra_arbres[, formTotNew := formTot * (1 - 1.3/height)^2]
+inra_arbres[, feuil.res := as.factor(fct_type)]
+
+## Indices
+# Find start and end indices for each species
+setkey(inra_arbres, fct_type, speciesName_sci, unique_id)
+ind_species = inra_arbres[, .(start = .I[1], end = .I[.N]), by = .(speciesName_sci)]
+ind_species[, n_indiv := end - start + 1, by = speciesName_sci]
+
+if (ind_species[, sum(n_indiv)] != inra_arbres[, .N])
+	stop("The number of individuals in ind_species does not correspond to the number of individuals in inra_arbres!")
+
+ind_species = merge.data.table(ind_species, unique(inra_arbres[, .(speciesName_sci, fct_type)]), by = "speciesName_sci")
+ind_species[, colour := if(fct_type == "broadleaf") "#FFAF37" else "#007BA5", by = speciesName_sci]
+setorder(ind_species, start)
+
+n_sp = ind_species[, .N, by = fct_type]
+setkey(n_sp, fct_type)
+
+## Stan data
+stanData = list(
+	N = inra_arbres[, .N],
+	S = ind_species[, .N],
+	n_sp_conif = n_sp["conifer", N],
+	n_sp_broad = n_sp["broadleaf", N],
+	ind_start_broad = ind_species[fct_type == "broadleaf", start],
+	ind_start_conif = ind_species[fct_type == "conifer", start],
+	ind_end_broad = ind_species[fct_type == "broadleaf", end],
+	ind_end_conif = ind_species[fct_type == "conifer", end],
+	height = inra_arbres[, height],
+	circumference_m = inra_arbres[, circumference_cm/100],
+	volume_m3 = inra_arbres[, volume_m3]
+)
+```
+
+The data are now ready! Here is the composition:
+```{r}
+#| echo: false
+#| label: fig-data
+#| fig-cap: "Number of individuals per species, with conifers in blue and broadleaves in orange. Watch out, it is a $\\log_{10}$ scale"
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 9
+species_nb = ind_species[, .(speciesName_sci, n_indiv, colour)]
+setorder(species_nb, n_indiv)
+
+par(mar = c(5, 12, 2, 2))
+# Use barplot f or horizontal bars
+barplot(
+	species_nb[, n_indiv],
+	names.arg = species_nb[, speciesName_sci],
+	horiz = TRUE, # Horizontal bars
+	xlab = "Number of individuals",
+	ylab = "",
+	main = "",
+	las = 1,
+	log = "x",
+	col = species_nb[, colour]
+)
+abline(v = 30, lwd = 2, lty = "dashed", col = "#CD212A")
+```
+The correlation between the hardiness and the slenderness is `{r} round(inra_arbres[, cor(hdn, slenderness)], 2)`, which is expected and I guess problematic...
+
+## Model using `CmdStanR`
+
+## Model using `nlme`
+```{r}
+Modele_mai2 = nlme(formTotNew ~ a + b*hdn + d*slenderness, data = inra_arbres,
+	start = c(a = 0.4, 0, b = 1.5, 0, d = 0.0005, 0),
+	fixed = list(a + b + d ~ feuil.res), random = a + d ~ 1|speciesName_sci)
+```
+
+Rebuild the parameters for *Fagus sylvatica*:
+```{r}
+## Rebuild species-specific params from nlme
+fixed_effects = fixed.effects(Modele_mai2)
+# random_effects = ranef(Modele_mai2)[sp_name, ]
+
+# if (nrow(random_effects) != 1)
+# 	stop("Dimensions mismatch")
+
+# b0_nlme = fixed_effects["a.(Intercept)"] + random_effects[1, "a.(Intercept)"] +
+# 	if (select_tp == 2) fixed_effects["a.feuil.resconifer"] else 0
+
+# b1_nlme = fixed_effects["b.(Intercept)"] + if (select_tp == 2) fixed_effects["b.feuil.resconifer"] else 0
+
+# b2_nlme = fixed_effects["d.(Intercept)"] + random_effects[1, "d.(Intercept)"] +
+# 	if (select_tp == 2) fixed_effects["d.feuil.resconifer"] else 0
+
+# species_params_nlme = round(c(beta0 = unname(b0_nlme), b1 = unname(b1_nlme), beta2 = unname(b2_nlme)), 4)
+
+```
+
+## Model using `lme4`
+```{r}
+test_lme4 = lme4::lmer(formTotNew ~ feuil.res * (hdn + slenderness) + (1 + slenderness | speciesName_sci), data = inra_arbres)
+```
+
+```{r}
+fixed_effects_lme4 = lme4::fixef(test_lme4)
+# random_effects_lme4 = lme4::ranef(test_lme4)$speciesName_sci[sp_name, c("(Intercept)", "slenderness")]
+
+# if (nrow(random_effects_lme4) != 1)
+# 	stop("Dimensions mismatch")
+
+# b0_lme4 = fixed_effects_lme4["(Intercept)"] + random_effects_lme4[1, "(Intercept)"] +
+# 	if (select_tp == 2) fixed_effects_lme4["feuil.resconifer"] else 0
+
+# b1_lme4 = fixed_effects_lme4["hdn"] + if (select_tp == 2) fixed_effects_lme4["feuil.resconifer:hdn"] else 0
+
+# b2_lme4 = fixed_effects_lme4["slenderness"] + random_effects_lme4[1, "slenderness"] +
+# 	if (select_tp == 2) fixed_effects_lme4["feuil.resconifer:slenderness"] else 0
+```
+
+
+
