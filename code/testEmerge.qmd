@@ -268,8 +268,212 @@ abline(v = 30, lwd = 2, lty = "dashed", col = "#CD212A")
 The correlation between the hardiness and the slenderness is `{r} round(inra_arbres[, cor(hdn, slenderness)], 2)`, which is expected and I guess problematic...
 
 ## Model using `CmdStanR`
+I use the following model, which has been tested with simulated data in `00_notes.qmd`:
+```{stan output.var = "stan_deleuze", cache = TRUE}
+data {
+	// Dimensions and indices
+	int N; // Number of individuals
+	int S; // Number of species
+	int<lower = 0, upper = S> n_sp_broad; // number of broadleaf species
+	int<lower = S - n_sp_broad, upper = S - n_sp_broad> n_sp_conif; // number of conifer species
+	array[n_sp_broad] int ind_start_broad; // Broadleaf species index start
+	array[n_sp_conif] int ind_start_conif; // Conifer species index start
+	array[n_sp_broad] int ind_end_broad; // Broadleaf species index end
+	array[n_sp_conif] int ind_end_conif; // Conifer species index end
+
+	// Predictors
+	vector<lower = 0> [N] height;
+	vector<lower = 0> [N] circumference_m;
+
+	// Response variable
+	vector [N] volume_m3;
+}
+
+transformed data {
+	vector [N] hdn = sqrt(circumference_m) ./ height;
+	vector [N] slenderness = height ./ circumference_m;
+	vector [N] corrected_cyl_vol = height .* circumference_m^2 ./ (4*pi()*(1 - 1.3/height)^2);
+}
+
+parameters {
+	// Fixed effects (population parameters) for broadleaf and conifer
+	vector[2] b0;
+	vector[2] b1;
+	vector[2] b2;
+	
+	// Random effects (group parameters)
+	// vector[S] eta0;
+	// vector[S] eta2;
+	vector[S] beta0;
+	vector[S] beta2;
+
+	// Variances
+	real<lower = 0> sigma; // sd residuals
+	real<lower = 0> sigma_beta0; // sd random effect beta0
+	real<lower = 0> sigma_beta2; // sd random effect beta2
+}
+
+// transformed parameters {
+// 	vector[S] beta0;
+// 	vector[S] beta2;
+	
+// 	beta0[1:n_sp_broad] = b0[1] + eta0[1:n_sp_broad]*sigma_beta0;
+// 	beta0[(n_sp_broad + 1):S] = b0[2] + eta0[(n_sp_broad + 1):S]*sigma_beta0;
+	
+// 	beta2[1:n_sp_broad] = b2[1] + eta2[1:n_sp_broad]*sigma_beta2;
+// 	beta2[(n_sp_broad + 1):S] = b2[2] + eta2[(n_sp_broad + 1):S]*sigma_beta2;
+// }
+
+model {
+	// Priors
+	// --- Population parameters
+	target += normal_lpdf(b0 | 0, 1);
+	target += normal_lpdf(b1 | 2, 1);
+	target += normal_lpdf(b2 | 0, 0.2);
+
+	// --- Residual variance and population variance
+	target += inv_gamma_lpdf(sigma | 2, 1); // Uses shape and scale (which is the rate from gamma perspective)
+	target += inv_gamma_lpdf(sigma_beta0 | 3, 0.5);
+	target += inv_gamma_lpdf(sigma_beta2 | 3, 0.5);
+
+	// Hierarchy
+	target += normal_lpdf(beta0[1:n_sp_broad] | b0[1], sigma_beta0);
+	target += normal_lpdf(beta2[1:n_sp_broad] | b2[1], sigma_beta2);
+	target += normal_lpdf(beta0[(n_sp_broad + 1):S] | b0[2], sigma_beta0);
+	target += normal_lpdf(beta2[(n_sp_broad + 1):S] | b2[2], sigma_beta2);
+	// target += normal_lpdf(eta0 | 0, 1);
+	// target += normal_lpdf(eta2 | 0, 1);
+
+	// Likelihood broadleaves, i = species
+	for (i in 1:n_sp_broad)
+	{
+		target += normal_lpdf(volume_m3[ind_start_broad[i]:ind_end_broad[i]] |
+			(beta0[i] +
+			b1[1]*hdn[ind_start_broad[i]:ind_end_broad[i]] +
+			beta2[i]*slenderness[ind_start_broad[i]:ind_end_broad[i]]) .*
+			corrected_cyl_vol[ind_start_broad[i]:ind_end_broad[i]],
+			sigma);
+	}
+
+	// Likelihood conifers, i = species
+	for (i in 1:n_sp_conif)
+	{
+		target += normal_lpdf(volume_m3[ind_start_conif[i]:ind_end_conif[i]] |
+			(beta0[n_sp_broad + i] +
+			b1[2]*hdn[ind_start_conif[i]:ind_end_conif[i]] +
+			beta2[n_sp_broad + i]*slenderness[ind_start_conif[i]:ind_end_conif[i]]) .*
+			corrected_cyl_vol[ind_start_conif[i]:ind_end_conif[i]],
+			sigma);
+	}
+}
+```
+
+The commented parts correspond to a [non-centred parametrisation](https://betanalpha.github.io/assets/case_studies/hierarchical_modeling.html), which did not work in my case. I now do the standard procedure for a Bayesian analysis:
+
+1. Computational model checks using fake data simulation (done in `00_notes.qmd`) and the prior predictive distribution (done in @sec-prior_check)
+2. Run the model (in @sec-run)
+3. Posterior predictive checks
+
+### Prior predictive checks {#sec-prior_check}
+```{r}
+n_sim = 20
+gen_data = vector(mode = "list", length = 20)
+S = ind_species[, .N]
+volume = numeric(length = inra_arbres[, .N])
+
+corrected_cyl_vol = inra_arbres[, height]*inra_arbres[, circumference_m^2]/(4*pi*(1 - 1.3/inra_arbres[, height])^2)
+
+for (sim in seq_len(n_sim))
+{
+	# Simulate the variances
+	sigma = 1/rgamma(n = 1, shape = 2, rate = 1);
+	sigma_beta0 = 1/rgamma(n = 1, shape = 3, rate = 0.5);
+	sigma_beta2 = 1/rgamma(n = 1, shape = 3, rate = 0.5);
+
+	# Simulate the common group intercepts and hdn/slenderness slopes
+	b0 = rnorm(n = 2, mean = 0, sd = 1);
+	b1 = rnorm(n = 2, mean = 2, sd = 1);
+	b2 = rnorm(n = 2, mean = 0, sd = 0.2);
+
+	# Simulate group-specific intercepts and slenderness slopes
+	n_sp_broad = stanData[["n_sp_broad"]]
+	n_sp_conif = stanData[["n_sp_conif"]]
+	beta0 = numeric(length = S)
+	beta2 = numeric(length = S)
+	beta0[1:n_sp_broad] = rnorm(n = n_sp_broad, mean = b0[1], sd = sigma_beta0);
+	beta0[(n_sp_broad + 1):S] = rnorm(n = n_sp_conif, mean = b0[2], sd = sigma_beta0);
+	beta2[1:n_sp_broad] = rnorm(n = n_sp_broad, mean = b2[1], sd = sigma_beta2);
+	beta2[(n_sp_broad + 1):S] = rnorm(n = n_sp_conif, mean = b2[2], sd = sigma_beta2);
+
+	# Simulate individual volume data
+	# --- Broadleaves
+	for (s in 1:n_sp_broad)
+	{
+		ind_start = ind_species[s, start]
+		ind_end = ind_species[s, end]
+		n_indiv = ind_species[s, n_indiv]
+		
+		volume[ind_start:ind_end] = rnorm(n = n_indiv, mean = (beta0[s] +
+			b1[1]*inra_arbres[ind_start:ind_end, hdn] +
+			beta2[s]*inra_arbres[ind_start:ind_end, slenderness]) * corrected_cyl_vol[ind_start:ind_end],
+			sd = sigma);
+	}
+
+	# --- Conifers
+	for (s in (n_sp_broad + 1):S)
+	{
+		ind_start = ind_species[s, start]
+		ind_end = ind_species[s, end]
+		n_indiv = ind_species[s, n_indiv]
+		
+		volume[ind_start:ind_end] = rnorm(n = n_indiv, mean = (beta0[s] +
+			b1[2]*inra_arbres[ind_start:ind_end, hdn] +
+			beta2[s]*inra_arbres[ind_start:ind_end, slenderness]) * corrected_cyl_vol[ind_start:ind_end],
+			sd = sigma);
+	}
+
+	gen_data[[sim]] = data.table(volume = volume)
+}
+
+gen_data = rbindlist(l = gen_data, idcol = "simulation")
+
+hist(gen_data[, volume])
+```
+
+### Run the model {#sec-run}
+```{r}
+n_chains = 4
+# woodstock_seed = 1969 - 08 - 18
+iter_warmup = 750
+iter_sampling = 1250
+
+## Fit
+if (!file.exists("fit_deleuze.rds"))
+{
+	fit = stan_deleuze$sample(data = stanData, chains = n_chains, parallel_chains = ifelse(n_chains < 4, n_chains, 4),
+		seed = NULL, refresh = 200, max_treedepth = 12, save_warmup = TRUE,
+		iter_sampling = iter_sampling, iter_warmup = iter_warmup, adapt_delta = 0.95)
+	fit$save_output_files(dir = "./", basename = paste0("fit_deleuze"), random = FALSE)
+	saveRDS(fit, "./fit_deleuze.rds")
+} else {
+	fit = readRDS("./fit_deleuze.rds")
+}
+
+# mcmc_rhat(bayesplot::rhat(fit))
+# mcmc_neff(bayesplot::neff_ratio(fit))
+# mcmc_nuts_divergence(bayesplot::nuts_params(fit), lp = log_posterior(fit))
+
+# mcmc_scatter(x = fit$draws(c("b2[1]", "b1[1]")), alpha = 1, np = nuts_params(fit))
+# mcmc_hex(x = fit$draws(c("b0[1]", "b1[1]")))
+
+# mcmc_pairs(x = fit$draws(c("b0", "b1", "b2", "sigma")), np = nuts_params(fit))
+```
+
+### Posterior predictive checks
+
 
 ## Model using `nlme`
+This is the model and package used in @Deleuze2014:
 ```{r}
 Modele_mai2 = nlme(formTotNew ~ a + b*hdn + d*slenderness, data = inra_arbres,
 	start = c(a = 0.4, 0, b = 1.5, 0, d = 0.0005, 0),
@@ -298,6 +502,7 @@ fixed_effects = fixed.effects(Modele_mai2)
 ```
 
 ## Model using `lme4`
+This is the equivalent model with the package `lme4`:
 ```{r}
 test_lme4 = lme4::lmer(formTotNew ~ feuil.res * (hdn + slenderness) + (1 + slenderness | speciesName_sci), data = inra_arbres)
 ```
