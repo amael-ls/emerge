@@ -739,14 +739,7 @@ However, the parameter values (displayed in @tbl-params for `Quercus robur_petra
 And here are the residuals computed as the mean of the bayesian simulation minus the observed:
 
 ```{r}
-#| echo: false
 #| output: false
-#| label: fig-residuals
-#| fig-cap: "Residuals for the Bayesian model. Each colour represents one species. The vertical line separates broadleaves (to the left) from conifers (to the right)"
-#| fig-asp: 1
-#| out-width: 95%
-#| fig-width: 9
-
 selected_sp = "Quercus robur_petraea" # Maybe in inra_arbres it is a hybrid, i.e. should be named Quercus × rosacea
 species_id = ind_species[speciesName_sci == selected_sp, which = TRUE]
 fct_type = ifelse(ind_species[speciesName_sci == selected_sp, fct_type] == "broadleaf", 1, 2)
@@ -779,7 +772,15 @@ ind_species[, hokusai := paste0(hokusai[1:.N], 66)]
 
 test = merge.data.table(test, ind_species[, .(speciesName_sci, hokusai)])
 setorder(test, -hokusai)
+```
 
+```{r}
+#| echo: false
+#| label: fig-residuals
+#| fig-cap: "Residuals for the Bayesian model. Each colour represents one species. The vertical line separates broadleaves (to the left) from conifers (to the right)"
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 9
 plot(test[, simulated_vol - measured_vol], col = test[, hokusai], pch = 19, ylab = "Residuals", axes = FALSE)
 abline(v = ind_species[fct_type == "broadleaf", max(end)], lwd = 2)
 abline(h = 0)
