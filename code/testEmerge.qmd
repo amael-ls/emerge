@@ -326,9 +326,6 @@ Here is the composition of the data for the posterior predictive checks:
 #| echo: false
 #| label: fig-data_postPred
 #| fig-cap: "Number of individuals per species for the posterior checks data, with conifers in blue and broadleaves in orange"
-#| fig-asp: 1
-#| out-width: 95%
-#| fig-width: 9
 species_nb = data_check[, .N, by = .(speciesName_sci, fct_type)]
 species_nb[fct_type == "broadleaf", colour := "#FFAF37"]
 species_nb[fct_type == "conifer", colour := "#007BA5"]
@@ -606,6 +603,7 @@ generated quantities {
 
 I predict new volumes based on the dataset collected in 2010, here for the species 'Quercus robur_petraea'.
 ```{r}
+#| output: false
 selected_sp = "Quercus robur_petraea" # Maybe in inra_arbres it is a hybrid, i.e. should be named Quercus × rosacea
 species_id = ind_species[speciesName_sci == selected_sp, which = TRUE]
 fct_type = ifelse(ind_species[speciesName_sci == selected_sp, fct_type] == "broadleaf", 1, 2)
