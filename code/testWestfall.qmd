@@ -1,0 +1,78 @@
+---
+title: "Testing the model of @Westfall2023"
+date: today
+author: Amaël Le Squin
+date-format: iso
+filters:
+  - fontawesome
+  - siunitx-quarto
+execute:
+  error: true
+bibliography: references.bib
+css: style.css
+knitr:
+  opts_chunk: 
+    dev: ragg_png
+    crop: null
+    out.width: "70%"
+    fig.width: 6
+    fig.asp: 0.618
+    fig.align: "center"
+format:
+  html:
+    toc: true
+    include-in-header: mathjax.html
+    code-fold: true
+    df-print: paged
+    number-sections: true
+    theme:
+      light: cerulean
+      dark: darkly
+    margin: 5% 0;
+  pdf:
+    keep-tex: true
+    pdf-engine: lualatex
+    include-in-header:
+      - text: |
+          \usepackage{unicode-math}
+          \usepackage{siunitx}
+---
+
+\newcommand{\ie}{*i.e.,*}
+\newcommand{\F}{\mathscr{F}}
+\newcommand{\N}{\mathbfscr{N}}
+
+## Introduction
+
+The European Union developed a [New EU Forest Strategy for 2030](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:52021DC0572) as part of the plan to adapt to and fight against climate change and make Europe a climate neutral continent by 2050. This strategy relies on improved monitoring of European forests to better understand their condition and respond accordingly. Specifically, it calls for assessing carbon sequestration in forests to evaluate whether or not Europe reached carbon neutrality. One bottleneck is the harmonisation of the forest monitoring methods between European member states, if not within them. The [PathFinder project](https://pathfinder-heu.eu/#top) supports member states in implementing a European Forest Monitoring System in order to standardise or harmonise forest data collection and reporting across the EU. This prompted the Institut National de l'information Géographique et forestière (IGN), which is in charge of the French National Forest Inventory (NFI) data, to update its methods for assessing forest carbon storage.
+
+In most countries, carbon content is estimated via two quantities: (*i*) the volume in \unit{\cubic\metre}, and (*ii*) the wood density in \unit{\kilogram\per\cubic\metre}. However, often numerous models and methods are currently used across countries, contingent upon the tree species and geographic location within each country [@Westfall2023, @Longuetaud2013, @Gschwantner2009]. 
+
+The original models can be found in @Westfall2023:
+
+Model of Schumacher-Hall
+$$
+y_i = a D_i^b H_i^c
+$$ {#eq-schumacherHall}
+
+Segmented model:
+
+$$
+y_i =
+\begin{cases}
+	a D_i^b H_i^c & D_i < k \\
+	a k^{b - b_1} D_i^{b_1} H_i^c & D_i \geqslant k
+\end{cases}
+$$ {#eq-cases}
+
+Continuously variable model:
+$$
+y_i = a D_i^{a_1(1 - \exp[-b D_i])^c} H_i^c
+$$ {#eq-continuous}
+
+and the modified Wiley model:
+$$
+y_i = a D_i^b H_i^c \exp[-b_1 D_i]
+$$ {#eq-wiley}
+
+The @eq-schumacherHall is the default model 
