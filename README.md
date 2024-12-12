@@ -41,4 +41,4 @@ The folder `data_origin` is protected and contains the data as provided by Chris
 
 The folder `data`, is not protected and **this is where the processed data should be stored**. It contains:
 
-- A folder `westfall2023`, data that where downloaded at [https://data.lib.vt.edu/articles/dataset/LegacyTreeData_v2/22582432](https://data.lib.vt.edu/articles/dataset/LegacyTreeData_v2/22582432). These data are used in the article [A national-scale tree volume, biomass, and carbon modeling system for the United States](https://research.fs.usda.gov/treesearch/66998).
+- A folder `westfall2023` which contains tables that were downloaded at [https://doi.org/10.2737/WO-GTR-104-Supp1](https://doi.org/10.2737/WO-GTR-104-Supp1). These tables are from the article [A national-scale tree volume, biomass, and carbon modeling system for the United States](https://research.fs.usda.gov/treesearch/66998).
