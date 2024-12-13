@@ -4,15 +4,28 @@ project:
 manuscript:
   article: index.qmd
 
+date: today
+title: Testing the model of @Westfall2023
+authors:
+  - name: Amaël Le Squin
+    affiliation: Institut national de l'information géographique et forestière
+    roles: writing
+    corresponding: true
+    orcid: 0000-0003-3516-4155
+bibliography: references.bib
+
 format:
   html:
     comments:
       hypothesis: true
-  docx: default
   jats: default
-
-  # (other formats)
-  # pdf: default
+  pdf:
+    keep-tex: true
+    pdf-engine: lualatex
+    include-in-header:
+      - text: |
+          \usepackage{unicode-math}
+          \usepackage{siunitx}
 
 execute:
   freeze: true
