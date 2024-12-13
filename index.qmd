@@ -1,12 +1,10 @@
----
-title: writing
-authors:
-  - name: Norah Jones
-    affiliation: The University
-    roles: writing
-    corresponding: true
-bibliography: references.bib
----
 
-## Section
-This is a simple placeholder for the manuscript's main document [@knuth84].
+<!-- New commands -->
+\newcommand{\ie}{*i.e.,*}
+\newcommand{\F}{\mathscr{F}}
+\newcommand{\N}{\mathbfscr{N}}
+
+<!-- Files -->
+{{< include content/introduction.qmd >}}
+
+{{< include content/methods.qmd >}}
