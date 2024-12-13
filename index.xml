@@ -11,16 +11,18 @@ and Interchange DTD v1.2 20190208//EN" "JATS-archivearticle1.dtd">
 
 
 <title-group>
-<article-title>writing</article-title>
+<article-title>Testing the model of Westfall et al.
+(<xref alt="2023" rid="ref-Westfall2023" ref-type="bibr">2023</xref>)</article-title>
 </title-group>
 
 <contrib-group>
 <contrib contrib-type="author" corresp="yes">
+<contrib-id contrib-id-type="orcid">0000-0003-3516-4155</contrib-id>
 <name>
-<surname>Jones</surname>
-<given-names>Norah</given-names>
+<surname>Squin</surname>
+<given-names>Amaël Le</given-names>
 </name>
-<string-name>Norah Jones</string-name>
+<string-name>Amaël Le Squin</string-name>
 
 <role vocab="https://credit.niso.org" vocab-term="writing – original
 draft" vocab-term-identifier="https://credit.niso.org/contributor-roles/writing-original-draft/">writing</role>
@@ -30,7 +32,8 @@ draft" vocab-term-identifier="https://credit.niso.org/contributor-roles/writing-
 </contrib-group>
 <aff id="aff-1">
 <institution-wrap>
-<institution>The University</institution>
+<institution>Institut national de l’information géographique et
+forestière</institution>
 </institution-wrap>
 
 
@@ -64,39 +67,467 @@ draft" vocab-term-identifier="https://credit.niso.org/contributor-roles/writing-
 </front>
 
 <body>
-<sec id="section">
-  <title>Section</title>
-  <p>This is a simple placeholder for the manuscript’s main document
-  (<xref alt="Knuth 1984" rid="ref-knuth84" ref-type="bibr">Knuth
-  1984</xref>).</p>
+<sec id="introduction">
+  <title>Introduction</title>
+  <p>The European Union developed a
+  <ext-link ext-link-type="uri" xlink:href="https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:52021DC0572">New
+  EU Forest Strategy for 2030</ext-link> as part of the plan to adapt to
+  and fight against climate change and make Europe a climate neutral
+  continent by 2050. This strategy relies on improved monitoring of
+  European forests to better understand their condition and respond
+  accordingly. Specifically, it calls for assessing carbon sequestration
+  in forests to evaluate whether or not Europe reached carbon
+  neutrality. One bottleneck is the harmonisation of the forest
+  monitoring methods between European member states, if not within them.
+  The
+  <ext-link ext-link-type="uri" xlink:href="https://pathfinder-heu.eu/#top">PathFinder
+  project</ext-link> supports member states in implementing a European
+  Forest Monitoring System in order to standardise or harmonise forest
+  data collection and reporting across the EU. This prompted the
+  Institut National de l’information Géographique et forestière (IGN),
+  which is in charge of the French National Forest Inventory (NFI) data,
+  to update its methods for assessing forest carbon storage.</p>
+  <p>In most countries, carbon content is estimated via two quantities:
+  (<italic>i</italic>) the volume in , and (<italic>ii</italic>) the
+  wood density in . However, often numerous models and methods are
+  currently used across countries, contingent upon the tree species and
+  geographic location within each country
+  (<xref alt="Westfall et al. 2023" rid="ref-Westfall2023" ref-type="bibr">Westfall
+  et al. 2023</xref>;
+  <xref alt="Longuetaud et al. 2013" rid="ref-Longuetaud2013" ref-type="bibr">Longuetaud
+  et al. 2013</xref>;
+  <xref alt="Gregoire and Schabenberger 1996" rid="ref-Gregoire1996" ref-type="bibr">Gregoire
+  and Schabenberger 1996</xref>), but also the definition of tree parts
+  (<xref alt="Gschwantner et al. 2009" rid="ref-Gschwantner2009" ref-type="bibr">Gschwantner
+  et al. 2009</xref>).</p>
+</sec>
+<sec id="methods">
+  <title>Methods</title>
+  <p>The original models can be found in Westfall et al.
+  (<xref alt="2023" rid="ref-Westfall2023" ref-type="bibr">2023</xref>):</p>
+  <p>Model of Schumacher-Hall
+  <styled-content id="eq-schumacherHall"><disp-formula><alternatives>
+  <tex-math><![CDATA[
+  y_i = a D_i^b H_i^c
+   \qquad(1)]]></tex-math>
+  <mml:math display="block" xmlns:mml="http://www.w3.org/1998/Math/MathML"><mml:mrow><mml:msub><mml:mi>y</mml:mi><mml:mi>i</mml:mi></mml:msub><mml:mo>=</mml:mo><mml:mi>a</mml:mi><mml:msubsup><mml:mi>D</mml:mi><mml:mi>i</mml:mi><mml:mi>b</mml:mi></mml:msubsup><mml:msubsup><mml:mi>H</mml:mi><mml:mi>i</mml:mi><mml:mi>c</mml:mi></mml:msubsup><mml:mspace width="2.0em"></mml:mspace><mml:mrow><mml:mo stretchy="true" form="prefix">(</mml:mo><mml:mn>1</mml:mn><mml:mo stretchy="true" form="postfix">)</mml:mo></mml:mrow></mml:mrow></mml:math></alternatives></disp-formula></styled-content></p>
+  <p>Segmented model:</p>
+  <p><styled-content id="eq-cases"><disp-formula><alternatives>
+  <tex-math><![CDATA[
+  y_i =
+  \begin{cases}
+      a D_i^b H_i^c & D_i < k \\
+      a k^{b - b_1} D_i^{b_1} H_i^c & D_i \geqslant k
+  \end{cases}
+   \qquad(2)]]></tex-math>
+  <mml:math display="block" xmlns:mml="http://www.w3.org/1998/Math/MathML"><mml:mrow><mml:msub><mml:mi>y</mml:mi><mml:mi>i</mml:mi></mml:msub><mml:mo>=</mml:mo><mml:mrow><mml:mo stretchy="true" form="prefix">{</mml:mo><mml:mtable><mml:mtr><mml:mtd columnalign="left" style="text-align: left"><mml:mi>a</mml:mi><mml:msubsup><mml:mi>D</mml:mi><mml:mi>i</mml:mi><mml:mi>b</mml:mi></mml:msubsup><mml:msubsup><mml:mi>H</mml:mi><mml:mi>i</mml:mi><mml:mi>c</mml:mi></mml:msubsup></mml:mtd><mml:mtd columnalign="left" style="text-align: left"><mml:msub><mml:mi>D</mml:mi><mml:mi>i</mml:mi></mml:msub><mml:mo>&lt;</mml:mo><mml:mi>k</mml:mi></mml:mtd></mml:mtr><mml:mtr><mml:mtd columnalign="left" style="text-align: left"><mml:mi>a</mml:mi><mml:msup><mml:mi>k</mml:mi><mml:mrow><mml:mi>b</mml:mi><mml:mo>−</mml:mo><mml:msub><mml:mi>b</mml:mi><mml:mn>1</mml:mn></mml:msub></mml:mrow></mml:msup><mml:msubsup><mml:mi>D</mml:mi><mml:mi>i</mml:mi><mml:msub><mml:mi>b</mml:mi><mml:mn>1</mml:mn></mml:msub></mml:msubsup><mml:msubsup><mml:mi>H</mml:mi><mml:mi>i</mml:mi><mml:mi>c</mml:mi></mml:msubsup></mml:mtd><mml:mtd columnalign="left" style="text-align: left"><mml:msub><mml:mi>D</mml:mi><mml:mi>i</mml:mi></mml:msub><mml:mo>≥</mml:mo><mml:mi>k</mml:mi></mml:mtd></mml:mtr></mml:mtable></mml:mrow><mml:mspace width="2.0em"></mml:mspace><mml:mrow><mml:mo stretchy="true" form="prefix">(</mml:mo><mml:mn>2</mml:mn><mml:mo stretchy="true" form="postfix">)</mml:mo></mml:mrow></mml:mrow></mml:math></alternatives></disp-formula></styled-content></p>
+  <p>Continuously variable model:
+  <styled-content id="eq-continuous"><disp-formula><alternatives>
+  <tex-math><![CDATA[
+  y_i = a D_i^{a_1(1 - \exp[-b D_i])^c} H_i^c
+   \qquad(3)]]></tex-math>
+  <mml:math display="block" xmlns:mml="http://www.w3.org/1998/Math/MathML"><mml:mrow><mml:msub><mml:mi>y</mml:mi><mml:mi>i</mml:mi></mml:msub><mml:mo>=</mml:mo><mml:mi>a</mml:mi><mml:msubsup><mml:mi>D</mml:mi><mml:mi>i</mml:mi><mml:mrow><mml:msub><mml:mi>a</mml:mi><mml:mn>1</mml:mn></mml:msub><mml:msup><mml:mrow><mml:mo stretchy="true" form="prefix">(</mml:mo><mml:mn>1</mml:mn><mml:mo>−</mml:mo><mml:mo>exp</mml:mo><mml:mrow><mml:mo stretchy="true" form="prefix">[</mml:mo><mml:mi>−</mml:mi><mml:mi>b</mml:mi><mml:msub><mml:mi>D</mml:mi><mml:mi>i</mml:mi></mml:msub><mml:mo stretchy="true" form="postfix">]</mml:mo></mml:mrow><mml:mo stretchy="true" form="postfix">)</mml:mo></mml:mrow><mml:mi>c</mml:mi></mml:msup></mml:mrow></mml:msubsup><mml:msubsup><mml:mi>H</mml:mi><mml:mi>i</mml:mi><mml:mi>c</mml:mi></mml:msubsup><mml:mspace width="2.0em"></mml:mspace><mml:mrow><mml:mo stretchy="true" form="prefix">(</mml:mo><mml:mn>3</mml:mn><mml:mo stretchy="true" form="postfix">)</mml:mo></mml:mrow></mml:mrow></mml:math></alternatives></disp-formula></styled-content></p>
+  <p>and the modified Wiley model:
+  <styled-content id="eq-wiley"><disp-formula><alternatives>
+  <tex-math><![CDATA[
+  y_i = a D_i^b H_i^c \exp[-b_1 D_i]
+   \qquad(4)]]></tex-math>
+  <mml:math display="block" xmlns:mml="http://www.w3.org/1998/Math/MathML"><mml:mrow><mml:msub><mml:mi>y</mml:mi><mml:mi>i</mml:mi></mml:msub><mml:mo>=</mml:mo><mml:mi>a</mml:mi><mml:msubsup><mml:mi>D</mml:mi><mml:mi>i</mml:mi><mml:mi>b</mml:mi></mml:msubsup><mml:msubsup><mml:mi>H</mml:mi><mml:mi>i</mml:mi><mml:mi>c</mml:mi></mml:msubsup><mml:mo>exp</mml:mo><mml:mrow><mml:mo stretchy="true" form="prefix">[</mml:mo><mml:mi>−</mml:mi><mml:msub><mml:mi>b</mml:mi><mml:mn>1</mml:mn></mml:msub><mml:msub><mml:mi>D</mml:mi><mml:mi>i</mml:mi></mml:msub><mml:mo stretchy="true" form="postfix">]</mml:mo></mml:mrow><mml:mspace width="2.0em"></mml:mspace><mml:mrow><mml:mo stretchy="true" form="prefix">(</mml:mo><mml:mn>4</mml:mn><mml:mo stretchy="true" form="postfix">)</mml:mo></mml:mrow></mml:mrow></mml:math></alternatives></disp-formula></styled-content></p>
+  <p>The
+  <xref alt="Equation 1" rid="eq-schumacherHall">Equation 1</xref> is
+  the default model,
+  <inline-formula><tex-math><![CDATA[\F = \N = 2]]></tex-math></inline-formula>.</p>
 </sec>
 </body>
 
 <back>
 <ref-list>
   <title></title>
-  <ref id="ref-knuth84">
+  <ref id="ref-Westfall2023">
     <element-citation publication-type="article-journal">
       <person-group person-group-type="author">
-        <name><surname>Knuth</surname><given-names>Donald E.</given-names></name>
+        <name><surname>Westfall</surname><given-names>James A.</given-names></name>
+        <name><surname>Coulston</surname><given-names>John W.</given-names></name>
+        <name><surname>Gray</surname><given-names>Andrew N.</given-names></name>
+        <name><surname>Shaw</surname><given-names>John D.</given-names></name>
+        <name><surname>Radtke</surname><given-names>Philip J.</given-names></name>
+        <name><surname>Walker</surname><given-names>David M.</given-names></name>
+        <name><surname>Weiskittel</surname><given-names>Aaron R.</given-names></name>
+        <name><surname>MacFarlane</surname><given-names>David W.</given-names></name>
+        <name><surname>Affleck</surname><given-names>David L. R.</given-names></name>
+        <name><surname>Zhao</surname><given-names>Dehai</given-names></name>
+        <name><surname>Temesgen</surname><given-names>Hailemariam</given-names></name>
+        <name><surname>Poudel</surname><given-names>Krishna P.</given-names></name>
+        <name><surname>Frank</surname><given-names>Jereme M.</given-names></name>
+        <name><surname>Prisley</surname><given-names>Stephen P.</given-names></name>
+        <name><surname>Wang</surname><given-names>Yingfang</given-names></name>
+        <name><surname>Meador</surname><given-names>Andrew J. Sánchez</given-names></name>
+        <name><surname>Auty</surname><given-names>David</given-names></name>
+        <name><surname>Domke</surname><given-names>Grant M.</given-names></name>
       </person-group>
-      <article-title>Literate programming</article-title>
-      <source>Comput. J.</source>
-      <publisher-name>Oxford University Press, Inc.</publisher-name>
-      <publisher-loc>USA</publisher-loc>
-      <year iso-8601-date="1984-05">1984</year><month>05</month>
-      <volume>27</volume>
+      <article-title>A national-scale tree volume, biomass, and carbon modeling system for the united states</article-title>
+      <source>Gen. Tech. Rep. WO-104. Washington, DC: U.S. Department of Agriculture, Forest Service.</source>
+      <year iso-8601-date="2023">2023</year>
+      <volume>104</volume>
+      <pub-id pub-id-type="doi">10.2737/wo-gtr-104</pub-id>
+    </element-citation>
+  </ref>
+  <ref id="ref-Longuetaud2013">
+    <element-citation publication-type="article-journal">
+      <person-group person-group-type="author">
+        <name><surname>Longuetaud</surname><given-names>Fleur</given-names></name>
+        <name><surname>Santenoise</surname><given-names>Philippe</given-names></name>
+        <name><surname>Mothe</surname><given-names>Frédéric</given-names></name>
+        <name><surname>Senga Kiessé</surname><given-names>Tristan</given-names></name>
+        <name><surname>Rivoire</surname><given-names>Michaël</given-names></name>
+        <name><surname>Saint-André</surname><given-names>Laurent</given-names></name>
+        <name><surname>Ognouabi</surname><given-names>Nina</given-names></name>
+        <name><surname>Deleuze</surname><given-names>Christine</given-names></name>
+      </person-group>
+      <article-title>Modeling volume expansion factors for temperate tree species in france</article-title>
+      <source>Forest Ecology and Management</source>
+      <year iso-8601-date="2013">2013</year>
+      <volume>292</volume>
+      <issn>0378-1127</issn>
+      <pub-id pub-id-type="doi">10.1016/j.foreco.2012.12.023</pub-id>
+      <fpage>111</fpage>
+      <lpage>121</lpage>
+    </element-citation>
+  </ref>
+  <ref id="ref-Gschwantner2009">
+    <element-citation publication-type="article-journal">
+      <person-group person-group-type="author">
+        <name><surname>Gschwantner</surname><given-names>Thomas</given-names></name>
+        <name><surname>Schadauer</surname><given-names>Klemens</given-names></name>
+        <name><surname>Vidal</surname><given-names>Claude</given-names></name>
+        <name><surname>Lanz</surname><given-names>Adrian</given-names></name>
+        <name><surname>Tomppo</surname><given-names>Erkki</given-names></name>
+        <name><surname>Cosmo</surname><given-names>Lucio di</given-names></name>
+        <name><surname>Robert</surname><given-names>Nicolas</given-names></name>
+        <name><surname>Duursma</surname><given-names>Daisy Englert</given-names></name>
+        <name><surname>Lawrence</surname><given-names>Mark</given-names></name>
+      </person-group>
+      <article-title>Common tree definitions for national forest inventories in europe</article-title>
+      <source>Silva Fennica</source>
+      <year iso-8601-date="2009">2009</year>
+      <volume>43</volume>
       <issue>2</issue>
-      <issn>0010-4620</issn>
-      <uri>https://doi.org/10.1093/comjnl/27.2.97</uri>
-      <pub-id pub-id-type="doi">10.1093/comjnl/27.2.97</pub-id>
-      <fpage>97</fpage>
-      <lpage>111</lpage>
+      <pub-id pub-id-type="doi">10.14214/sf.463</pub-id>
+    </element-citation>
+  </ref>
+  <ref id="ref-Gregoire1996">
+    <element-citation publication-type="article-journal">
+      <person-group person-group-type="author">
+        <name><surname>Gregoire</surname><given-names>Timothy G.</given-names></name>
+        <name><surname>Schabenberger</surname><given-names>Oliver</given-names></name>
+      </person-group>
+      <article-title>A non-linear mixed-effects model to predict cumulative bole volume of standing trees</article-title>
+      <source>Journal of Applied Statistics</source>
+      <year iso-8601-date="1996">1996</year>
+      <volume>23</volume>
+      <issue>2–3</issue>
+      <issn>0266-4763</issn>
+      <pub-id pub-id-type="doi">10.1080/02664769624233</pub-id>
+      <fpage>257</fpage>
+      <lpage>272</lpage>
+    </element-citation>
+  </ref>
+</ref-list>
+</back>
+
+<sub-article article-type="notebook" id="nb-4-nb-1">
+<front-stub>
+<title-group>
+<article-title>Testing the model of Westfall et al.
+(<xref alt="2023" rid="ref-Westfall2023-nb-1" ref-type="bibr">2023</xref>)</article-title>
+</title-group>
+<contrib-group>
+<contrib contrib-type="author" corresp="yes">
+<contrib-id contrib-id-type="orcid">0000-0003-3516-4155</contrib-id>
+<name>
+<surname>Squin</surname>
+<given-names>Amaël Le</given-names>
+</name>
+<string-name>Amaël Le Squin</string-name>
+
+<role vocab="https://credit.niso.org" vocab-term="writing – original
+draft" vocab-term-identifier="https://credit.niso.org/contributor-roles/writing-original-draft/">writing</role>
+<xref ref-type="aff" rid="aff-1-nb-1">a</xref>
+<xref ref-type="corresp" rid="cor-1-nb-1">&#x002A;</xref>
+</contrib>
+</contrib-group>
+<aff id="aff-1-nb-1">
+<institution-wrap>
+<institution>Institut national de l’information géographique et
+forestière</institution>
+</institution-wrap>
+
+
+
+
+
+
+
+</aff>
+<author-notes>
+<corresp id="cor-1-nb-1"></corresp>
+</author-notes>
+</front-stub>
+
+<body>
+<sec id="methods-nb-1">
+  <title>Methods</title>
+  <p>The original models can be found in Westfall et al.
+  (<xref alt="2023" rid="ref-Westfall2023-nb-1" ref-type="bibr">2023</xref>):</p>
+  <p>Model of Schumacher-Hall <disp-formula><alternatives>
+  <tex-math><![CDATA[
+  y_i = a D_i^b H_i^c
+  ]]></tex-math>
+  <mml:math display="block" xmlns:mml="http://www.w3.org/1998/Math/MathML"><mml:mrow><mml:msub><mml:mi>y</mml:mi><mml:mi>i</mml:mi></mml:msub><mml:mo>=</mml:mo><mml:mi>a</mml:mi><mml:msubsup><mml:mi>D</mml:mi><mml:mi>i</mml:mi><mml:mi>b</mml:mi></mml:msubsup><mml:msubsup><mml:mi>H</mml:mi><mml:mi>i</mml:mi><mml:mi>c</mml:mi></mml:msubsup></mml:mrow></mml:math></alternatives></disp-formula>
+  {#eq-schumacherHall}</p>
+  <p>Segmented model:</p>
+  <p><disp-formula><alternatives>
+  <tex-math><![CDATA[
+  y_i =
+  \begin{cases}
+      a D_i^b H_i^c & D_i < k \\
+      a k^{b - b_1} D_i^{b_1} H_i^c & D_i \geqslant k
+  \end{cases}
+  ]]></tex-math>
+  <mml:math display="block" xmlns:mml="http://www.w3.org/1998/Math/MathML"><mml:mrow><mml:msub><mml:mi>y</mml:mi><mml:mi>i</mml:mi></mml:msub><mml:mo>=</mml:mo><mml:mrow><mml:mo stretchy="true" form="prefix">{</mml:mo><mml:mtable><mml:mtr><mml:mtd columnalign="left" style="text-align: left"><mml:mi>a</mml:mi><mml:msubsup><mml:mi>D</mml:mi><mml:mi>i</mml:mi><mml:mi>b</mml:mi></mml:msubsup><mml:msubsup><mml:mi>H</mml:mi><mml:mi>i</mml:mi><mml:mi>c</mml:mi></mml:msubsup></mml:mtd><mml:mtd columnalign="left" style="text-align: left"><mml:msub><mml:mi>D</mml:mi><mml:mi>i</mml:mi></mml:msub><mml:mo>&lt;</mml:mo><mml:mi>k</mml:mi></mml:mtd></mml:mtr><mml:mtr><mml:mtd columnalign="left" style="text-align: left"><mml:mi>a</mml:mi><mml:msup><mml:mi>k</mml:mi><mml:mrow><mml:mi>b</mml:mi><mml:mo>−</mml:mo><mml:msub><mml:mi>b</mml:mi><mml:mn>1</mml:mn></mml:msub></mml:mrow></mml:msup><mml:msubsup><mml:mi>D</mml:mi><mml:mi>i</mml:mi><mml:msub><mml:mi>b</mml:mi><mml:mn>1</mml:mn></mml:msub></mml:msubsup><mml:msubsup><mml:mi>H</mml:mi><mml:mi>i</mml:mi><mml:mi>c</mml:mi></mml:msubsup></mml:mtd><mml:mtd columnalign="left" style="text-align: left"><mml:msub><mml:mi>D</mml:mi><mml:mi>i</mml:mi></mml:msub><mml:mo>≥</mml:mo><mml:mi>k</mml:mi></mml:mtd></mml:mtr></mml:mtable></mml:mrow></mml:mrow></mml:math></alternatives></disp-formula>
+  {#eq-cases}</p>
+  <p>Continuously variable model: <disp-formula><alternatives>
+  <tex-math><![CDATA[
+  y_i = a D_i^{a_1(1 - \exp[-b D_i])^c} H_i^c
+  ]]></tex-math>
+  <mml:math display="block" xmlns:mml="http://www.w3.org/1998/Math/MathML"><mml:mrow><mml:msub><mml:mi>y</mml:mi><mml:mi>i</mml:mi></mml:msub><mml:mo>=</mml:mo><mml:mi>a</mml:mi><mml:msubsup><mml:mi>D</mml:mi><mml:mi>i</mml:mi><mml:mrow><mml:msub><mml:mi>a</mml:mi><mml:mn>1</mml:mn></mml:msub><mml:msup><mml:mrow><mml:mo stretchy="true" form="prefix">(</mml:mo><mml:mn>1</mml:mn><mml:mo>−</mml:mo><mml:mo>exp</mml:mo><mml:mrow><mml:mo stretchy="true" form="prefix">[</mml:mo><mml:mi>−</mml:mi><mml:mi>b</mml:mi><mml:msub><mml:mi>D</mml:mi><mml:mi>i</mml:mi></mml:msub><mml:mo stretchy="true" form="postfix">]</mml:mo></mml:mrow><mml:mo stretchy="true" form="postfix">)</mml:mo></mml:mrow><mml:mi>c</mml:mi></mml:msup></mml:mrow></mml:msubsup><mml:msubsup><mml:mi>H</mml:mi><mml:mi>i</mml:mi><mml:mi>c</mml:mi></mml:msubsup></mml:mrow></mml:math></alternatives></disp-formula>
+  {#eq-continuous}</p>
+  <p>and the modified Wiley model: <disp-formula><alternatives>
+  <tex-math><![CDATA[
+  y_i = a D_i^b H_i^c \exp[-b_1 D_i]
+  ]]></tex-math>
+  <mml:math display="block" xmlns:mml="http://www.w3.org/1998/Math/MathML"><mml:mrow><mml:msub><mml:mi>y</mml:mi><mml:mi>i</mml:mi></mml:msub><mml:mo>=</mml:mo><mml:mi>a</mml:mi><mml:msubsup><mml:mi>D</mml:mi><mml:mi>i</mml:mi><mml:mi>b</mml:mi></mml:msubsup><mml:msubsup><mml:mi>H</mml:mi><mml:mi>i</mml:mi><mml:mi>c</mml:mi></mml:msubsup><mml:mo>exp</mml:mo><mml:mrow><mml:mo stretchy="true" form="prefix">[</mml:mo><mml:mi>−</mml:mi><mml:msub><mml:mi>b</mml:mi><mml:mn>1</mml:mn></mml:msub><mml:msub><mml:mi>D</mml:mi><mml:mi>i</mml:mi></mml:msub><mml:mo stretchy="true" form="postfix">]</mml:mo></mml:mrow></mml:mrow></mml:math></alternatives></disp-formula>
+  {#eq-wiley}</p>
+  <p>The
+  (<xref alt="eq-schumacherHall?" rid="ref-eq-schumacherHall-nb-1" ref-type="bibr"><bold>eq-schumacherHall?</bold></xref>)
+  is the default model,
+  <inline-formula><tex-math><![CDATA[\F = \N = 2]]></tex-math></inline-formula>.</p>
+</sec>
+</body>
+
+
+
+<back>
+<ref-list>
+  <title></title>
+  <ref id="ref-Westfall2023-nb-1">
+    <element-citation publication-type="article-journal">
+      <person-group person-group-type="author">
+        <name><surname>Westfall</surname><given-names>James A.</given-names></name>
+        <name><surname>Coulston</surname><given-names>John W.</given-names></name>
+        <name><surname>Gray</surname><given-names>Andrew N.</given-names></name>
+        <name><surname>Shaw</surname><given-names>John D.</given-names></name>
+        <name><surname>Radtke</surname><given-names>Philip J.</given-names></name>
+        <name><surname>Walker</surname><given-names>David M.</given-names></name>
+        <name><surname>Weiskittel</surname><given-names>Aaron R.</given-names></name>
+        <name><surname>MacFarlane</surname><given-names>David W.</given-names></name>
+        <name><surname>Affleck</surname><given-names>David L. R.</given-names></name>
+        <name><surname>Zhao</surname><given-names>Dehai</given-names></name>
+        <name><surname>Temesgen</surname><given-names>Hailemariam</given-names></name>
+        <name><surname>Poudel</surname><given-names>Krishna P.</given-names></name>
+        <name><surname>Frank</surname><given-names>Jereme M.</given-names></name>
+        <name><surname>Prisley</surname><given-names>Stephen P.</given-names></name>
+        <name><surname>Wang</surname><given-names>Yingfang</given-names></name>
+        <name><surname>Meador</surname><given-names>Andrew J. Sánchez</given-names></name>
+        <name><surname>Auty</surname><given-names>David</given-names></name>
+        <name><surname>Domke</surname><given-names>Grant M.</given-names></name>
+      </person-group>
+      <article-title>A national-scale tree volume, biomass, and carbon modeling system for the united states</article-title>
+      <source>Gen. Tech. Rep. WO-104. Washington, DC: U.S. Department of Agriculture, Forest Service.</source>
+      <year iso-8601-date="2023">2023</year>
+      <volume>104</volume>
+      <pub-id pub-id-type="doi">10.2737/wo-gtr-104</pub-id>
     </element-citation>
   </ref>
 </ref-list>
 </back>
 
 
+</sub-article>
+<sub-article article-type="notebook" id="nb-7-nb-2">
+<front-stub>
+<title-group>
+<article-title>Testing the model of Westfall et al.
+(<xref alt="2023" rid="ref-Westfall2023-nb-2" ref-type="bibr">2023</xref>)</article-title>
+</title-group>
+<contrib-group>
+<contrib contrib-type="author" corresp="yes">
+<contrib-id contrib-id-type="orcid">0000-0003-3516-4155</contrib-id>
+<name>
+<surname>Squin</surname>
+<given-names>Amaël Le</given-names>
+</name>
+<string-name>Amaël Le Squin</string-name>
+
+<role vocab="https://credit.niso.org" vocab-term="writing – original
+draft" vocab-term-identifier="https://credit.niso.org/contributor-roles/writing-original-draft/">writing</role>
+<xref ref-type="aff" rid="aff-1-nb-2">a</xref>
+<xref ref-type="corresp" rid="cor-1-nb-2">&#x002A;</xref>
+</contrib>
+</contrib-group>
+<aff id="aff-1-nb-2">
+<institution-wrap>
+<institution>Institut national de l’information géographique et
+forestière</institution>
+</institution-wrap>
+
+
+
+
+
+
+
+</aff>
+<author-notes>
+<corresp id="cor-1-nb-2"></corresp>
+</author-notes>
+</front-stub>
+
+<body>
+<sec id="introduction-nb-2">
+  <title>Introduction</title>
+  <p>The European Union developed a
+  <ext-link ext-link-type="uri" xlink:href="https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:52021DC0572">New
+  EU Forest Strategy for 2030</ext-link> as part of the plan to adapt to
+  and fight against climate change and make Europe a climate neutral
+  continent by 2050. This strategy relies on improved monitoring of
+  European forests to better understand their condition and respond
+  accordingly. Specifically, it calls for assessing carbon sequestration
+  in forests to evaluate whether or not Europe reached carbon
+  neutrality. One bottleneck is the harmonisation of the forest
+  monitoring methods between European member states, if not within them.
+  The
+  <ext-link ext-link-type="uri" xlink:href="https://pathfinder-heu.eu/#top">PathFinder
+  project</ext-link> supports member states in implementing a European
+  Forest Monitoring System in order to standardise or harmonise forest
+  data collection and reporting across the EU. This prompted the
+  Institut National de l’information Géographique et forestière (IGN),
+  which is in charge of the French National Forest Inventory (NFI) data,
+  to update its methods for assessing forest carbon storage.</p>
+  <p>In most countries, carbon content is estimated via two quantities:
+  (<italic>i</italic>) the volume in , and (<italic>ii</italic>) the
+  wood density in . However, often numerous models and methods are
+  currently used across countries, contingent upon the tree species and
+  geographic location within each country
+  (<xref alt="Westfall et al. 2023" rid="ref-Westfall2023-nb-2" ref-type="bibr">Westfall
+  et al. 2023</xref>;
+  <xref alt="Longuetaud et al. 2013" rid="ref-Longuetaud2013-nb-2" ref-type="bibr">Longuetaud
+  et al. 2013</xref>;
+  <xref alt="Gregoire and Schabenberger 1996" rid="ref-Gregoire1996-nb-2" ref-type="bibr">Gregoire
+  and Schabenberger 1996</xref>), but also the definition of tree parts
+  (<xref alt="Gschwantner et al. 2009" rid="ref-Gschwantner2009-nb-2" ref-type="bibr">Gschwantner
+  et al. 2009</xref>).</p>
+</sec>
+</body>
+
+
+
+<back>
+<ref-list>
+  <title></title>
+  <ref id="ref-Westfall2023-nb-2">
+    <element-citation publication-type="article-journal">
+      <person-group person-group-type="author">
+        <name><surname>Westfall</surname><given-names>James A.</given-names></name>
+        <name><surname>Coulston</surname><given-names>John W.</given-names></name>
+        <name><surname>Gray</surname><given-names>Andrew N.</given-names></name>
+        <name><surname>Shaw</surname><given-names>John D.</given-names></name>
+        <name><surname>Radtke</surname><given-names>Philip J.</given-names></name>
+        <name><surname>Walker</surname><given-names>David M.</given-names></name>
+        <name><surname>Weiskittel</surname><given-names>Aaron R.</given-names></name>
+        <name><surname>MacFarlane</surname><given-names>David W.</given-names></name>
+        <name><surname>Affleck</surname><given-names>David L. R.</given-names></name>
+        <name><surname>Zhao</surname><given-names>Dehai</given-names></name>
+        <name><surname>Temesgen</surname><given-names>Hailemariam</given-names></name>
+        <name><surname>Poudel</surname><given-names>Krishna P.</given-names></name>
+        <name><surname>Frank</surname><given-names>Jereme M.</given-names></name>
+        <name><surname>Prisley</surname><given-names>Stephen P.</given-names></name>
+        <name><surname>Wang</surname><given-names>Yingfang</given-names></name>
+        <name><surname>Meador</surname><given-names>Andrew J. Sánchez</given-names></name>
+        <name><surname>Auty</surname><given-names>David</given-names></name>
+        <name><surname>Domke</surname><given-names>Grant M.</given-names></name>
+      </person-group>
+      <article-title>A national-scale tree volume, biomass, and carbon modeling system for the united states</article-title>
+      <source>Gen. Tech. Rep. WO-104. Washington, DC: U.S. Department of Agriculture, Forest Service.</source>
+      <year iso-8601-date="2023">2023</year>
+      <volume>104</volume>
+      <pub-id pub-id-type="doi">10.2737/wo-gtr-104</pub-id>
+    </element-citation>
+  </ref>
+  <ref id="ref-Longuetaud2013-nb-2">
+    <element-citation publication-type="article-journal">
+      <person-group person-group-type="author">
+        <name><surname>Longuetaud</surname><given-names>Fleur</given-names></name>
+        <name><surname>Santenoise</surname><given-names>Philippe</given-names></name>
+        <name><surname>Mothe</surname><given-names>Frédéric</given-names></name>
+        <name><surname>Senga Kiessé</surname><given-names>Tristan</given-names></name>
+        <name><surname>Rivoire</surname><given-names>Michaël</given-names></name>
+        <name><surname>Saint-André</surname><given-names>Laurent</given-names></name>
+        <name><surname>Ognouabi</surname><given-names>Nina</given-names></name>
+        <name><surname>Deleuze</surname><given-names>Christine</given-names></name>
+      </person-group>
+      <article-title>Modeling volume expansion factors for temperate tree species in france</article-title>
+      <source>Forest Ecology and Management</source>
+      <year iso-8601-date="2013">2013</year>
+      <volume>292</volume>
+      <issn>0378-1127</issn>
+      <pub-id pub-id-type="doi">10.1016/j.foreco.2012.12.023</pub-id>
+      <fpage>111</fpage>
+      <lpage>121</lpage>
+    </element-citation>
+  </ref>
+  <ref id="ref-Gschwantner2009-nb-2">
+    <element-citation publication-type="article-journal">
+      <person-group person-group-type="author">
+        <name><surname>Gschwantner</surname><given-names>Thomas</given-names></name>
+        <name><surname>Schadauer</surname><given-names>Klemens</given-names></name>
+        <name><surname>Vidal</surname><given-names>Claude</given-names></name>
+        <name><surname>Lanz</surname><given-names>Adrian</given-names></name>
+        <name><surname>Tomppo</surname><given-names>Erkki</given-names></name>
+        <name><surname>Cosmo</surname><given-names>Lucio di</given-names></name>
+        <name><surname>Robert</surname><given-names>Nicolas</given-names></name>
+        <name><surname>Duursma</surname><given-names>Daisy Englert</given-names></name>
+        <name><surname>Lawrence</surname><given-names>Mark</given-names></name>
+      </person-group>
+      <article-title>Common tree definitions for national forest inventories in europe</article-title>
+      <source>Silva Fennica</source>
+      <year iso-8601-date="2009">2009</year>
+      <volume>43</volume>
+      <issue>2</issue>
+      <pub-id pub-id-type="doi">10.14214/sf.463</pub-id>
+    </element-citation>
+  </ref>
+  <ref id="ref-Gregoire1996-nb-2">
+    <element-citation publication-type="article-journal">
+      <person-group person-group-type="author">
+        <name><surname>Gregoire</surname><given-names>Timothy G.</given-names></name>
+        <name><surname>Schabenberger</surname><given-names>Oliver</given-names></name>
+      </person-group>
+      <article-title>A non-linear mixed-effects model to predict cumulative bole volume of standing trees</article-title>
+      <source>Journal of Applied Statistics</source>
+      <year iso-8601-date="1996">1996</year>
+      <volume>23</volume>
+      <issue>2–3</issue>
+      <issn>0266-4763</issn>
+      <pub-id pub-id-type="doi">10.1080/02664769624233</pub-id>
+      <fpage>257</fpage>
+      <lpage>272</lpage>
+    </element-citation>
+  </ref>
+</ref-list>
+</back>
+
+
+</sub-article>
 
 </article>

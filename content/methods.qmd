@@ -1,0 +1,29 @@
+## Methods
+The original models can be found in @Westfall2023:
+
+Model of Schumacher-Hall
+$$
+y_i = a D_i^b H_i^c
+$$ {#eq-schumacherHall}
+
+Segmented model:
+
+$$
+y_i =
+\begin{cases}
+	a D_i^b H_i^c & D_i < k \\
+	a k^{b - b_1} D_i^{b_1} H_i^c & D_i \geqslant k
+\end{cases}
+$$ {#eq-cases}
+
+Continuously variable model:
+$$
+y_i = a D_i^{a_1(1 - \exp[-b D_i])^c} H_i^c
+$$ {#eq-continuous}
+
+and the modified Wiley model:
+$$
+y_i = a D_i^b H_i^c \exp[-b_1 D_i]
+$$ {#eq-wiley}
+
+The @eq-schumacherHall is the default model, \ie $\F = \N = 2$.
