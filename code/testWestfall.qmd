@@ -38,16 +38,17 @@ format:
           \usepackage{siunitx}
 ---
 
-\newcommand{\ie}{*i.e.,*}
+\newcommand{\ie}{\textit{i.e.,} }
 \newcommand{\F}{\mathscr{F}}
 \newcommand{\N}{\mathbfscr{N}}
 
 ## Introduction
 
-The European Union developed a [New EU Forest Strategy for 2030](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:52021DC0572) as part of the plan to adapt to and fight against climate change and make Europe a climate neutral continent by 2050. This strategy relies on improved monitoring of European forests to better understand their condition and respond accordingly. Specifically, it calls for assessing carbon sequestration in forests to evaluate whether or not Europe reached carbon neutrality. One bottleneck is the harmonisation of the forest monitoring methods between European member states, if not within them. The [PathFinder project](https://pathfinder-heu.eu/#top) supports member states in implementing a European Forest Monitoring System in order to standardise or harmonise forest data collection and reporting across the EU. This prompted the Institut National de l'information Géographique et forestière (IGN), which is in charge of the French National Forest Inventory (NFI) data, to update its methods for assessing forest carbon storage.
+The European Union \ie a test developed a [New EU Forest Strategy for 2030](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:52021DC0572) as part of the plan to adapt to and fight against climate change and make Europe a climate neutral continent by 2050. This strategy relies on improved monitoring of European forests to better understand their condition and respond accordingly. Specifically, it calls for assessing carbon sequestration in forests to evaluate whether or not Europe reached carbon neutrality. One bottleneck is the harmonisation of the forest monitoring methods between European member states, if not within them. The [PathFinder project](https://pathfinder-heu.eu/#top) supports member states in implementing a European Forest Monitoring System in order to standardise or harmonise forest data collection and reporting across the EU. This prompted the Institut National de l'information Géographique et forestière (IGN), which is in charge of the French National Forest Inventory (NFI) data, to update its methods for assessing forest carbon storage.
 
-In most countries, carbon content is estimated via two quantities: (*i*) the volume in \unit{\cubic\metre}, and (*ii*) the wood density in \unit{\kilogram\per\cubic\metre}. However, often numerous models and methods are currently used across countries, contingent upon the tree species and geographic location within each country [@Westfall2023, @Longuetaud2013, @Gschwantner2009]. 
+In most countries, carbon content is estimated via two quantities: (*i*) the volume in \unit{\cubic\metre}, and (*ii*) the wood density in \unit{\kilogram\per\cubic\metre}. However, often numerous models and methods are currently used across countries, contingent upon the tree species and geographic location within each country [@Westfall2023; @Longuetaud2013; @Gregoire1996], but also the definition of tree parts [@Gschwantner2009]. 
 
+## Methods
 The original models can be found in @Westfall2023:
 
 Model of Schumacher-Hall
@@ -75,4 +76,97 @@ $$
 y_i = a D_i^b H_i^c \exp[-b_1 D_i]
 $$ {#eq-wiley}
 
-The @eq-schumacherHall is the default model 
+The @eq-schumacherHall is the default model.
+
+### Load the dataset
+The dataset has already been prepared in `testEmerge.qmd`. First, I load the necessary packages:
+```{r}
+#| output: false
+#### Clear space and load packages
+rm(list = ls())
+graphics.off()
+
+options(max.print = 500)
+
+library(data.table)
+library(MetBrewer)
+library(cmdstanr)
+	register_knitr_engine(override = TRUE)
+library(stringi)
+library(gt)
+
+setHook(packageEvent("grDevices", "onLoad"),
+function(...) grDevices::X11.options(type='cairo'))
+options(device='x11')
+```
+
+The data are available on a mounted remote folder (see `testEmerge.qmd` for more details on how to mount the remote folder):
+```{r}
+#### Prepare data
+## Loading
+os = Sys.info()[['sysname']]
+mnt_point = "/mnt/local_share/"
+if (os == "Linux" || os == "Darwin")
+{
+	if (!dir.exists(mnt_point))
+		stop(paste0("The mounting point <", mnt_point, "> does not exist"))
+} else if (os == "Windows") {
+	stop("TO DO!!! No idea how that works on Windows!")
+} else {
+	stop(paste("Unknown Operating System:", os))
+}
+
+path_data = paste0(mnt_point, "/data/")
+if (!dir.exists(path_data))
+	stop(paste0("Folder <", path_data, "> does not exist! Are you sure you mounted the good remote folder?"))
+
+stanData = readRDS(paste0(path_data, "stanData_westfall2023.rds"))
+ind_species = readRDS(paste0(path_data, "ind_species.rds"))
+```
+
+### Prepare the priors
+For the priors, I use the average parameter values from @Westfall2023, that I had to modify since they use cubic feet and inches.
+
+```{r}
+westfall_dt = fread(paste0(path_data, "westfall2023/Table S19_component_division_spcd_scorecard.csv"))
+
+westfall_dt[VAR2 == "Total Tree Wood+Bark"]
+
+```
+
+### Stan model
+
+::: {.callout-tip}
+## Stan engine
+By default, Quarto uses the knitr's built-in stan engine `rstan`. To override it so that all stan chunks are processed with `CmdStanR`, I need to specify:
+```{r}
+#| eval: false
+#| code-fold: false
+register_knitr_engine(override = TRUE)
+```
+:::
+
+
+
+## Feet and inches to metres {.apendix}
+Of course, @Westfall2023 had to provide their parameter values in inches and feet rather than in the international system... Here is an example that shows how to convert into metres:
+```{r}
+alpha = 0.3048 # Converting 1 foot into 1 metre
+
+a = 2.3
+b = 0.5
+c = 0.02
+
+n = 50
+
+D = runif(n = n, min = 1, max = 55) # In inch
+H = runif(n = n, min = 6, max = 150) # In foot
+y = a*D^b*H^c
+
+y_m3 = alpha^3*y # In metre
+
+D_m = alpha/12*D # In metre
+H_m = alpha*H # In metre
+
+a*alpha^(3 - b - c)*12^b*D_m^b*H_m^c - y_m3  # Should be 0 (in metre)
+```
