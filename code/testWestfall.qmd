@@ -10,6 +10,7 @@ execute:
   error: true
 bibliography: references.bib
 css: style.css
+server: shiny
 knitr:
   opts_chunk: 
     dev: ragg_png
@@ -44,11 +45,12 @@ format:
 
 ## Introduction
 
-The European Union \ie a test developed a [New EU Forest Strategy for 2030](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:52021DC0572) as part of the plan to adapt to and fight against climate change and make Europe a climate neutral continent by 2050. This strategy relies on improved monitoring of European forests to better understand their condition and respond accordingly. Specifically, it calls for assessing carbon sequestration in forests to evaluate whether or not Europe reached carbon neutrality. One bottleneck is the harmonisation of the forest monitoring methods between European member states, if not within them. The [PathFinder project](https://pathfinder-heu.eu/#top) supports member states in implementing a European Forest Monitoring System in order to standardise or harmonise forest data collection and reporting across the EU. This prompted the Institut National de l'information Géographique et forestière (IGN), which is in charge of the French National Forest Inventory (NFI) data, to update its methods for assessing forest carbon storage.
+The European Union \textit{i.e.,} a test developed a [New EU Forest Strategy for 2030](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:52021DC0572) as part of the plan to adapt to and fight against climate change and make Europe a climate neutral continent by 2050. This strategy relies on improved monitoring of European forests to better understand their condition and respond accordingly. Specifically, it calls for assessing carbon sequestration in forests to evaluate whether or not Europe reached carbon neutrality. One bottleneck is the harmonisation of the forest monitoring methods between European member states, if not within them. The [PathFinder project](https://pathfinder-heu.eu/#top) supports member states in implementing a European Forest Monitoring System in order to standardise or harmonise forest data collection and reporting across the EU. This prompted the Institut National de l'information Géographique et forestière (IGN), which is in charge of the French National Forest Inventory (NFI) data, to update its methods for assessing forest carbon storage.
 
-In most countries, carbon content is estimated via two quantities: (*i*) the volume in \unit{\cubic\metre}, and (*ii*) the wood density in \unit{\kilogram\per\cubic\metre}. However, often numerous models and methods are currently used across countries, contingent upon the tree species and geographic location within each country [@Westfall2023; @Longuetaud2013; @Gregoire1996], but also the definition of tree parts [@Gschwantner2009]. 
+In most countries, carbon content is estimated via two quantities: (*i*) the volume in \unit{\cubic\metre}, and (*ii*) the wood density in \unit{\kilogram\per\cubic\metre}. However, often numerous models and methods are currently used across countries, contingent upon the tree species and geographic location within each country [@Westfall2023; @Longuetaud2013; @Gregoire1996], but also the definition of tree parts [@Gschwantner2009].
 
 ## Methods
+
 The original models can be found in @Westfall2023:
 
 Model of Schumacher-Hall
@@ -61,8 +63,8 @@ Segmented model:
 $$
 y_i =
 \begin{cases}
-	a D_i^b H_i^c & D_i < k \\
-	a k^{b - b_1} D_i^{b_1} H_i^c & D_i \geqslant k
+    a D_i^b H_i^c & D_i < k \\
+    a k^{b - b_1} D_i^{b_1} H_i^c & D_i \geqslant k
 \end{cases}
 $$ {#eq-cases}
 
@@ -79,7 +81,9 @@ $$ {#eq-wiley}
 The @eq-schumacherHall is the default model.
 
 ### Load the dataset
+
 The dataset has already been prepared in `testEmerge.qmd`. First, I load the necessary packages:
+
 ```{r}
 #| output: false
 #### Clear space and load packages
@@ -90,6 +94,7 @@ options(max.print = 500)
 
 library(data.table)
 library(MetBrewer)
+library(bayesplot)
 library(cmdstanr)
 	register_knitr_engine(override = TRUE)
 library(stringi)
@@ -101,6 +106,7 @@ options(device='x11')
 ```
 
 The data are available on a mounted remote folder (see `testEmerge.qmd` for more details on how to mount the remote folder):
+
 ```{r}
 #### Prepare data
 ## Loading
@@ -111,7 +117,7 @@ if (os == "Linux" || os == "Darwin")
 	if (!dir.exists(mnt_point))
 		stop(paste0("The mounting point <", mnt_point, "> does not exist"))
 } else if (os == "Windows") {
-	stop("TO DO!!! No idea how that works on Windows!")
+	warning("TO DO!!! No idea how that works on Windows!")
 } else {
 	stop(paste("Unknown Operating System:", os))
 }
@@ -125,20 +131,88 @@ ind_species = readRDS(paste0(path_data, "ind_species.rds"))
 ```
 
 ### Prepare the priors
-For the priors, I use the average parameter values from @Westfall2023, that I had to modify since they use cubic feet and inches.
+
+For the priors, I use normal distributions with the average and standard deviation parameter values (see @tbl-priors) estimated in @Westfall2023, which I modified since they use cubic feet and inches (see @sec-app_convert).
 
 ```{r}
-westfall_dt = fread(paste0(path_data, "westfall2023/Table S19_component_division_spcd_scorecard.csv"))
+#| output: false
+# The primary use of table S3a is for calculating merchantable [...] stem volumes, defined as:
+# Volume from the stump height (0.9 m) upward along the trunk, stopping when the diameter is 10 cm
+# This volume kind of corresponds to the "volume bois-fort tige (top diameter threshold = 7cm)"
 
-westfall_dt[VAR2 == "Total Tree Wood+Bark"]
+westfall_dt = fread(paste0(path_data, "Westfall2023/Table S3a_volob_coefs_spcd.csv"))
 
+b_prior = westfall_dt[, mean(b)]
+c_prior = westfall_dt[, mean(c)]
+a_prior = westfall_dt[, mean(a)]*0.3048^(3 - b_prior - c_prior)*12^b_prior # Converting 1 foot into 1 metre: 0.3048
+
+sd_a = sd(westfall_dt[, a])*0.3048^(3 - b_prior - c_prior)*12^b_prior
 ```
+
+| Parameter | Mean                    | Std. dev.                            |
+|----------:|:------------------------|:-------------------------------------|
+| $a$       | `{r} round(a_prior, 2)` | `{r} round(sd_a, 2)`                 |
+| $b$       | `{r} round(b_prior, 2)` | `{r} round(sd(westfall_dt[, b]), 2)` |
+| $c$       | `{r} round(c_prior, 2)` | `{r} round(sd(westfall_dt[, c]), 2)` |
+
+: Prior values for the three parameters. The priors are normal distributions, with mean and standard deviation {#tbl-priors .borderless .hover}
+
+This gives the following priors (in red):
+
+```{r}
+#| label: fig-priors
+#| fig-cap: "Priors for $a$, $b$, and $c$, based on the densities from @Westfall2023"
+#| fig-subcap: 
+#|   - Intercept "$a$"
+#|   - Power dbh "$b$"
+#|   - Power height "$c$"
+#| fig-height: 8
+#| fig-width: 8
+#| fig-align: center
+#| echo: false
+#| output: false
+plot(density(westfall_dt[, a]), axes = FALSE, xlab = "Parameter a", lwd = 2, main = "")
+curve(dnorm(x, mean = mean(westfall_dt[, a]), sd = sd(westfall_dt[, a])), add = TRUE, lwd = 2, col = "#CD212A")
+axis(1)
+legend(x = "topright", legend = c("Dens. params", "Prior"), fill = c("black", "#CD212A"), bty = "n")
+
+plot(density(westfall_dt[, b]), axes = FALSE, xlab = "Parameter b", lwd = 2, main = "")
+curve(dnorm(x, mean = mean(westfall_dt[, b]), sd = sd(westfall_dt[, b])), add = TRUE, lwd = 2, col = "#CD212A")
+axis(1)
+legend(x = "topright", legend = c("Dens. params", "Prior"), fill = c("black", "#CD212A"), bty = "n")
+
+plot(density(westfall_dt[, c]), axes = FALSE, xlab = "Parameter c", lwd = 2, main = "")
+curve(dnorm(x, mean = mean(westfall_dt[, c]), sd = sd(westfall_dt[, c])), add = TRUE, lwd = 2, col = "#CD212A")
+axis(1)
+legend(x = "topright", legend = c("Dens. params", "Prior"), fill = c("black", "#CD212A"), bty = "n")
+```
+
+Doing the prior predictive checks, we get:
+```{r}
+#| label: fig-priorPredChecks
+#| fig-cap: "Prior predictive check"
+set.seed(1969 - 08 - 18) # Woodstock seed
+sim_a = rnorm(n = stanData[["N"]], mean = a_prior, sd = sd_a)
+sim_b = rnorm(n = stanData[["N"]], mean = b_prior, sd = sd(westfall_dt[, b]))
+sim_c = rnorm(n = stanData[["N"]], mean = c_prior, sd = sd(westfall_dt[, c]))
+
+sim_vol_prior = sim_a*(stanData[["circumference_m"]]^sim_b)*(stanData[["height"]]^sim_c)
+sim_vol_prior = sim_vol_prior[sim_vol_prior < quantile(sim_vol_prior, 0.975)]
+
+plot(density(sim_vol_prior), axes = FALSE, lwd = 2, main = "",
+	xlab = expression("Prior predicted volume in m"^3*" (up to 97.5 percentile)"))
+axis(1)
+axis(2, las = 1)
+```
+which gives plausible results (although few negatives when $a < 0$), with a minimum of `{r} round(min(sim_vol_prior), 3)` \unit{\cubic\metre}, and a 97.5 quantile `{r} round(quantile(sim_vol_prior, 0.975), 3)` \unit{\cubic\metre}.
 
 ### Stan model
 
-::: {.callout-tip}
+::: callout-tip
 ## Stan engine
+
 By default, Quarto uses the knitr's built-in stan engine `rstan`. To override it so that all stan chunks are processed with `CmdStanR`, I need to specify:
+
 ```{r}
 #| eval: false
 #| code-fold: false
@@ -146,10 +220,122 @@ register_knitr_engine(override = TRUE)
 ```
 :::
 
+```{stan output.var = "stan_westfall", cache = TRUE}
+data {
+	// Dimensions and indices
+	int N; // Number of individuals
+	int S; // Number of species
+	int<lower = 0, upper = S> n_sp_broad; // number of broadleaf species
+	int<lower = S - n_sp_broad, upper = S - n_sp_broad> n_sp_conif; // number of conifer species
+	array[n_sp_broad] int ind_start_broad; // Broadleaf species index start
+	array[n_sp_conif] int ind_start_conif; // Conifer species index start
+	array[n_sp_broad] int ind_end_broad; // Broadleaf species index end
+	array[n_sp_conif] int ind_end_conif; // Conifer species index end
 
+	// Predictors
+	vector<lower = 0> [N] height;
+	vector<lower = 0> [N] circumference_m;
 
-## Feet and inches to metres {.apendix}
+	// Response variable
+	vector [N] volume_m3;
+}
+
+parameters {
+	// Fixed effects (population parameters) for broadleaf and conifer
+	vector[2] a;
+	vector[2] b;
+	vector[2] c;
+	
+	// Random effects (group parameters)
+	vector[S] beta0;
+	vector[S] beta1;
+	vector[S] beta2;
+
+	// Variances
+	real<lower = 0> sigma; // sd residuals
+	real<lower = 0> sigma_beta0; // sd random effect beta0
+	real<lower = 0> sigma_beta1; // sd random effect beta1
+	real<lower = 0> sigma_beta2; // sd random effect beta2
+}
+
+model {
+	// Priors
+	// --- Population parameters
+	target += normal_lpdf(a | 0.36, 0.16);
+	target += normal_lpdf(b | 1.87, 0.10);
+	target += normal_lpdf(c | 0.98, 0.12);
+
+	// --- Residual variance and population variance
+	target += inv_gamma_lpdf(sigma | 2, 1); // Uses shape and scale (which is the rate from gamma perspective)
+	target += inv_gamma_lpdf(sigma_beta0 | 3, 0.5); // Uses shape and scale (which is the rate from gamma perspective)
+	target += inv_gamma_lpdf(sigma_beta1 | 3, 0.5); // Uses shape and scale (which is the rate from gamma perspective)
+	target += inv_gamma_lpdf(sigma_beta2 | 3, 0.5); // Uses shape and scale (which is the rate from gamma perspective)
+
+	// Hierarchy
+	target += normal_lpdf(beta0[1:n_sp_broad] | a[1], sigma_beta0);
+	target += normal_lpdf(beta1[1:n_sp_broad] | a[1], sigma_beta0);
+	target += normal_lpdf(beta2[1:n_sp_broad] | c[1], sigma_beta2);
+	target += normal_lpdf(beta0[(n_sp_broad + 1):S] | a[2], sigma_beta0);
+	target += normal_lpdf(beta1[(n_sp_broad + 1):S] | a[2], sigma_beta0);
+	target += normal_lpdf(beta2[(n_sp_broad + 1):S] | c[2], sigma_beta2);
+
+	// Likelihood broadleaves, i = species
+	for (i in 1:n_sp_broad)
+	{
+		target += normal_lpdf(volume_m3[ind_start_broad[i]:ind_end_broad[i]] | beta0[i] *
+			circumference_m[ind_start_broad[i]:ind_end_broad[i]]^beta1[i] .*
+			height[ind_start_broad[i]:ind_end_broad[i]]^beta2[i],
+			sigma);
+	}
+
+	// Likelihood conifers, i = species
+	for (i in 1:n_sp_conif)
+	{
+		target += normal_lpdf(volume_m3[ind_start_conif[i]:ind_end_conif[i]] | beta0[n_sp_broad + i] +
+			circumference_m[ind_start_conif[i]:ind_end_conif[i]]^beta1[n_sp_broad + i] .*
+			height[ind_start_conif[i]:ind_end_conif[i]]^beta2[n_sp_broad + i],
+			sigma);
+	}
+}
+```
+
+### Run the model
+```{r}
+n_chains = 4
+iter_warmup = 750
+iter_sampling = 1250
+
+stan_westfall = cmdstan_model(stan_file = "toto.stan")
+
+## Fit
+if (!file.exists("fit_westfall.rds"))
+{
+	fit = stan_westfall$sample(data = stanData, chains = n_chains, parallel_chains = ifelse(n_chains < 4, n_chains, 4),
+			seed = NULL, refresh = 200, max_treedepth = 12, save_warmup = TRUE,
+			iter_sampling = iter_sampling, iter_warmup = iter_warmup, adapt_delta = 0.95)
+	fit$save_output_files(dir = "./", basename = paste0("fit_westfall"), random = FALSE)
+	saveRDS(fit, "./fit_westfall.rds")
+} else {
+	fit = readRDS("./fit_westfall.rds")
+}
+
+mcmc_rhat(rhat(fit))
+mcmc_neff(neff_ratio(fit))
+mcmc_nuts_divergence(nuts_params(fit), lp = log_posterior(fit))
+
+mcmc_scatter(x = fit$draws(c("b[1]", "c[1]")), alpha = 1, np = nuts_params(fit))
+mcmc_hex(x = fit$draws(c("a[1]", "b[1]")))
+```
+
+```{r}
+
+mcmc_pairs(x = fit$draws(c("a", "b", "c", "sigma")), np = nuts_params(fit))
+```
+
+## Feet and inches to metres {#sec-app_convert .apendix}
+
 Of course, @Westfall2023 had to provide their parameter values in inches and feet rather than in the international system... Here is an example that shows how to convert into metres:
+
 ```{r}
 alpha = 0.3048 # Converting 1 foot into 1 metre
 
