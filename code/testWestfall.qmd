@@ -10,7 +10,6 @@ execute:
   error: true
 bibliography: references.bib
 css: style.css
-server: shiny
 knitr:
   opts_chunk: 
     dev: ragg_png
@@ -37,6 +36,7 @@ format:
       - text: |
           \usepackage{unicode-math}
           \usepackage{siunitx}
+server: shiny
 ---
 
 \newcommand{\ie}{\textit{i.e.,} }
@@ -98,6 +98,8 @@ library(bayesplot)
 library(cmdstanr)
 	register_knitr_engine(override = TRUE)
 library(stringi)
+library(shiny)
+library(bslib)
 library(gt)
 
 setHook(packageEvent("grDevices", "onLoad"),
@@ -192,19 +194,77 @@ Doing the prior predictive checks, we get:
 #| label: fig-priorPredChecks
 #| fig-cap: "Prior predictive check"
 set.seed(1969 - 08 - 18) # Woodstock seed
-sim_a = rnorm(n = stanData[["N"]], mean = a_prior, sd = sd_a)
-sim_b = rnorm(n = stanData[["N"]], mean = b_prior, sd = sd(westfall_dt[, b]))
-sim_c = rnorm(n = stanData[["N"]], mean = c_prior, sd = sd(westfall_dt[, c]))
 
-sim_vol_prior = sim_a*(stanData[["circumference_m"]]^sim_b)*(stanData[["height"]]^sim_c)
-sim_vol_prior = sim_vol_prior[sim_vol_prior < quantile(sim_vol_prior, 0.975)]
+n_sim = 200
+gen_data = vector(mode = "list", length = 20)
+S = ind_species[, .N]
+volume = numeric(length = length(stanData[["volume_m3"]]))
+n_sp_broad = stanData[["n_sp_broad"]]
+n_sp_conif = stanData[["n_sp_conif"]]
 
-plot(density(sim_vol_prior), axes = FALSE, lwd = 2, main = "",
-	xlab = expression("Prior predicted volume in m"^3*" (up to 97.5 percentile)"))
+for (sim in seq_len(n_sim))
+{
+	if (sim %% 100 == 0)
+		print(paste0(round(sim/n_sim*100, 2), "% done"))
+	# Simulate the variances
+	sigma = 1/rgamma(n = 1, shape = 2, rate = 1);
+	sigma_beta0 = 1/rgamma(n = 1, shape = 3, rate = 0.5);
+	sigma_beta1 = 1/rgamma(n = 1, shape = 3, rate = 0.5);
+	sigma_beta2 = 1/rgamma(n = 1, shape = 3, rate = 0.5);
+
+	# Simulate the common group 'intercepts' and dbh/height powers
+	sim_a = rnorm(n = 2, mean = a_prior, sd = sd_a)
+	sim_b = rnorm(n = 2, mean = b_prior, sd = sd(westfall_dt[, b]))
+	sim_c = rnorm(n = 2, mean = c_prior, sd = sd(westfall_dt[, c]))
+
+	# Simulate group-specific intercepts and slenderness slopes
+	beta0 = numeric(length = S)
+	beta1 = numeric(length = S)
+	beta2 = numeric(length = S)
+	beta0[1:n_sp_broad] = rnorm(n = n_sp_broad, mean = sim_a[1], sd = sigma_beta0);
+	beta0[(n_sp_broad + 1):S] = rnorm(n = n_sp_conif, mean = sim_a[2], sd = sigma_beta0);
+	beta1[1:n_sp_broad] = rnorm(n = n_sp_broad, mean = sim_b[1], sd = sigma_beta1);
+	beta1[(n_sp_broad + 1):S] = rnorm(n = n_sp_conif, mean = sim_b[2], sd = sigma_beta1);
+	beta2[1:n_sp_broad] = rnorm(n = n_sp_broad, mean = sim_c[1], sd = sigma_beta2);
+	beta2[(n_sp_broad + 1):S] = rnorm(n = n_sp_conif, mean = sim_c[2], sd = sigma_beta2);
+
+	# Simulate individual volume data
+	# --- Broadleaves
+	for (s in 1:n_sp_broad)
+	{
+		ind_start = ind_species[s, start]
+		ind_end = ind_species[s, end]
+		n_indiv = ind_species[s, n_indiv]
+		
+		volume[ind_start:ind_end] = rnorm(n = n_indiv,
+			mean = beta0[1]*(stanData[["circumference_m"]]^beta1[1])*(stanData[["height"]]^beta2[1]), sd = sigma);
+	}
+
+	# --- Conifers
+	for (s in (n_sp_broad + 1):S)
+	{
+		ind_start = ind_species[s, start]
+		ind_end = ind_species[s, end]
+		n_indiv = ind_species[s, n_indiv]
+		
+		volume[ind_start:ind_end] = rnorm(n = n_indiv,
+			mean = beta0[2]*(stanData[["circumference_m"]]^beta1[2])*(stanData[["height"]]^beta2[2]), sd = sigma);
+	}
+
+	gen_data[[sim]] = data.table(volume = volume)
+}
+
+gen_data = rbindlist(l = gen_data, idcol = "simulation")
+bounds = quantile(x = gen_data[, volume], probs = c(0.025, 0.975))
+gen_data = gen_data[(bounds["2.5%"] < volume) & (volume < bounds["97.5%"]), volume]
+dens_gen = density(gen_data)
+
+plot(dens_gen, axes = FALSE, lwd = 2, main = "",
+	xlab = expression("Prior predicted volume in m"^3*" (from 2.5 up to 97.5 percentile)"))
 axis(1)
 axis(2, las = 1)
 ```
-which gives plausible results (although few negatives when $a < 0$), with a minimum of `{r} round(min(sim_vol_prior), 3)` \unit{\cubic\metre}, and a 97.5 quantile `{r} round(quantile(sim_vol_prior, 0.975), 3)` \unit{\cubic\metre}.
+which gives plausible results (although few negatives when $a < 0$), with a 2.5 percentile of `{r} round(min(gen_data), 3)` \unit{\cubic\metre}, and a 97.5 quantile of `{r} round(max(gen_data, 0.975), 3)` \unit{\cubic\metre}.
 
 ### Stan model
 
@@ -273,10 +333,10 @@ model {
 
 	// Hierarchy
 	target += normal_lpdf(beta0[1:n_sp_broad] | a[1], sigma_beta0);
-	target += normal_lpdf(beta1[1:n_sp_broad] | a[1], sigma_beta0);
+	target += normal_lpdf(beta1[1:n_sp_broad] | b[1], sigma_beta0);
 	target += normal_lpdf(beta2[1:n_sp_broad] | c[1], sigma_beta2);
 	target += normal_lpdf(beta0[(n_sp_broad + 1):S] | a[2], sigma_beta0);
-	target += normal_lpdf(beta1[(n_sp_broad + 1):S] | a[2], sigma_beta0);
+	target += normal_lpdf(beta1[(n_sp_broad + 1):S] | b[2], sigma_beta0);
 	target += normal_lpdf(beta2[(n_sp_broad + 1):S] | c[2], sigma_beta2);
 
 	// Likelihood broadleaves, i = species
@@ -297,9 +357,11 @@ model {
 			sigma);
 	}
 }
+
 ```
 
 ### Run the model
+In total, there are `{r} 3*(S + 2 + 1) + 1 + 1` parameters to estimate.
 ```{r}
 n_chains = 4
 iter_warmup = 750
@@ -322,48 +384,48 @@ if (!file.exists("fit_westfall.rds"))
 mcmc_rhat(rhat(fit))
 mcmc_neff(neff_ratio(fit))
 mcmc_nuts_divergence(nuts_params(fit), lp = log_posterior(fit))
-
-mcmc_scatter(x = fit$draws(c("b[1]", "c[1]")), alpha = 1, np = nuts_params(fit))
-mcmc_hex(x = fit$draws(c("a[1]", "b[1]")))
 ```
 
 ```{r}
-#| server: shiny
+#| context: server
 
-library(shiny)
-
-# Define UI ----
-user_interface = page_sidebar(title = "MCMC pairs",
-	sidebar = "Menu params",
+# Define UI
+user_interface = page_sidebar(
+	title = "MCMC pairs",
+	sidebar = sidebar(
+		helpText("Select two parameters to plot their posteriors and visually check there is no problem"),
+		selectInput(
+			inputId = "params1",
+			label = "Select 1s parameter",
+			choices = list("a", "b", "c"),
+			selected = "a"),
+		selectInput(
+			inputId = "params2",
+			label = "Select 2nd parameter",
+			choices = list("a", "b", "c"),
+			selected = "b")
+	),
 	card(
-		card_header("Parameters"),
-		selectInput(
-			"select",
-			"Select parameter",
-			choices = list("Choice 1" = 1, "Choice 2" = 2, "Choice 3" = 3),
-			selected = 1
-		),
-		selectInput(
-			"select",
-			"Select parameter",
-			choices = list("Choice 1" = 1, "Choice 2" = 2, "Choice 3" = 3),
-			selected = 1
-		)
+		card_header(class = "bg-dark", "Result plot"),
+		card_footer("Graphics made with Shiny and Bayesplot packages"),
+		plotOutput("mcmc")
 	)
 )
 
-# Define server logic ----
+# Define server logic
 server = function(input, output)
 {
-
+	output$mcmc = renderPlot({
+		mcmc_pairs(x = fit$draws(c(input$params1,input$params2)), np = nuts_params(fit))
+	})
+	# output$mcmc = renderPlot({
+	# 	mcmc_scatter(x = fit$draws(c(paste0(input$params1, "[1]"), paste0(input$params2, "[1]"))),
+	# 		alpha = 1, np = nuts_params(fit))
+	# })
 }
 
-# Run the app ----
+# Run the app
 shinyApp(ui = user_interface, server = server)
-
-
-
-mcmc_pairs(x = fit$draws(c("a", "b", "c", "sigma")), np = nuts_params(fit))
 ```
 
 ## Feet and inches to metres {#sec-app_convert .apendix}
