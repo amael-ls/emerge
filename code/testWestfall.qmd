@@ -86,6 +86,7 @@ The dataset has already been prepared in `testEmerge.qmd`. First, I load the nec
 
 ```{r}
 #| output: false
+#| context: setup
 #### Clear space and load packages
 rm(list = ls())
 graphics.off()
@@ -193,6 +194,7 @@ Doing the prior predictive checks, we get:
 ```{r}
 #| label: fig-priorPredChecks
 #| fig-cap: "Prior predictive check"
+#| output: false
 set.seed(1969 - 08 - 18) # Woodstock seed
 
 n_sim = 200
@@ -363,6 +365,7 @@ model {
 ### Run the model
 In total, there are `{r} 3*(S + 2 + 1) + 1 + 1` parameters to estimate.
 ```{r}
+#| context: setup
 n_chains = 4
 iter_warmup = 750
 iter_sampling = 1250
@@ -387,45 +390,30 @@ mcmc_nuts_divergence(nuts_params(fit), lp = log_posterior(fit))
 ```
 
 ```{r}
-#| context: server
-
 # Define UI
-user_interface = page_sidebar(
-	title = "MCMC pairs",
-	sidebar = sidebar(
-		helpText("Select two parameters to plot their posteriors and visually check there is no problem"),
-		selectInput(
-			inputId = "params1",
-			label = "Select 1s parameter",
-			choices = list("a", "b", "c"),
-			selected = "a"),
-		selectInput(
-			inputId = "params2",
-			label = "Select 2nd parameter",
-			choices = list("a", "b", "c"),
-			selected = "b")
-	),
-	card(
-		card_header(class = "bg-dark", "Result plot"),
-		card_footer("Graphics made with Shiny and Bayesplot packages"),
-		plotOutput("mcmc")
-	)
-)
+selectInput(
+	inputId = "params1",
+	label = "Select 1s parameter",
+	choices = list("a", "b", "c"),
+	selected = "a",
+	width = "600px")
+selectInput(
+	inputId = "params2",
+	label = "Select 2nd parameter",
+	choices = list("a", "b", "c"),
+	selected = "b",
+	width = "600px")
+```
 
-# Define server logic
-server = function(input, output)
-{
-	output$mcmc = renderPlot({
-		mcmc_pairs(x = fit$draws(c(input$params1,input$params2)), np = nuts_params(fit))
-	})
-	# output$mcmc = renderPlot({
-	# 	mcmc_scatter(x = fit$draws(c(paste0(input$params1, "[1]"), paste0(input$params2, "[1]"))),
-	# 		alpha = 1, np = nuts_params(fit))
-	# })
-}
+```{r}
+plotOutput("mcmc")
+```
 
-# Run the app
-shinyApp(ui = user_interface, server = server)
+```{r}
+#| context: server
+output$mcmc = renderPlot({
+	mcmc_pairs(x = fit$draws(c(input$params1,input$params2)), np = nuts_params(fit))
+})
 ```
 
 ## Feet and inches to metres {#sec-app_convert .apendix}
