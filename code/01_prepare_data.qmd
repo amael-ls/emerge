@@ -1,0 +1,338 @@
+---
+title: "Preparing the data for estimating volumes"
+date: today
+author: Amaël Le Squin
+date-format: iso
+filters:
+  - fontawesome
+execute:
+  error: true
+bibliography: references.bib
+css: style.css
+knitr:
+  opts_chunk: 
+    dev: ragg_png
+    crop: null
+    out.width: "70%"
+    fig.width: 6
+    fig.asp: 0.618
+    fig.align: "center"
+format:
+  html:
+    toc: true
+    include-in-header: mathjax.html
+    code-fold: true
+    df-print: paged
+    number-sections: true
+    theme:
+      light: cerulean
+      dark: darkly
+    margin: 5% 0;
+  pdf:
+    keep-tex: true
+    pdf-engine: lualatex
+    include-in-header:
+      - text: |
+          \usepackage{unicode-math}
+---
+
+\newcommand{\ie}{*i.e.,*}
+\newcommand{\F}{\mathscr{F}}
+\newcommand{\N}{\mathbfscr{N}}
+
+## Introduction
+The data were provided by Christine Deleuze by e-mail the 17 September 2024. The format is a single `.RData` file, which is stored remotely on the server 'Abies' (`smb://del1509n015/`) in the protected folder (only reading rights) `2024_faircarbon/data_orig/`. The person to contact to add data to this folder is Thierry Leclaire.
+
+For Linux, and maybe MacOS, it is necessary to mount locally the remote folder in order to access the data from R. According to Henri Cunny, it is not necessary for Windows (at least for remote folders on Abies, maybe because smb is a Windows protocol).
+
+### Mount the remote folder
+1. Switch to super user where you replace `JohnField-Admin` (really nice [Irish composer](https://www.youtube.com/watch?v=Uktj2MYSsaU)) by your admin name (typically, your IGN id followed by `-Admin`):
+```{sh}
+#| eval: false
+#| code-fold: false
+su JohnField-Admin
+```
+Your **admin** password will be asked
+
+2. Create a directory where you will mount the remote folder. By default I like to put it in `/mnt/local_share`. You need to be super user to write in `/mnt/`:
+```{sh}
+#| eval: false
+#| code-fold: false
+sudo mkdir /mnt/local_share
+```
+This step should be done only once.
+
+3. Mount the remote folder `smb://del1509n015/2024_faircarbon/`, where you replace `your_name` by your **usual** IGN id (NOT the admin one):
+```{sh}
+#| eval: false
+#| code-fold: false
+sudo mount -t cifs -o username=your_name,domain=ign,uid=your_name //del1509n015/2024_faircarbon /mnt/local_share/
+```
+Maybe two passwords will be asked, first your **admin** password to execute the `sudo`, and then your **usual** password. If you just did step 2, then the prompt will not ask again for your **admin** password again.
+
+4. Check that it worked, especially the reading and writting rigths:
+```{sh}
+#| eval: false
+#| code-fold: false
+ls -l /mnt/local_share/
+```
+The content of the remote folder should appear. You can close your admin session by using `ctrl + d` or `Cmd + d`
+
+Now that the raw data are accessible to {{< fa brands r-project >}}, it is time to prepare them!
+
+## Prepare the data
+### Loading the data
+The following packages are required to load and handle the data and print summary tables
+```{r}
+#| output: false
+#### Clear space and load packages
+rm(list = ls())
+graphics.off()
+
+options(max.print = 500)
+
+library(data.table)
+library(stringi)
+library(gt)
+```
+
+Read the data from (mounted) remote folder.
+```{r}
+#### Prepare data
+## Loading
+os = Sys.info()[['sysname']]
+mnt_point = "/mnt/local_share/"
+if (os == "Linux" || os == "Darwin")
+{
+	if (!dir.exists(mnt_point))
+		stop(paste0("The mounting point <", mnt_point, "> does not exist"))
+} else if (os == "Windows") {
+	stop("TO DO!!! No idea how that works on Windows!")
+} else {
+	stop(paste("Unknown Operating System:", os))
+}
+
+path_data = paste0(mnt_point, "/data_orig/")
+if (!dir.exists(path_data))
+	stop(paste0("Folder <", path_data, "> does not exist! Are you sure you mounted the good remote folder?"))
+
+if (list.files(path = path_data) != "EMERGE.RData")
+	stop("There should be only the file <EMERGE.RData> in the data_orig folder")
+
+load(paste0(path_data, "EMERGE.RData"))
+```
+
+There are data from different institutes and different periods of time:
+
+1. 'Protocole Oudin', dataset preserved by INRA (<span class="oudin_colour"></span> on the @fig-map)
+
+2. The French NFI (<span class="nfi_colour"></span> on the @fig-map), from the 60's to 1983
+
+3. The 'Office National des Forêts (ONF)', in 1972 (<span class="onf72_colour"></span> on the @fig-map) and 1983 (<span class="onf83_colour"></span> on the @fig-map)
+
+
+### Clean the datasets and compute new variables
+Keep only the columns of interest, change column names, transform everything to `data.table`.
+```{r}
+setDT(inra_arbres)
+setDT(codesforets)
+setDT(ifn_arbres)
+
+## Compute (total) volume in m³, circumference in m, hardiness, and slenderness
+inra_arbres[, total_volume_m3 := (v_tronc_verif + v_fourche_verif + v_fourche2_verif + v_br_verif + v_menu_verif)/1e3]
+inra_arbres[, circumference_m := c130/100]
+inra_arbres[, hdn := sqrt(circumference_m)/h_tot]
+inra_arbres[, slenderness := h_tot/circumference_m]
+
+## Keep only column of interest and rename them
+inra_arbres = unique(inra_arbres[, .(nom_fichier, essence, circumference_m, h_tot, total_volume_m3, genre, id_codesforets)])
+inra_arbres = merge.data.table(inra_arbres, codesforets[, .(id, x_lambert_ii, y_lambert_ii, longitude, latitude)],
+	by.x = "id_codesforets", by.y = "id")
+inra_arbres = na.omit(inra_arbres)
+
+setnames(inra_arbres, new = c("plot_id", "unique_id", "speciesName_sci", "circumference_m", "height", "total_volume_m3",
+	"genus", "x_lambert_2", "y_lambert_2", "lon", "lat"))
+
+## Change type of cols
+inra_arbres[, unique_id := as.character(unique_id)]
+inra_arbres[, speciesName_sci := as.character(speciesName_sci)]
+inra_arbres[, genus := as.character(genus)]
+
+## Set functional type, either broadleaf or conifer
+inra_arbres[, fct_type := "broadleaf"]
+inra_arbres[genus %in% c("Abies", "Cedrus", "Larix", "Picea", "Pinus", "Pseudotsuga", "Thuya", "Tsuga"),
+	fct_type := "conifer"]
+
+## Number of individuals per species
+inra_arbres[, nb_indiv := .N, by = speciesName_sci]
+# inra_arbres = inra_arbres[nb_indiv > 20]
+```
+
+### Coordinates
+```{r}
+## Coordinates
+coords = unique(inra_arbres[, .(plot_id, x_lambert_2, y_lambert_2, lon, lat)])
+
+coords[, lon := as.character(lon)]
+coords[, lat := as.character(lat)]
+
+angle2dec = function(angle)
+{
+	x = stri_match(angle, regex = "([+-]?\\d+)°(\\d+)'(\\d+)") # To split the degree from minute and second
+	x = apply(x[, 2:4], 1L, function(y) {
+		y = as.numeric(y)
+		y[1] + y[2]/60 + y[3]/3600
+	})
+	return(x)
+}
+
+coords[, lon_dec := angle2dec(lon)]
+coords[, lat_dec := angle2dec(lat)]
+
+coords = terra::vect(x = coords[, .(plot_id, lon_dec, lat_dec)],
+	geom = c("lon_dec", "lat_dec"),
+	crs = "EPSG:4326")
+
+## Stan data
+stanData = list(
+	N = inra_arbres[, .N],
+	S = ind_species[, .N],
+	n_sp_conif = n_sp["conifer", N],
+	n_sp_broad = n_sp["broadleaf", N],
+	ind_start_broad = ind_species[fct_type == "broadleaf", start],
+	ind_start_conif = ind_species[fct_type == "conifer", start],
+	ind_end_broad = ind_species[fct_type == "broadleaf", end],
+	ind_end_conif = ind_species[fct_type == "conifer", end],
+	height = inra_arbres[, height],
+	circumference_m = inra_arbres[, circumference_cm/100],
+	total_volume_m3 = inra_arbres[, total_volume_m3],
+	v_BFT_m3 = inra_arbres[, v_BFT/1000]
+)
+
+## French NFI data
+ifn_arbres[, cpp := as.character(cpp)]
+#! RESTART HERE
+# coords_nfi = fread(paste0(path_data, "nfi_coords.csv"))
+# ifn_abres = merge.data.table(ifn_arbres, coords_nfi, by = "cpp")
+# # keep columns of interest
+# ifn_arbres[, c("id", "id_codesforets", "id_codesorganismes") := NULL]
+```
+
+### Gather all the datasets into a single one
+
+TODO!!!
+
+### Compute the indices for Stan
+Stan language uses vectors and arrays (think matrices), but does not know data.frames or data.tables. Therefore, it is necessary to provide an ordered dataset accordingly to the structure of the model. Here, we need to order by functional type and by species within function type. Then, the index table just indicates when each functional type and each species starts and ends in the data. This is not only necessary for Stan, but can also accelerate the computation by vectorising certain calculus. Of course, it is important that the data order is not changed **after** the index table is generated.
+
+```{r}
+## Indices
+# Find start and end indices for each species
+setkey(inra_arbres, fct_type, speciesName_sci, unique_id)
+ind_species = inra_arbres[, .(start = .I[1], end = .I[.N]), by = .(speciesName_sci)]
+ind_species[, n_indiv := end - start + 1, by = speciesName_sci]
+
+if (ind_species[, sum(n_indiv)] != inra_arbres[, .N])
+	stop("The number of individuals in ind_species does not correspond to the number of individuals in inra_arbres!")
+
+ind_species = merge.data.table(ind_species, unique(inra_arbres[, .(speciesName_sci, fct_type)]), by = "speciesName_sci")
+ind_species[, colour := if(fct_type == "broadleaf") "#FFAF37" else "#007BA5", by = speciesName_sci]
+setorder(ind_species, start)
+
+n_sp = ind_species[, .N, by = fct_type]
+setkey(n_sp, fct_type)
+```
+
+### Save the data
+The data are now ready and can be saved
+```{r}
+saveRDS(stanData, paste0(mnt_point, "data/stanData_westfall2023.rds"))
+saveRDS(ind_species, paste0(mnt_point, "data/ind_species.rds"))
+saveRDS(ifn_arbres, paste0(mnt_point, "data/trees_nfi.rds"))
+terra::writeVector(x = coords, filename = paste0(mnt_point, "data/coords"), filetype = "ESRI Shapefile")
+```
+
+## Presentation of the data
+The data are now ready! Here is the composition:
+```{r}
+#| echo: false
+#| label: fig-data
+#| fig-cap: "Number of individuals per species, with conifers in blue and broadleaves in orange. Watch out, it is a $\\log_{10}$ scale"
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 9
+species_nb = ind_species[, .(speciesName_sci, n_indiv, colour)]
+setorder(species_nb, n_indiv)
+
+par(mar = c(5, 12, 2, 2))
+# Use barplot f or horizontal bars
+barplot(
+	species_nb[, n_indiv],
+	names.arg = species_nb[, speciesName_sci],
+	horiz = TRUE, # Horizontal bars
+	xlab = "Number of individuals",
+	ylab = "",
+	main = "",
+	las = 1,
+	log = "x",
+	col = species_nb[, colour]
+)
+abline(v = 30, lwd = 2, lty = "dashed", col = "#CD212A")
+```
+The correlation between the hardiness and the slenderness is `{r} round(inra_arbres[, cor(hdn, slenderness)], 2)`, which is expected and I guess problematic...
+
+### Data for posterior checks
+After running a Bayesian model, it is important to do a 'predict' on new data to check that the model can generate sensible volume. For this, I use the volume-measured trees dataset from 2010, which I format in the following code snippet.
+
+```{r}
+## Add species to the profiles
+setDT(emerge_2010_profils)
+setDT(emerge_2010_arbres)
+
+emerge_2010_arbres = unique(emerge_2010_arbres[, .(tree, species, c130)])
+emerge_2010_profils = emerge_2010_arbres[emerge_2010_profils, on = "tree"]
+
+## Compute dbh top/bottom of each log
+emerge_2010_profils[, dbh_bottom_m := circ_bas_cm/(100*pi)]
+emerge_2010_profils[, dbh_top_m := circ_haut_cm/(100*pi)]
+
+## Reorganising
+emerge_2010_profils[, species := as.character(species)]
+setorder(emerge_2010_profils, tree, niveau_bas_m)
+emerge_2010_profils[, id := NULL]
+emerge_2010_profils[, c130 := c130/100]
+setnames(x = emerge_2010_profils, old = c("niveau_bas_m", "niveau_haut_m", "c130"), c("h_bottom", "h_top", "circumference_m"))
+emerge_2010_profils = emerge_2010_profils[, .(tree, species, dbh_bottom_m, dbh_top_m, h_bottom, h_top, circumference_m)]
+
+## Compute log and cumulated volumes
+emerge_2010_profils[, height := max(h_top), by = tree]
+emerge_2010_profils[, total_volume_m3 := pi/12*max(dbh_bottom_m)^2*height, by = tree]
+emerge_2010_profils[, vol_log := pi/12*dbh_bottom_m^2*(height - h_bottom) - pi/12*dbh_top_m^2*(height - h_top)]
+
+emerge_2010_profils[, cumulated_vol := cumsum(vol_log), by = tree]
+emerge_2010_profils[, cumulated_percent_vol := cumulated_vol/total_volume_m3, by = tree]
+
+## Keep only variables of interest
+data_check = unique(emerge_2010_profils[, .(tree, species, total_volume_m3, height, circumference_m)])
+
+## Change vernacular species names to scientific
+species_dt = data.table(species = c("Frêne", "Chêne vert", "Tilia cordata", "Chêne sessile", "Eucalyptus",
+		"Robinier", "Pin Alep", "Chêne pubescent", "Aulne", "Bouleau"),
+	speciesName_sci = c("Fraxinus excelsior", "Quercus ilex", "Tilia cordata", "Quercus petraea", "Eucalyptus spp.",
+		"Robinia pseudoacacia", "Pinus halepensis", "Quercus pubescens", "Alnus glutinosa", "Betula pendula"),
+	fct_type = c(rep("broadleaf", 6), "conifer", rep("broadleaf", 3)))
+
+data_check = merge.data.table(data_check, species_dt, by = "species")
+data_check[, species := NULL]
+data_check[speciesName_sci == "Quercus petraea", speciesName_sci := "Quercus robur_petraea"] # Because of inra_arbres
+setkey(data_check, speciesName_sci)
+
+data_check = data_check[speciesName_sci %in% species_nb[, speciesName_sci]]
+
+data_check[, hdn := sqrt(circumference_m)/height]
+data_check[, slenderness := height/circumference_m]
+data_check[, corrected_cyl_vol := height*circumference_m^2/(4*pi*(1 - 1.3/height)^2)]
+
+data_check[, feuil.res := as.factor(fct_type)]
+```
+
