@@ -166,21 +166,56 @@ There are data from different institutes and different periods of time:
 
 The variable names are not necessarily unified (but the species names are, I checked! So I can safely use the data.table `codesessences`). I gather in @tbl-notations the data-specific variable names and the common english name I use hereafter.
 
-| INRA            | NFI  | Common                       | Description                                      |
-|----------------:|-----:|:-----------------------------|:-------------------------------------------------|
-| id              | npp  | plot_id                      | Plot id                                          |
-| nom_fichier     | \-   | unique_id                    | Unique id                                        |
-| essence         | ess  | speciesName_sci              | Species name                                     |
-| c130            | c13  | circumference_m              | Circumference at 1.3 m                           |
-| h_tot           | htot | height                       | Height in m                                      |
-| total_volume_m3 | \-   | total_volume_m3              | Total above-ground volume                        |
-| v_tronc         | v    | merchantable_trunk_volume_m3 | Volume main trunk up to 7 cm (merchantable vol.) |
-| v_courrone      | \-   | crown_volume_m3              | Total volume minus merchantable trunk            |
-| genre           | \-   | genus                        | Genus                                            |
-| longitude       | xl   | \-                           | Coordinates in different proj                    |
-| latitude        | yl   | \-                           | Coordinates in different proj                    |
+| INRA            | NFI  | Common             | Description                        |
+|----------------:|-----:|:-------------------|:-----------------------------------|
+| id              | npp  | plot_id            | Plot id                            |
+| nom_fichier     | \-   | unique_id          | Unique id                          |
+| essence         | ess  | speciesName_sci    | Species name                       |
+| c130            | c13  | circumference_m    | Circumference at 1.3 m             |
+| h_tot           | htot | height             | Height in m                        |
+| total_volume_m3 | \-   | total_volume_m3    | Total above-ground volume          |
+| v_tronc         | v    | stemwood_volume_m3 | Volume main trunk up to 7 cm       |
+| v_courrone      | \-   | crown_volume_m3    | Total volume minus stemwood volume |
+| genre           | \-   | genus              | Genus                              |
+| longitude       | xl   | \-                 | Coordinates in different proj      |
+| latitude        | yl   | \-                 | Coordinates in different proj      |
 
 : Variable names {#tbl-notations .borderless .hover}
+
+### Species
+For convenience, I format the species data frame with strings rather than factor, change it to data.table, and add some variables:
+```{r}
+setDT(codesessences)
+
+codesessences[, nfi := as.character(essence_ifn)]
+codesessences[, genre := as.character(genre)]
+codesessences[, espece := as.character(espece)]
+codesessences[, nomessence := as.character(nomessence)]
+
+codesessences[essence_ifn < 10, nfi := paste0("0", nfi)]
+```
+
+I noticed one error in the `codesessences` data.table for the species `essence_ifn = 65`. It is written *Cedrus atlantica ou libani* but it should be *Cedrus atlantica* according to the French NFI.
+
+```{r}
+codesessences[essence_ifn == 65, c("nomessence", "espece") := .("cèdre de l Atlas", "atlantica")]
+```
+
+Then, I also decided to merge *Pinus nigra ssp pallasiana* with *Pinus nigra* because there are only 7 individuals *v.s.* 240. Note that after all, *Pinus nigra ssp pallasiana* [is a synonym](https://inpn.mnhn.fr/espece/listeEspeces/pinus+nigra/) of *Pinus nigra ssp nigra*, which is quite close to *Pinus nigra*.
+
+```{r}
+codesessences[espece == "nigra ssp pallasiana", espece := "nigra"]
+codesessences[, c("speciesName_sci", "fct_type") := .(paste(genre, espece), ifelse(feuillu, "broadleaf", "conifer"))]
+```
+
+Finally, the `essence_ifn = 99913` is for grouping *Quercus robur* and *Quercus petraea*, while `essence_ifn = 1` groups *Quercus robur*, *Quercus petraea*, and *Quercus pubescens*. I decided to merge these two codes, using the largest group (\ie `essence_ifn = 1`).
+```{r}
+ref_nomessence = codesessences[essence == 19, nomessence]
+ref_espece = codesessences[essence == 19, espece]
+ref_speciesName_sci = codesessences[essence == 19, speciesName_sci]
+codesessences[essence == 22,
+	c("nomessence", "espece", "speciesName_sci") := .(ref_nomessence, ref_espece, ref_speciesName_sci)]
+```
 
 ### Clean the datasets and compute new variables
 
@@ -188,7 +223,6 @@ Keep only the columns of interest, change column names, transform everything to 
 ```{r}
 setDT(inra_arbres)
 setDT(codesforets)
-setDT(codesessences)
 
 ## Compute (total) volume in m³, and format data
 inra_arbres[, total_volume_m3 := (v_tronc_verif + v_fourche_verif + v_fourche2_verif + v_br_verif + v_menu_verif)/1e3]
@@ -199,25 +233,22 @@ inra_arbres[, circumference_m := c130/100]
 inra_arbres[, year := format(as.Date(date, "%Y-%m-%d"), "%Y")]
 
 ## Keep only column of interest and rename them
-inra_arbres = unique(inra_arbres[, .(nom_fichier, essence, circumference_m, h_tot, total_volume_m3, v_tronc_verif,
+inra_arbres = unique(inra_arbres[, .(nom_fichier, id_codesessences, circumference_m, h_tot, total_volume_m3, v_tronc_verif,
 	v_courrone, genre, id_codesforets, year)])
 inra_arbres = merge.data.table(inra_arbres, codesforets[, .(id, longitude, latitude)],
 	by.x = "id_codesforets", by.y = "id")
+inra_arbres = merge.data.table(inra_arbres, codesessences[, .(essence, speciesName_sci, fct_type)],
+	by.x = "id_codesessences", by.y = "essence")
 
 inra_arbres = na.omit(inra_arbres)
+inra_arbres[, id_codesessences := NULL]
 
-setnames(inra_arbres, new = c("plot_id", "unique_id", "speciesName_sci", "circumference_m", "height", "total_volume_m3",
-	"merchantable_trunk_volume_m3", "crown_volume_m3", "genus", "year", "lon", "lat"))
+setnames(inra_arbres, new = c("plot_id", "unique_id", "circumference_m", "height", "total_volume_m3",
+	"stemwood_volume_m3", "crown_volume_m3", "genus", "year", "lon", "lat", "speciesName_sci", "fct_type"))
 
 ## Change type of cols
 inra_arbres[, unique_id := as.character(unique_id)]
-inra_arbres[, speciesName_sci := as.character(speciesName_sci)]
 inra_arbres[, genus := as.character(genus)]
-
-## Set functional type, either broadleaf or conifer
-inra_arbres[, fct_type := "broadleaf"]
-inra_arbres[genus %in% c("Abies", "Cedrus", "Larix", "Picea", "Pinus", "Pseudotsuga", "Thuya", "Tsuga"),
-	fct_type := "conifer"]
 
 ## Number of individuals per species
 inra_arbres[, nb_indiv := .N, by = speciesName_sci]
@@ -255,21 +286,13 @@ disconnect_db(db)
 nfi_data = na.omit(nfi_data)
 
 ## Add scientific species names
-codesessences = codesessences[essence_ifn < 100]
-codesessences[, nfi := as.character(essence_ifn)]
-codesessences[, genre := as.character(genre)]
-codesessences[, espece := as.character(espece)]
-codesessences[essence_ifn < 10, nfi := paste0("0", nfi)]
-codesessences[, speciesName_sci := paste(genre, espece)]
-
-nfi_data = merge.data.table(nfi_data, codesessences[, .(nfi, genre, speciesName_sci)], by.x = "ess", by.y = "nfi")
-
-nfi_data[, ess := NULL]
+nfi_data = merge.data.table(nfi_data, codesessences[, .(nfi, genre, speciesName_sci, fct_type)],
+	by.x = "ess", by.y = "nfi")
 
 ## Strangely, v and vtot are the same... I keep v then
 if (isTRUE(nfi_data[, all.equal(v, vtot, tol = 1e-5)]))
 {
-	print("It seems that v and vtot are the same, which is strange as I was expecting vtot = (1 - r)*v")
+	print("The cols v and vtot are the same, which is strange as I was expecting vtot = (1 - r)*v. I remove vtot and r")
 	nfi_data[, vtot := NULL]
 	nfi_data[, r := NULL]
 } else {
@@ -277,15 +300,8 @@ if (isTRUE(nfi_data[, all.equal(v, vtot, tol = 1e-5)]))
 }
 
 ## Change column names
-setnames(nfi_data, new = c("plot_id", "tree_id", "circumference_m", "height", "merchantable_trunk_volume_m3",
-	"x_lambert", "y_lambert", "year", "genus", "speciesName_sci"))
-
-nfi_data[, nb_indiv := .N, by = speciesName_sci]
-
-## Set functional type, either broadleaf or conifer
-nfi_data[, fct_type := "broadleaf"]
-nfi_data[genus %in% c("Abies", "Cedrus", "Cupressus", "inconnu (résineux)", "Juniperus", "Larix", "Picea",
-	"Pinus", "Pseudotsuga", "Taxus", "Thuya", "Tsuga"), fct_type := "conifer"]
+setnames(nfi_data, new = c("species_code_nfi", "plot_id", "tree_id", "circumference_m", "height", "stemwood_volume_m3",
+	"x_lambert", "y_lambert", "year", "genus", "speciesName_sci", "fct_type"))
 ```
 
 ### Coordinates
@@ -352,8 +368,9 @@ Stan language uses vectors and arrays (think matrices), but does not know data.f
 ## Indices
 # Find start and end indices for each species
 setkey(forest_dt, fct_type, speciesName_sci, origin_data, unique_id)
-ind_species_1 = forest_dt[, .(start = .I[1], end = .I[.N]), by = .(speciesName_sci, fct_type)]
-ind_species_2 = forest_dt[, .(start_sp_orig = .I[1], end_sp_orig = .I[.N]), by = .(speciesName_sci, origin_data)]
+ind_species_1 = forest_dt[, .(start = .I[1], end = .I[.N], fct_type = unique(fct_type)), by = .(speciesName_sci)]
+ind_species_2 = forest_dt[, .(start_sp_orig = .I[1], end_sp_orig = .I[.N], genus = unique(genus)),
+	by = .(speciesName_sci, origin_data)]
 ind_species = merge.data.table(x = ind_species_1, y = ind_species_2, by = "speciesName_sci")
 ind_species[, n_indiv := end - start + 1, by = speciesName_sci]
 
@@ -387,7 +404,7 @@ stanData = list(
 	height = forest_dt[, height],
 	circumference_m = forest_dt[, circumference_m],
 	total_volume_m3 = forest_dt[, total_volume_m3],
-	merchantable_trunk_volume_m3 = forest_dt[, merchantable_trunk_volume_m3],
+	stemwood_volume_m3 = forest_dt[, stemwood_volume_m3],
 	crown_volume_m3 = forest_dt[, crown_volume_m3]
 )
 ```
@@ -413,14 +430,14 @@ The data are composed by the following species:
 #| fig-asp: 1
 #| out-width: 95%
 #| fig-width: 9
-species_nb = ind_species[, .(speciesName_sci, n_indiv, colour)]
+species_nb = unique(ind_species[, .(n_indiv = sum(n_indiv), colour), by = genus])
 setorder(species_nb, n_indiv)
 
 par(mar = c(5, 12, 2, 2))
 # Use barplot f or horizontal bars
 barplot(
 	species_nb[, n_indiv],
-	names.arg = species_nb[, speciesName_sci],
+	names.arg = species_nb[, genus],
 	horiz = TRUE, # Horizontal bars
 	xlab = "Number of individuals",
 	ylab = "",
@@ -429,7 +446,6 @@ barplot(
 	log = "x",
 	col = species_nb[, colour]
 )
-abline(v = 30, lwd = 2, lty = "dashed", col = "#CD212A")
 ```
 
 and the plots are located:
@@ -455,42 +471,29 @@ points(coords_inra, col = colours_vec[1], pch = 20, cex = 1.15)
 
 ## Data for posterior checks
 
-After running a Bayesian model, it is important to do a 'predict' on new data to check that the model can generate sensible volume. For this, I use the volume-measured trees dataset from 2010, which I format in the following code snippet.
+After running a Bayesian model, it is important to do a 'predict' on new data to check that the model can generate sensible volume. For this, I use the volume-measured trees dataset from 2010, which I format in this section.
 
 ```{r}
-## Add species to the profiles
+# # load(paste0(path_data, "EMERGE.RData"))
+# setDT(inra_arbres)
+# setDT(codesforets)
+# setDT(codesessences)
+# # codesessences = copy(qq)
+# setDT(emerge_2010_arbres)
 
-load(paste0(path_data, "EMERGE.RData"))
+# ## Clean the tree dataset and keep only columns of interest (tree is already unique id, no need for site, nor parcelle)
+# emerge_2010_arbres = merge.data.table(emerge_2010_arbres, codesessences[, .(essence, genre, espece)],
+# 	by.x = "id_codesessences", by.y = "essence", all.x = TRUE)
 
-setDT(emerge_2010_profils)
-setDT(emerge_2010_arbres)
-setDT(emerge_2010_branches)
+# emerge_2010_arbres = unique(emerge_2010_arbres[, .(date, id_codesforets, id_codesessences, genre, espece, tree, species, c130,
+# 	hauteur_souche_m, longueur_arbre_m, longueur_d7_m, v_br_verif, v_menu_verif, v_tronc_cone_verif, v_tronc_cylindre_verif)])
 
-# emerge_2010_arbres = unique(emerge_2010_arbres[, .(tree, species, c130)])
-# emerge_2010_profils = emerge_2010_arbres[emerge_2010_profils, on = "tree"]
+# emerge_2010_arbres[is.na(genre)]
 
-# ## Compute dbh top/bottom of each log
-# emerge_2010_profils[, dbh_bottom_m := circ_bas_cm/(100*pi)]
-# emerge_2010_profils[, dbh_top_m := circ_haut_cm/(100*pi)]
 
-# ## Reorganising
-# emerge_2010_profils[, species := as.character(species)]
-# setorder(emerge_2010_profils, tree, niveau_bas_m)
-# emerge_2010_profils[, id := NULL]
-# emerge_2010_profils[, c130 := c130/100]
-# setnames(x = emerge_2010_profils, old = c("niveau_bas_m", "niveau_haut_m", "c130"), c("h_bottom", "h_top", "circumference_m"))
-# emerge_2010_profils = emerge_2010_profils[, .(tree, species, dbh_bottom_m, dbh_top_m, h_bottom, h_top, circumference_m)]
-
-# ## Compute log and cumulated volumes
-# emerge_2010_profils[, height := max(h_top), by = tree]
-# emerge_2010_profils[, merchantable_trunk_volume_m3 := pi/12*max(dbh_bottom_m)^2*height, by = tree]
-# emerge_2010_profils[, vol_log := pi/12*dbh_bottom_m^2*(height - h_bottom) - pi/12*dbh_top_m^2*(height - h_top)]
-
-# emerge_2010_profils[, cumulated_vol := cumsum(vol_log), by = tree]
-# emerge_2010_profils[, cumulated_percent_vol := cumulated_vol/merchantable_trunk_volume_m3, by = tree]
-
+# setnames(emerge_2010_arbres, new = c("date", ""))
 # ## Keep only variables of interest
-# data_check = unique(emerge_2010_profils[, .(tree, species, merchantable_trunk_volume_m3, height, circumference_m)])
+# data_check = unique(emerge_2010_profils[, .(tree, species, stemwood_volume_m3, height, circumference_m)])
 
 # ## Change vernacular species names to scientific
 # species_dt = data.table(species = c("Frêne", "Chêne vert", "Tilia cordata", "Chêne sessile", "Eucalyptus",
@@ -512,3 +515,69 @@ setDT(emerge_2010_branches)
 
 # data_check[, feuil.res := as.factor(fct_type)]
 ```
+
+::: {.callout-note}
+## Data check-up for the trunk volumes
+
+It is important to know how the data were built, to make sure everyhting is well understood! The following code snippet shows that the column `v_br_verif` is the total branch volume per tree:
+```{r}
+# ## Change class to data table
+# setDT(emerge_2010_profils)
+
+# ## Convert circumference into metre
+# emerge_2010_profils[, circ_bottom_m := circ_bas_cm/100]
+# emerge_2010_profils[, circ_top_m := circ_haut_cm/100]
+
+# ## Reorganising
+# setorder(emerge_2010_profils, tree, niveau_bas_m)
+# emerge_2010_profils[, id := NULL]
+
+# setnames(x = emerge_2010_profils, old = c("niveau_bas_m", "niveau_haut_m"), c("h_bottom", "h_top"))
+
+# emerge_2010_profils = emerge_2010_profils[, .(tree, circ_bottom_m, circ_top_m, h_bottom, h_top)]
+# emerge_2010_profils[, c0 := max(circ_bottom_m), by = tree]
+
+# ## Compute log and cumulated volumes
+# emerge_2010_profils[, height := max(h_top), by = tree]
+# emerge_2010_profils[, vol_log := (h_top - h_bottom)/(12*pi)*(circ_bottom_m^2 + circ_top_m^2 + circ_bottom_m*circ_top_m)]
+# emerge_2010_profils[, cumulated_vol := cumsum(vol_log), by = tree]
+# emerge_2010_profils[, stemwood_volume_m3 := sum(vol_log), by = tree]
+
+# emerge_2010_profils = unique(emerge_2010_profils[, .(tree, height, stemwood_volume_m3)])
+
+# compare = unique(emerge_2010_arbres[, .(tree, longueur_arbre_m, v_tronc_cone_verif, v_tronc_cylindre_verif)])
+# compare = compare[emerge_2010_profils, on = "tree"]
+```
+
+:::
+
+::: {.callout-note}
+## Data check-up for the branch volumes
+
+It is important to know how the data were built, to make sure everyhting is well understood! The following code snippet shows that the column `v_br_verif` is the total branch volume per tree:
+```{r}
+# ## Change class to data table
+# setDT(emerge_2010_branches)
+
+# ## Clean the branch dataset and compute total branch volume per tree
+# incomplete_trees = sort(emerge_2010_branches[is.na(v_wet_m3), unique(tree)]) # Why is there a tree 0.1089531? Mystery...
+# emerge_2010_branches = emerge_2010_branches[!is.na(c_cm) & !is.na(l_cm)] # Remove not measured branches
+# emerge_2010_branches = emerge_2010_branches[!is.na(v_wet_m3)] # Concerns 5 branches that had problems in their measurements
+
+# if (any(incomplete_trees %in% emerge_2010_branches[, unique(tree)]))
+# 	warning(paste("The following trees are incomplete:",
+# 		paste0(incomplete_trees[incomplete_trees %in% emerge_2010_branches[, unique(tree)]], collapse = ", ")))
+
+# ## Compute branch volume
+# emerge_2010_branches[, br_vol := sum(c_cm^2*l_cm)/(4*pi*1e6), by = tree]
+# branch_volume = emerge_2010_branches[, .(branch_volume_m3 = sum(v_wet_m3), verif = unique(br_vol)), by = tree]
+
+# compare = unique(emerge_2010_arbres[, .(tree, v_br_verif)])
+# compare = compare[branch_volume, on = "tree"]
+# compare[, diff1 := v_br_verif - branch_volume_m3]
+# compare[, diff2 := v_br_verif - verif]
+# compare[abs(diff1) > 1e-4]
+# compare[abs(diff2) > 1e-4] # The small diffs come from branches that I removed because broken despite they had a volume
+```
+
+:::
