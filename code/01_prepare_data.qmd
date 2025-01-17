@@ -105,7 +105,7 @@ We decided to use the definitions from @Gschwantner2009 (see @fig-partition and 
 	- Large branches: portion of the above-ground lateral parts with a diameter of more than or equal to \qty{7}{\centi\metre} (French NFI)
 	- Large branches: portion of the above-ground lateral parts with a diameter of less than \qty{7}{\centi\metre} (French NFI)
 
-![Tree partition, with Bole (<span class="egypt_green"></span>), stem top (<span class="egypt_yellow"></span>), large branches (<span class="egypt_blue"></span>), and small branches (<span class="egypt_red"></span>)](../writing/content/img/tree_ign.png){#fig-treeDef}
+![Tree partition, with Bole (<span class="egypt_green"></span>), stem top (<span class="egypt_yellow"></span>), large branches (<span class="egypt_blue"></span>), and small branches (<span class="egypt_red"></span>)](img/tree_ign.png){#fig-treeDef}
 
 ### Mount the remote folder {#sec-mount_folder}
 
