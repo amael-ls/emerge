@@ -1,0 +1,46 @@
+---
+title: "Analyse data to estimate volumes"
+date: today
+author: Amaël Le Squin
+date-format: iso
+filters:
+  - fontawesome
+execute:
+  error: true
+bibliography: references.bib
+lightbox:
+  match: auto
+css: style.css
+knitr:
+  opts_chunk: 
+    dev: ragg_png
+    crop: null
+    out.width: "70%"
+    fig.width: 6
+    fig.asp: 0.618
+    fig.align: "center"
+format:
+  html:
+    toc: true
+    include-in-header: mathjax.html
+    code-fold: true
+    df-print: paged
+    number-sections: true
+    theme:
+      light: cerulean
+      dark: darkly
+    margin: 5% 0;
+  pdf:
+    keep-tex: true
+    pdf-engine: lualatex
+    include-in-header:
+      - text: |
+          \usepackage{unicode-math}
+---
+
+\newcommand{\ie}{*i.e.,*}
+\newcommand{\F}{\mathscr{F}}
+\newcommand{\N}{\mathbfscr{N}}
+
+## Introduction
+The data have been prepared in `01_prepare_data.qmd`
