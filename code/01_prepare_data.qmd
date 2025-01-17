@@ -8,6 +8,8 @@ filters:
 execute:
   error: true
 bibliography: references.bib
+lightbox:
+  match: auto
 css: style.css
 knitr:
   opts_chunk: 
@@ -44,9 +46,68 @@ format:
 
 The data were provided by Christine Deleuze by e-mail the 17 September 2024. The format is a single `.RData` file, which is stored remotely on the server 'Abies' (`smb://del1509n015/`) in the protected folder (only reading rights) `2024_faircarbon/data_orig/`. The person to contact to add data to this folder is Thierry Leclaire.
 
-For Linux, and maybe MacOS, it is necessary to mount locally the remote folder in order to access the data from R. According to Henri Cunny, it is not necessary for Windows (at least for remote folders on Abies, maybe because smb is a Windows protocol).
+For Linux, and maybe MacOS, it is necessary to mount locally the remote folder in order to access the data from R. According to Henri Cunny, it is not necessary for Windows (at least for remote folders on Abies, maybe because smb is a Windows protocol). All of this is explained in the @sec-mount_folder.
 
-### Mount the remote folder
+In order to understand the data, I first define what is a tree in @sec-what_a_tree. There are also some test to reconstruct the data from raw data to show explicitly how volumes where calculated (see @sec-nfi_query, @nte-trunkVol, and @nte-branchVol)
+
+### Define what is a tree {#sec-what_a_tree}
+
+Trees are partitioned into hierarchical elements in Forest Inventories (\eg @fig-partition). Definitions of elements can vary between inventories, and they do not necessarily contains the same data. In our case, the tree data come from different institutes and different periods of time:
+
+1.  'Protocole Oudin', dataset preserved by INRA, between 1930 and 1980 (<span class="egypt_red"></span> on the @fig-map)
+
+2.  The French NFI (<span class="egypt_blue"></span> on the @fig-map). I do not trust the dataset provided by C. Deleuze: I do not know where it comes from, nor who provided it, but there are about 50% of the plot id (labelled `CPP` in the table) that cannot be found when I or Cedric Duprez do our own request. They are also subtleties with diameters and circumferences... Therefore, I decided to do my own request of the data, which is also better for reproducibility. Details are explained in @sec-nfi_query. Data range from 1988 to 2007.
+
+3.  The 'Office National des Forêts (ONF)', with protocols from 1972 and from 1983. I do not use these data as there is no coordinates
+
+4.  Institut Technologique Forêt, Cellulose, Bois-construction, Ameublement (FCBA), which I do not use so far
+
+5.  L'Institut pour le développement forestier (IDF) which is the R&D of the Centre National de la Propriété Forestière and the Institut national de recherche en sciences et technologies pour l'environnement et l'agriculture (IRSTEA, currently INRAE)
+
+```{mermaid}
+%%| label: fig-partition
+%%| fig-cap: Partition of a tree (inspired by @Gschwantner2009)
+%%{init: {"flowchart": {"defaultRenderer": "elk"}} }%%
+flowchart LR
+subgraph SUB0 [Level 0]
+	W(Whole tree)
+end
+
+subgraph SUB1 [Level 1]
+	W --> A(Above-ground)
+	W --> B(Below-ground)
+end
+
+subgraph SUB2 [Level 2]
+	A --> M(Main stem)
+	A --> L(Lateral)
+	A --> F(Foliage)
+
+	B --> E(...)
+end
+
+subgraph SUB3 [Level 3]
+	M --> S(Stem top)
+	M --> MB(Bole)
+	M --> MS(Stump)
+	L --> LB(Large branches)
+	L --> SB(Small branches)
+end
+```
+
+We decided to use the definitions from @Gschwantner2009 (see @fig-partition and @fig-treeDef):
+
+- Main stem: The stem of a tree is the above-ground part of the main (off) shoot with apical dominance
+	- Stem top: topmost part of the stem from an over-bark base-diameter of \qty{7}{\centi\metre} (French NFI) to the stem tip
+	- Bole: above-ground part of the stem between stump and the stem top
+	- Stump: above-ground base part of the stem which would remain after a tree was cut under normal felling practices
+- Lateral parts:
+	- Large branches: portion of the above-ground lateral parts with a diameter of more than or equal to \qty{7}{\centi\metre} (French NFI)
+	- Large branches: portion of the above-ground lateral parts with a diameter of less than \qty{7}{\centi\metre} (French NFI)
+
+![Tree partition, with Bole (<span class="egypt_green"></span>), stem top (<span class="egypt_yellow"></span>), large branches (<span class="egypt_blue"></span>), and small branches (<span class="egypt_red"></span>)](../writing/content/img/tree_ign.png){#fig-treeDef}
+
+### Mount the remote folder {#sec-mount_folder}
 
 1.  Switch to super user where you replace `JohnField-Admin` (really nice [Irish composer](https://www.youtube.com/watch?v=Uktj2MYSsaU)) by your admin name (typically, your IGN id followed by `-Admin`):
 
@@ -150,18 +211,6 @@ if (list.files(path = path_data) != "EMERGE.RData")
 load(paste0(path_data, "EMERGE.RData"))
 ```
 
-There are data from different institutes and different periods of time:
-
-1.  'Protocole Oudin', dataset preserved by INRA ( on the @fig-map)
-
-2.  The French NFI ( on the @fig-map). I do not trust this dataset: I do not know where it comes from, nor who provided it, but there are about 50% of the plot id (labelled `CPP` in the table) that cannot be found when I or Cedric Duprez do our own request. Therefore, I decided to do my own request of the data, which is also better for reproducibility. Details are explained in @sec-nfi_query
-
-3.  The 'Office National des Forêts (ONF)', with protocols from 1972 and from 1983. I do not use these data as there is no coordinates
-
-4.  Institut Technologique Forêt, Cellulose, Bois-construction, Ameublement (FCBA), which I do not use so far
-
-5.  L'Institut pour le développement forestier (IDF) which is the R&D of the Centre National de la Propriété Forestière and the Institut national de recherche en sciences et technologies pour l'environnement et l'agriculture (IRSTEA, currently INRAE)
-
 ### Variable names
 
 The variable names are not necessarily unified (but the species names are, I checked! So I can safely use the data.table `codesessences`). I gather in @tbl-notations the data-specific variable names and the common english name I use hereafter.
@@ -174,8 +223,8 @@ The variable names are not necessarily unified (but the species names are, I che
 | c130            | c13  | circumference_m    | Circumference at 1.3 m             |
 | h_tot           | htot | height             | Height in m                        |
 | total_volume_m3 | \-   | total_volume_m3    | Total above-ground volume          |
-| v_tronc         | v    | stemwood_volume_m3 | Volume main trunk up to 7 cm       |
-| v_courrone      | \-   | crown_volume_m3    | Total volume minus stemwood volume |
+| v_tronc         | v    | bole_volume_m3 | Volume bole up to 7 cm       |
+| v_courrone      | \-   | crown_volume_m3    | Total volume minus bole volume |
 | genre           | \-   | genus              | Genus                              |
 | longitude       | xl   | \-                 | Coordinates in different proj      |
 | latitude        | yl   | \-                 | Coordinates in different proj      |
@@ -244,7 +293,7 @@ inra_arbres = na.omit(inra_arbres)
 inra_arbres[, id_codesessences := NULL]
 
 setnames(inra_arbres, new = c("plot_id", "unique_id", "circumference_m", "height", "total_volume_m3",
-	"stemwood_volume_m3", "crown_volume_m3", "genus", "year", "lon", "lat", "speciesName_sci", "fct_type"))
+	"bole_volume_m3", "crown_volume_m3", "genus", "year", "lon", "lat", "speciesName_sci", "fct_type"))
 
 ## Change type of cols
 inra_arbres[, unique_id := as.character(unique_id)]
@@ -266,22 +315,62 @@ db = connect_db()
 nfi_data = exec_req(conn = db, req = "
 	SELECT
 		tree.NPP, tree.A, tree.ESS, tree.C13, tree.HTOT, tree.R, tree.V, tree.VTOT,
+		tree.d26, tree.ddec, tree.dmed, tree.hdec,
+		log.surlon, log.surdia, log.ns,
 		coords1.XL, coords1.YL,
 		EXTRACT(YEAR FROM coords2.DATEPOINT) AS year
 	FROM
 		inv_exp_am.g3arbre AS tree
 		
+		LEFT JOIN inv_exp_am.g3bille AS log
+		ON log.npp = tree.npp AND log.A = tree.A
+
 		LEFT JOIN inv_exp_am.e1point AS coords1
 		ON coords1.npp = tree.npp
 		
 		LEFT JOIN inv_exp_am.e2point AS coords2
 		ON coords2.npp = tree.npp
 	WHERE
-		tree.cube = 'M' AND coords2.DATEPOINT >= '1988-01-01'::date
+		tree.cube = 'M' AND -- Tree volume measured rather than evaluated by a model
+		tree.MC IN ('4', '5') -- Circumference measured, and not diameter
+		-- coords2.DATEPOINT >= '1988-01-01'::date -- I think there is no need for this one
 	ORDER BY
 		npp, a;", DT = TRUE)
 
 disconnect_db(db)
+```
+
+I believe that it is important to know how the data are built! Here, `vtot` is the sum of three volumes coming from:
+
+1. A first log, from the base level to \qty{2.60}{\metre}, measured using the cylinder formula:
+$$
+v_1 = \frac{2.60 c^2}{4 \pi}
+$$
+
+2. A second log, from \qty{2.60}{\metre} to the taper cut-off height (height at which there is at least a 10% decrease in diameter within a meter), measured using the three-level Newton-Simpson formula:
+$$
+v_2 = \frac{\pi}{24} \cdot (d_{26}^2 + 4 d_{\text{m}}^2 + d_{\text{dec}}^2) \cdot (h_{\text{dec}} - 2.60)
+$$
+3. $n \geqslant 0$ log sections of the trunk, from the taper cut-off height (in the case of a taper cut) to the merchantable timber cut-off (\qty{7}{\centi\metre} diameter for the French NFI), calculated using the cylinder formula:
+$$
+v_3 = \frac{\pi}{4}\sum_{n \geqslant 0} d^2 l
+$$
+
+```{r}
+#| hold: true
+nfi_data[, v1 := c13^2/(4*pi)*2.6] # Volume first part: from 0 to 2.6m high
+nfi_data[, v2 := pi/24*(d26^2 + 4*dmed^2 + ddec^2)*(hdec - 2.6)] # Volume 2nd part: from 2.6m to hdec
+nfi_data[, v3 := pi/4*sum(surdia^2*surlon), by = .(npp, a)] # Volume 3rd part: from hdec to diameter = 7cm
+
+nfi_data[, c("surlon", "surdia", "ns") := NULL]
+
+nfi_data[is.na(v2), v2 := 0]
+nfi_data[is.na(v3), v3 := 0]
+nfi_data[, verif := v1 + v2 + v3 - vtot]
+
+hist(nfi_data$verif)
+
+nfi_data[, c("v1", "v2", "v3", "d26", "dmed", "ddec", "hdec", "verif") := NULL]
 
 nfi_data = na.omit(nfi_data)
 
@@ -300,9 +389,11 @@ if (isTRUE(nfi_data[, all.equal(v, vtot, tol = 1e-5)]))
 }
 
 ## Change column names
-setnames(nfi_data, new = c("species_code_nfi", "plot_id", "tree_id", "circumference_m", "height", "stemwood_volume_m3",
+setnames(nfi_data, new = c("species_code_nfi", "plot_id", "tree_id", "circumference_m", "height", "bole_volume_m3",
 	"x_lambert", "y_lambert", "year", "genus", "speciesName_sci", "fct_type"))
 ```
+
+For most of the trees I find back the volume. The differences can be explained by some details I did not consider in this quick and dirty check, such as short trees (smaller than \qty{2.60}{\metre} which are computed differently, and some weird trees that are also handled differently).
 
 ### Coordinates
 
@@ -404,7 +495,7 @@ stanData = list(
 	height = forest_dt[, height],
 	circumference_m = forest_dt[, circumference_m],
 	total_volume_m3 = forest_dt[, total_volume_m3],
-	stemwood_volume_m3 = forest_dt[, stemwood_volume_m3],
+	bole_volume_m3 = forest_dt[, bole_volume_m3],
 	crown_volume_m3 = forest_dt[, crown_volume_m3]
 )
 ```
@@ -493,7 +584,7 @@ After running a Bayesian model, it is important to do a 'predict' on new data to
 
 # setnames(emerge_2010_arbres, new = c("date", ""))
 # ## Keep only variables of interest
-# data_check = unique(emerge_2010_profils[, .(tree, species, stemwood_volume_m3, height, circumference_m)])
+# data_check = unique(emerge_2010_profils[, .(tree, species, bole_volume_m3, height, circumference_m)])
 
 # ## Change vernacular species names to scientific
 # species_dt = data.table(species = c("Frêne", "Chêne vert", "Tilia cordata", "Chêne sessile", "Eucalyptus",
@@ -516,7 +607,7 @@ After running a Bayesian model, it is important to do a 'predict' on new data to
 # data_check[, feuil.res := as.factor(fct_type)]
 ```
 
-::: {.callout-note}
+::: {#nte-trunkVol .callout-note}
 ## Data check-up for the trunk volumes
 
 It is important to know how the data were built, to make sure everyhting is well understood! The following code snippet shows that the column `v_br_verif` is the total branch volume per tree:
@@ -541,9 +632,9 @@ It is important to know how the data were built, to make sure everyhting is well
 # emerge_2010_profils[, height := max(h_top), by = tree]
 # emerge_2010_profils[, vol_log := (h_top - h_bottom)/(12*pi)*(circ_bottom_m^2 + circ_top_m^2 + circ_bottom_m*circ_top_m)]
 # emerge_2010_profils[, cumulated_vol := cumsum(vol_log), by = tree]
-# emerge_2010_profils[, stemwood_volume_m3 := sum(vol_log), by = tree]
+# emerge_2010_profils[, bole_volume_m3 := sum(vol_log), by = tree]
 
-# emerge_2010_profils = unique(emerge_2010_profils[, .(tree, height, stemwood_volume_m3)])
+# emerge_2010_profils = unique(emerge_2010_profils[, .(tree, height, bole_volume_m3)])
 
 # compare = unique(emerge_2010_arbres[, .(tree, longueur_arbre_m, v_tronc_cone_verif, v_tronc_cylindre_verif)])
 # compare = compare[emerge_2010_profils, on = "tree"]
@@ -551,7 +642,7 @@ It is important to know how the data were built, to make sure everyhting is well
 
 :::
 
-::: {.callout-note}
+::: {#nte-branchVol .callout-note}
 ## Data check-up for the branch volumes
 
 It is important to know how the data were built, to make sure everyhting is well understood! The following code snippet shows that the column `v_br_verif` is the total branch volume per tree:
