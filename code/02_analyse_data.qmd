@@ -7,6 +7,7 @@ filters:
   - fontawesome
 execute:
   error: true
+  cache: true
 bibliography: references.bib
 lightbox:
   match: auto
@@ -41,6 +42,7 @@ format:
 \newcommand{\ie}{*i.e.,*}
 \newcommand{\F}{\mathscr{F}}
 \newcommand{\N}{\mathbfscr{N}}
+\newcommand{\logN}{log\mathbfscr{N}}
 
 \newcommand{\vtot}{v_{\text{tot}}}
 \newcommand{\vbole}{v_{\text{bole}}}
@@ -59,6 +61,7 @@ library(MetBrewer)
 library(bayesplot)
 library(cmdstanr)
 	register_knitr_engine(override = TRUE)
+library(lognorm)
 ```
 
 ## Introduction
@@ -125,7 +128,7 @@ I first try a simple model:
 $$
 \vtot = \vbole + \vbr
 $$
-where the bole volume, $\vbole$, and the branch volume, $\vbr$, both follow a lognormal distribution. For a definition of this volumes see `01_prepare_data.qmd`. The sum of the lognormals can be approximated via a method described in @Lo2012.
+where the bole volume, $\vbole$, and the branch volume, $\vbr$, both follow a lognormal distribution (see @sec-reconstruct for a proof). For a definition of this volumes see `01_prepare_data.qmd`. The sum of the lognormals can be approximated via a method described in @Lo2012.
 
 ```{stan output.var = "nfi_inra", cache = TRUE}
 data {
@@ -251,7 +254,7 @@ if (!file.exists("fit_inra-nfi.rds"))
 ```
 
 ## Results
-As can be seen here in what follows there is no problem of convergence
+As can be seen here in what follows there is no problem of convergence:
 ```{r}
 mcmc_trace(fit$draws(c("a_bole", "a_crown")))
 mcmc_trace(fit$draws(c("b_bole", "b_crown")))
@@ -264,6 +267,209 @@ mcmc_nuts_divergence(bayesplot::nuts_params(fit), lp = log_posterior(fit))
 
 I now do some posterior checks:
 
-1. What are the residuals?
-2. How well does it predict an independent dataset?
+1. Reconstruct the volume variable after the log transformation
+2. What are the residuals?
+3. How well does it predict an independent dataset?
 
+### Reconstruction {#sec-reconstruct}
+
+So far, I fit a model on $X = \log(V) \sim \N(\mu, \sigma)$. Following @Wasserman2003[pp. 41] I get:
+
+1. $A_y = ] -\infty; \log(y)]$, if $y > 0$.
+2. For the cumulative density function, I get:
+\begin{align*}
+	F_Y(y) &= \int_{A_y} f_X(x) \, dx \\
+		&= \int_{-\infty}^{\log(y)} \frac{1}{\sqrt{2 \pi} \sigma} \exp\left[ -\frac{1}{2} \left(\frac{x - \mu}{\sigma} \right) \right] \, dx \\
+		&= \int_{-\infty}^{y} \frac{1}{\sqrt{2 \pi} \sigma z} \exp\left[ -\frac{1}{2} \left(\frac{\log(z) - \mu}{\sigma} \right) \right] \, dz && \text{with change of variable } z = \exp(x)
+\end{align*}
+which is the lognormal distribution $\logN(\mu, \sigma)$.
+3. Now the total volume can be approximated by the formula of @Lo2012.
+
+### Residuals
+We compute the residuals as the mean of the bayesian simulations minus the observed. Note that we use the lognormal distribution and the real observations rather than the normal distribution and the log-transformed observation.
+
+```{stan output.var = "genQ", cache = TRUE}
+// This standalone script generates volume for a given species
+
+data {
+	// Dimensions and indices for parameters
+	int S; // Number of species
+	
+	// New data for generating posterior
+	int N_new; // Number of new individuals
+	int<lower = 1, upper = S> species_id; // Index of the species
+	int<lower = 1, upper = 2> fct_type; // Functional type, 1 = broadleaf, 2 = conifer
+
+	// Predictors
+	vector [N_new] hdn_new;
+	vector [N_new] slenderness_new;
+	vector [N_new] corrected_cyl_vol_new;
+}
+
+parameters {
+	// Fixed effects (population parameters) for broadleaf and conifer
+	vector[2] b0;
+	vector[2] b1;
+	vector[2] b2;
+	
+	// Random effects (group parameters)
+	vector[S] beta0;
+	vector[S] beta2;
+
+	// Variances
+	real<lower = 0> sigma; // sd residuals
+	real<lower = 0> sigma_beta0; // sd random effect beta0
+	real<lower = 0> sigma_beta2; // sd random effect beta2
+}
+
+generated quantities {
+	vector[N_new] avg = (beta0[species_id] + b1[fct_type]*hdn_new + beta2[species_id]*slenderness_new) .*
+		corrected_cyl_vol_new;
+	array[N_new] real volume_new = normal_rng(avg, sigma);
+}
+```
+
+```{r}
+n_chains = 4
+# woodstock_seed = 1969 - 08 - 18
+iter_warmup = 350
+iter_sampling = 500
+
+genQ = cmdstan_model("./genQ_nfi-inra.stan")
+
+stanData_new = stanData
+stanData_new$N_new = stanData$N
+stanData_new$N_inra_new = stanData$N_inra
+stanData_new$n_sp_broad_inra_new = stanData_new$n_sp_broad_inra
+stanData_new$n_sp_conif_inra_new = stanData_new$n_sp_conif_inra
+
+stanData_new$start_broad_new = stanData_new$ind_start_broad
+stanData_new$end_broad_new = stanData_new$ind_end_broad
+stanData_new$start_conif_new = stanData_new$ind_start_conif
+stanData_new$end_conif_new = stanData_new$ind_end_conif
+
+stanData_new$start_broad_inra_new = stanData_new$ind_start_broad_inra
+stanData_new$end_broad_inra_new = stanData_new$ind_end_broad_inra
+stanData_new$start_conif_inra_new = stanData_new$ind_start_conif_inra
+stanData_new$end_conif_inra_new = stanData_new$ind_end_conif_inra
+
+stanData_new$circumference_m_new = stanData_new$circumference_m
+
+stanData_new$predict_crown = 1 # Stan uses 0 to encode false, and 1 to encode true
+
+posteriorVols = genQ$generate_quantities(fitted_params = fit$draws(inc_warmup = FALSE), data = stanData_new,
+	parallel_chains = min(n_chains, 4))
+
+dim(posteriorVols)
+
+sim_bole = apply(X = posteriorVols$draws("bole_volume_new"), MARGIN = 3, FUN = mean)
+sim_crown = apply(X = posteriorVols$draws("crown_volume_new"), MARGIN = 3, FUN = mean)
+
+approx_dt = forest_dt[!is.na(crown_volume_m3), .(fct_type, circumference_m, total_volume_m3)]
+
+approx_dt[fct_type == "broadleaf", c("mu_bole", "sd_bole") := .(apply(X = fit$draws("a_bole[1]"), MARGIN = 3, FUN = mean) +
+	apply(X = fit$draws("b_bole[1]", inc_warmup = FALSE), MARGIN = 3, FUN = mean)*log(circumference_m) +
+	apply(X = fit$draws("c_bole[1]", inc_warmup = FALSE), MARGIN = 3, FUN = mean)*log(circumference_m)^4,
+	apply(X = fit$draws("sigma_bole[1]"), MARGIN = 3, FUN = mean))]
+approx_dt[fct_type == "conifer", c("mu_bole", "sd_bole") := .(apply(X = fit$draws("a_bole[2]"), MARGIN = 3, FUN = mean) +
+	apply(X = fit$draws("b_bole[2]", inc_warmup = FALSE), MARGIN = 3, FUN = mean)*log(circumference_m) +
+	apply(X = fit$draws("c_bole[2]", inc_warmup = FALSE), MARGIN = 3, FUN = mean)*log(circumference_m)^4,
+	apply(X = fit$draws("sigma_bole[2]"), MARGIN = 3, FUN = mean))]
+
+approx_dt[fct_type == "broadleaf", c("mu_crown", "sd_crown") := .(apply(X = fit$draws("a_crown[1]"), MARGIN = 3, FUN = mean) +
+	apply(X = fit$draws("b_crown[1]", inc_warmup = FALSE), MARGIN = 3, FUN = mean)*log(circumference_m) +
+	apply(X = fit$draws("c_crown[1]", inc_warmup = FALSE), MARGIN = 3, FUN = mean)*log(circumference_m)^4,
+	apply(X = fit$draws("sigma_crown[1]"), MARGIN = 3, FUN = mean))]
+approx_dt[fct_type == "conifer", c("mu_crown", "sd_crown") := .(apply(X = fit$draws("a_crown[2]"), MARGIN = 3, FUN = mean) +
+	apply(X = fit$draws("b_crown[2]", inc_warmup = FALSE), MARGIN = 3, FUN = mean)*log(circumference_m) +
+	apply(X = fit$draws("c_crown[2]", inc_warmup = FALSE), MARGIN = 3, FUN = mean)*log(circumference_m)^4,
+	apply(X = fit$draws("sigma_crown[2]"), MARGIN = 3, FUN = mean))]
+
+
+matmat = vector(mode = "list", length = approx_dt[, .N])
+
+a_bole = fit$draws("a_bole")
+b_bole = fit$draws("b_bole")
+c_bole = fit$draws("c_bole")
+
+a_crown = fit$draws("a_crown")
+b_crown = fit$draws("a_crown")
+c_crown = fit$draws("a_crown")
+
+sigma_bole = fit$draws("sigma_bole")
+sigma_crown = fit$draws("sigma_crown")
+
+for (i in seq_along(matmat))
+{
+	if (approx_dt[i, fct_type] == "broadleaf")
+	{
+		temp = data.table(
+			mu_bole = as.vector(a_bole[, , 1] + b_bole[, , 1]*log(approx_dt[i, circumference_m]) +
+				c_bole[, , 1]*log(approx_dt[i, circumference_m])^4),
+			mu_crown = as.vector(a_crown[, , 1] + b_crown[, , 1]*log(approx_dt[i, circumference_m]) +
+				c_crown[, , 1]*log(approx_dt[i, circumference_m])^4),
+			sigma_bole = as.vector(sigma_bole),
+			sigma_crown = as.vector(sigma_crown)
+		)
+		matmat[[i]] = cor(temp)
+	} else {
+		temp = data.table(
+			mu_bole = as.vector(a_bole[, , 2] + b_bole[, , 2]*log(approx_dt[i, circumference_m]) +
+				c_bole[, , 2]*log(approx_dt[i, circumference_m])^4),
+			mu_crown = as.vector(a_crown[, , 2] + b_crown[, , 2]*log(approx_dt[i, circumference_m]) +
+				c_crown[, , 2]*log(approx_dt[i, circumference_m])^4),
+			sigma_bole = as.vector(sigma_bole),
+			sigma_crown = as.vector(sigma_crown)
+		)
+		matmat[[i]] = cor(temp)
+	}
+}
+
+approx_dt[, c("mu_tot", "sigma_tot") := as.list(estimateSumLognormal(mu = c(mu_bole, mu_crown),
+	sigma = c(sd_bole, sd_crown), corr = matmat[[.I]])), by = .I]
+
+approx_dt[, v_tot_pred := exp(mu_tot + sigma_tot^2/2)]
+
+curve(dlnorm(x, meanlog = -1.084176, sdlog = 0.2897294), lwd = 2, col = "#CD212A", to = 1.5)
+abline(v = 0.51050, lwd = 2)
+abline(v = 0.35267655, lwd = 2)
+
+estimateSumLognormal(mu = c(-1.347949, -2.709285), sigma = c(0.3366277, 0.5570702), corr = matmat[[1]]) -
+estimateSumLognormal(mu = c(-1.347949, -2.709285), sigma = c(0.3366277, 0.5570702))
+
+exp(-1.083712 + 0.288125^2/2) - exp(-1.1880649 + 0.5401125^2/2)
+
+rm(posteriorVols)
+rm(stanData_new)
+
+res = sim_bole - stanData$bole_volume_m3
+
+pdf("density_res.pdf")
+plot(density(res))
+dev.off()
+
+pdf("res.pdf")
+plot(res, pch = 19, col = forest_dt[, origin_colour], cex = 0.05)
+legend(x = "topright", legend = c("inra", "nfi"), fill = colours[c("inra", "nfi")])
+dev.off()
+
+pdf("pred_bole.pdf")
+plot(stanData$bole_volume_m3, sim_bole, pch = 19, col = forest_dt[, fct_colour], cex = 0.2)
+abline(a = 0, b = 1, lwd = 2, col = "#020202")
+legend(x = "topright", legend = c("conifer", "broadleaf"), fill = colours[c("conifer", "broadleaf")])
+dev.off()
+
+pdf("pred_crown.pdf")
+plot(forest_dt[!is.na(crown_volume_m3), crown_volume_m3], sim_crown, pch = 19,
+	col = forest_dt[!is.na(crown_volume_m3), fct_colour], cex = 0.2)
+abline(a = 0, b = 1, lwd = 2, col = "#020202")
+legend(x = "topright", legend = c("conifer", "broadleaf"), fill = colours[c("conifer", "broadleaf")])
+dev.off()
+
+pdf("pred_vtot.pdf")
+plot(approx_dt[, total_volume_m3], approx_dt[, v_tot_pred], pch = 19,
+	col = forest_dt[!is.na(crown_volume_m3), fct_colour], cex = 0.2)
+abline(a = 0, b = 1, lwd = 2, col = "#020202")
+legend(x = "topright", legend = c("conifer", "broadleaf"), fill = colours[c("conifer", "broadleaf")])
+dev.off()
+```corr = matmat[[1]]
