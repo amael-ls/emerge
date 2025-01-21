@@ -42,5 +42,228 @@ format:
 \newcommand{\F}{\mathscr{F}}
 \newcommand{\N}{\mathbfscr{N}}
 
+\newcommand{\vtot}{v_{\text{tot}}}
+\newcommand{\vbole}{v_{\text{bole}}}
+\newcommand{\vbr}{v_{\text{branches}}}
+
+```{r}
+#| output: false
+#### Clear space and load packages
+rm(list = ls())
+graphics.off()
+
+options(max.print = 500)
+
+library(data.table)
+library(MetBrewer)
+library(bayesplot)
+library(cmdstanr)
+	register_knitr_engine(override = TRUE)
+```
+
 ## Introduction
-The data have been prepared in `01_prepare_data.qmd`
+The data have been prepared in `01_prepare_data.qmd`. In this document, I fit a model on both INRA and French NFI data. In this section, I explore the data, and in the next section I define the model. Lastly  I explore few results.
+
+```{r}
+#| output: false
+
+#### Load the data
+## Path
+os = Sys.info()[['sysname']]
+mnt_point = "/mnt/local_share/"
+if (os == "Linux" || os == "Darwin")
+{
+	if (!dir.exists(mnt_point))
+		stop(paste0("The mounting point <", mnt_point, "> does not exist"))
+} else if (os == "Windows") {
+	stop("TO DO!!! No idea how that works on Windows!")
+} else {
+	stop(paste("Unknown Operating System:", os))
+}
+
+path_data = paste0(mnt_point, "/data/")
+if (!dir.exists(path_data))
+	stop(paste0("Folder <", path_data, "> does not exist! Did you run 01_prepare_data.qmd?"))
+
+## Loading
+stanData = readRDS(paste0(path_data, "stanData_nfi-inra.rds"))
+forest_dt = readRDS(paste0(path_data, "nfi-inra_dt.rds"))
+ind_species = readRDS(paste0(path_data, "ind_species_nfi-inra.rds"))
+
+colours = paste0(met.brewer("Egypt")[1:4])
+names(colours) = c("conifer", "broadleaf", "inra", "nfi")
+
+forest_dt[fct_type == "broadleaf", fct_colour := colours["broadleaf"]]
+forest_dt[fct_type == "conifer", fct_colour := colours["conifer"]]
+forest_dt[origin_data == "inra", origin_colour := colours["inra"]]
+forest_dt[origin_data == "nfi", origin_colour := colours["nfi"]]
+```
+
+```{r}
+colnames(forest_dt)
+
+forest_dt[!is.na(crown_volume_m3), .N, by = fct_type]
+
+png("./test.png", res = 120, height = 1080, width = 1080)
+plot(forest_dt[, log(circumference_m)], forest_dt[, log(bole_volume_m3)], col = forest_dt[, fct_colour], pch = 19,
+	xlab = "Circumference", ylab = "Bole volume")
+legend(x = "topright", legend = c("Broadleaf", "Conifer"), fill = colours[c("broadleaf", "conifer")])
+dev.off()
+
+png("./test2.png", res = 120, height = 1080, width = 1080)
+plot(forest_dt[!is.na(crown_volume_m3), log(circumference_m)], forest_dt[!is.na(crown_volume_m3), log(crown_volume_m3)],
+	col = forest_dt[!is.na(crown_volume_m3), fct_colour], pch = 19, xlab = "Circumference", ylab = "Crown volume")
+legend(x = "topright", legend = c("Broadleaf", "Conifer"), fill = colours[c("broadleaf", "conifer")])
+dev.off()
+
+lm_bole = lm(forest_dt[, log(bole_volume_m3)] ~ 1 + forest_dt[, log(circumference_m)] + forest_dt[, log(circumference_m)^4])
+lm_crown = lm(forest_dt[, log(crown_volume_m3)] ~ 1 + forest_dt[, log(circumference_m)] + forest_dt[, log(circumference_m)^4])
+```
+
+## Methods
+I first try a simple model:
+$$
+\vtot = \vbole + \vbr
+$$
+where the bole volume, $\vbole$, and the branch volume, $\vbr$, both follow a lognormal distribution. For a definition of this volumes see `01_prepare_data.qmd`. The sum of the lognormals can be approximated via a method described in @Lo2012.
+
+```{stan output.var = "nfi_inra", cache = TRUE}
+data {
+	// Dimensions and indices
+	int <lower = 1> N; // Total number of individuals
+	int <lower = 1, upper = N> N_inra; // Number of individuals with a measured crown
+	int <lower = 1, upper = N> S; // Number of species
+	int <lower = 0, upper = S> n_sp_broad_inra; // Number of broadleaf species
+	int <lower = 0, upper = S - n_sp_broad_inra> n_sp_conif_inra; // Number of conifer species
+
+	int <lower = 1, upper = N - 1> ind_start_broad; // Broadleaf index start
+	int <lower = 1, upper = N> ind_end_broad; // Broadleaf index end
+	int <lower = 1, upper = N - 1> ind_start_conif; // Conifer index start
+	int <lower = 1, upper = N> ind_end_conif; // Conifer index end
+	
+	array[n_sp_broad_inra] int ind_start_broad_inra; // Broadleaf crown species index start
+	array[n_sp_broad_inra] int ind_end_broad_inra; // Broadleaf crown species index end
+	array[n_sp_conif_inra] int ind_start_conif_inra; // Conifer crown species index start
+	array[n_sp_conif_inra] int ind_end_conif_inra; // Conifer crown species index end
+
+	// Predictors
+	vector <lower = 0> [N] circumference_m;
+
+	// Response variables
+	vector <lower = 0> [N] bole_volume_m3;
+	vector <lower = 0> [N] crown_volume_m3;
+}
+
+transformed data {
+	// Predictors
+	vector [N] log_circumference_m = log(circumference_m);
+
+	// Response variables
+	vector [N] log_bole_volume_m3 = log(bole_volume_m3);
+	vector [N] log_crown_volume_m3 = log(crown_volume_m3);
+}
+
+parameters {
+	// Intercepts
+	vector [2] a_bole;
+	vector [2] a_crown;
+
+	// Slopes
+	vector [2] b_bole;
+	vector [2] b_crown;
+	vector [2] c_bole;
+	vector [2] c_crown;
+
+	// Variances
+	vector <lower = 0> [2] sigma_bole;
+	vector <lower = 0> [2] sigma_crown;
+}
+
+model {
+	// Priors
+	// --- Intercepts
+	target += normal_lpdf(a_bole | 0, 2);
+	target += normal_lpdf(a_crown | 0, 2);
+
+	// --- Slopes
+	target += normal_lpdf(b_bole | 0, 2);
+	target += normal_lpdf(b_crown | 0, 2);
+
+	target += normal_lpdf(c_bole | 0, 2);
+	target += normal_lpdf(c_crown | 0, 2);
+
+	// --- Variances
+	target += gamma_lpdf(sigma_bole | 1.0^2/5.0, 1.0/5.0);
+	target += gamma_lpdf(sigma_crown | 1.0^2/5.0, 1.0/5.0);
+
+	// Likelihood
+	// --- Broadleaves, bole
+	target += normal_lpdf(log_bole_volume_m3[ind_start_broad:ind_end_broad] | a_bole[1] + 
+		b_bole[1]*log_circumference_m[ind_start_broad:ind_end_broad] +
+		c_bole[1]*log_circumference_m[ind_start_broad:ind_end_broad].^4, sigma_bole[1]);
+	
+	// --- Conifers, bole
+	target += normal_lpdf(log_bole_volume_m3[ind_start_conif:ind_end_conif] | a_bole[2] + 
+		b_bole[2]*log_circumference_m[ind_start_conif:ind_end_conif] +
+		c_bole[2]*log_circumference_m[ind_start_conif:ind_end_conif].^4, sigma_bole[2]);
+
+	// --- Broadleaves, crown
+	for (i in 1:n_sp_broad_inra)
+		target += normal_lpdf(log_crown_volume_m3[ind_start_broad_inra[i]:ind_end_broad_inra[i]] | a_crown[1] + 
+			b_crown[1]*log_circumference_m[ind_start_broad_inra[i]:ind_end_broad_inra[i]] +
+			c_crown[1]*log_circumference_m[ind_start_broad_inra[i]:ind_end_broad_inra[i]].^4, sigma_crown[1]);
+	
+	// --- Conifers, crown
+	for (i in 1:n_sp_conif_inra)
+		target += normal_lpdf(log_crown_volume_m3[ind_start_conif_inra[i]:ind_end_conif_inra[i]] | a_crown[2] + 
+			b_crown[2]*log_circumference_m[ind_start_conif_inra[i]:ind_end_conif_inra[i]] +
+			c_crown[2]*log_circumference_m[ind_start_conif_inra[i]:ind_end_conif_inra[i]].^4, sigma_crown[2]);
+}
+```
+
+
+```{r}
+n_chains = 4
+# woodstock_seed = 1969 - 08 - 18
+iter_warmup = 350
+iter_sampling = 500
+
+nfi_inra = cmdstan_model("./test_nfi-inra.stan")
+
+stanData$total_volume_m3 = NULL
+stanData$crown_volume_m3[is.na(stanData$crown_volume_m3)] = Inf
+stanData$ind_start_broad = min(stanData$ind_start_broad)
+stanData$ind_end_broad = max(stanData$ind_end_broad)
+stanData$ind_start_conif = min(stanData$ind_start_conif)
+stanData$ind_end_conif = max(stanData$ind_end_conif)
+
+## Fit
+if (!file.exists("fit_inra-nfi.rds"))
+{
+	fit = nfi_inra$sample(data = stanData, chains = n_chains, parallel_chains = ifelse(n_chains < 4, n_chains, 4),
+		seed = NULL, refresh = 50, max_treedepth = 12, save_warmup = TRUE,
+		iter_sampling = iter_sampling, iter_warmup = iter_warmup, adapt_delta = 0.8)
+	fit$save_output_files(dir = "./", basename = paste0("fit_inra-nfi"), random = FALSE)
+	saveRDS(fit, "./fit_inra-nfi.rds")
+} else {
+	fit = readRDS("./fit_inra-nfi.rds")
+}
+```
+
+## Results
+As can be seen here in what follows there is no problem of convergence
+```{r}
+mcmc_trace(fit$draws(c("a_bole", "a_crown")))
+mcmc_trace(fit$draws(c("b_bole", "b_crown")))
+mcmc_trace(fit$draws(c("c_bole", "c_crown")))
+mcmc_trace(fit$draws(c("sigma_bole", "sigma_crown")))
+
+mcmc_rhat(bayesplot::rhat(fit))
+mcmc_nuts_divergence(bayesplot::nuts_params(fit), lp = log_posterior(fit))
+```
+
+I now do some posterior checks:
+
+1. What are the residuals?
+2. How well does it predict an independent dataset?
+
