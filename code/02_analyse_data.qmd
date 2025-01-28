@@ -58,10 +58,10 @@ options(max.print = 500)
 
 library(data.table)
 library(MetBrewer)
+library(rootSolve)
 library(bayesplot)
 library(cmdstanr)
 	register_knitr_engine(override = TRUE)
-library(lognorm)
 ```
 
 ## Introduction
@@ -330,11 +330,6 @@ generated quantities {
 ```
 
 ```{r}
-n_chains = 4
-# woodstock_seed = 1969 - 08 - 18
-iter_warmup = 350
-iter_sampling = 500
-
 genQ = cmdstan_model("./genQ_nfi-inra.stan")
 
 stanData_new = stanData
@@ -359,8 +354,6 @@ stanData_new$predict_crown = 1 # Stan uses 0 to encode false, and 1 to encode tr
 
 posteriorVols = genQ$generate_quantities(fitted_params = fit$draws(inc_warmup = FALSE), data = stanData_new,
 	parallel_chains = min(n_chains, 4))
-
-dim(posteriorVols)
 
 sim_bole = apply(X = posteriorVols$draws("bole_volume_new"), MARGIN = 3, FUN = mean)
 sim_crown = apply(X = posteriorVols$draws("crown_volume_new"), MARGIN = 3, FUN = mean)
@@ -472,4 +465,82 @@ plot(approx_dt[, total_volume_m3], approx_dt[, v_tot_pred], pch = 19,
 abline(a = 0, b = 1, lwd = 2, col = "#020202")
 legend(x = "topright", legend = c("conifer", "broadleaf"), fill = colours[c("conifer", "broadleaf")])
 dev.off()
-```corr = matmat[[1]]
+```
+
+```{r}
+approx_logN = function(mu1, mu2, sigma1, sigma2, s1 = 0.2, s2 = 1, N = 12, start = c(1, 1))
+{
+	# The source of the method is:
+	#	Mehta, N.B. and Wu, Jingxian and Molisch, A.F. and Zhang, Jin, 2007
+	#	Approximating a Sum of Random Variables with a Lognormal
+	#	IEEE Transactions on Wireless Communications, vol. 7, pp. 2690–2699
+	#	10.1109/twc.2007.051000
+	#
+	# The source of the weights and abscissa is:
+	#	Herbert E. Salzer, Ruth Zucker, and Ruth Capuano, 1952
+	#	Table of the Zeros and Weight Factors of the First Twenty Hermite Polynomials
+	#	Journal of Research of the National Bureau of Standards Vol. 48, No.2
+
+	## Gauß-Hermite 
+	if (N != 12)
+		stop("You must choose N = 12 as I did not write the coefficients and abscissa for any other value of N")
+
+	abscissa = c(0.314240376254359,
+		0.947788391240164,
+		1.597682635152605,
+		2.279507080501060,
+		3.020637025120890,
+		3.889724897869782)
+
+	hermite_dt = data.table(
+		abscissa = c(-abscissa, abscissa),
+		weights = rep(c(
+			5.701352362625e-1,
+			2.604923102642e-1,
+			5.160798561588e-2,
+			3.905390584629e-3,
+			8.573687043588e-5,
+			2.658551684356e-7
+		), 2)
+	)
+
+	gaussHermite = function(s, mu, sigma, hermite_dt)
+	{
+		gh = hermite_dt[, weights] %*% exp(-s * exp(sqrt(2)*sigma*hermite_dt[, abscissa] + mu))
+		return(1/sqrt(pi) * gh)
+	}
+
+	psi_hat_s1 = gaussHermite(s1, mu1, sigma1, hermite_dt)*gaussHermite(s1, mu2, sigma2, hermite_dt)
+	psi_hat_s2 = gaussHermite(s2, mu1, sigma1, hermite_dt)*gaussHermite(s2, mu2, sigma2, hermite_dt)
+
+	fun_to_optim = function(x, s1, s2, psi_hat_s1, psi_hat_s2, hermite_dt) # x = c(mu, sigma)
+	{
+		Eq1 = gaussHermite(s1, x[1], x[2], hermite_dt) - psi_hat_s1
+		Eq2 = gaussHermite(s2, x[1], x[2], hermite_dt) - psi_hat_s2
+
+		return(c(Eq1, Eq2))
+	}
+
+	mu_sigma = multiroot(f = fun_to_optim, start = start, s1 = s1, s2 = s2, psi_hat_s1 = psi_hat_s1,
+		psi_hat_s2 = psi_hat_s2, hermite_dt = hermite_dt)
+	
+	return(c(mu = mu_sigma[["root"]][1], sigma = mu_sigma[["root"]][2], iter = mu_sigma[["iter"]],
+		estimated_prec = mu_sigma[["estim.precis"]]))
+}
+
+## Parameters of the lognormals
+mu1 = 1
+mu2 = -3
+sigma1 = 0.25
+sigma2 = 0.42
+
+set.seed(1968 - 08 - 18)
+aa = rlnorm(1e4, mu1, sigma1)
+bb = rlnorm(1e4, mu2, sigma2)
+cc = aa + bb
+
+test = approx_logN(mu1, mu2, sigma1, sigma2)
+
+plot(density(cc), lwd = 4)
+curve(dlnorm(x, test["mu"], test["sigma"]), lwd = 2, col = "#CD212A", add = TRUE)
+```
