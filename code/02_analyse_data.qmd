@@ -103,24 +103,24 @@ forest_dt[origin_data == "nfi", origin_colour := colours["nfi"]]
 ```
 
 ```{r}
-colnames(forest_dt)
+#| echo: false
+#| label: fig-explore_data
+#| fig-cap: "Explore the data"
+#| fig-subcap: 
+#|   - "Bole"
+#|   - "Crown"
+#| layout-ncol: 2
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 8.142857
 
-forest_dt[!is.na(crown_volume_m3), .N, by = fct_type]
-
-png("./test.png", res = 120, height = 1080, width = 1080)
 plot(forest_dt[, log(circumference_m)], forest_dt[, log(bole_volume_m3)], col = forest_dt[, fct_colour], pch = 19,
 	xlab = "Circumference", ylab = "Bole volume")
 legend(x = "topright", legend = c("Broadleaf", "Conifer"), fill = colours[c("broadleaf", "conifer")])
-dev.off()
 
-png("./test2.png", res = 120, height = 1080, width = 1080)
 plot(forest_dt[!is.na(crown_volume_m3), log(circumference_m)], forest_dt[!is.na(crown_volume_m3), log(crown_volume_m3)],
 	col = forest_dt[!is.na(crown_volume_m3), fct_colour], pch = 19, xlab = "Circumference", ylab = "Crown volume")
 legend(x = "topright", legend = c("Broadleaf", "Conifer"), fill = colours[c("broadleaf", "conifer")])
-dev.off()
-
-lm_bole = lm(forest_dt[, log(bole_volume_m3)] ~ 1 + forest_dt[, log(circumference_m)] + forest_dt[, log(circumference_m)^4])
-lm_crown = lm(forest_dt[, log(crown_volume_m3)] ~ 1 + forest_dt[, log(circumference_m)] + forest_dt[, log(circumference_m)^4])
 ```
 
 ## Methods
@@ -128,7 +128,7 @@ I first try a simple model:
 $$
 \vtot = \vbole + \vbr
 $$
-where the bole volume, $\vbole$, and the branch volume, $\vbr$, both follow a lognormal distribution (see @sec-reconstruct for a proof). For a definition of this volumes see `01_prepare_data.qmd`. The sum of the lognormals can be approximated via a method described in @Lo2012.
+where the bole volume, $\vbole$, and the branch volume, $\vbr$, both follow a lognormal distribution (see @sec-reconstruct for a proof). For a definition of this volumes see `01_prepare_data.qmd`. The sum of the lognormals can be approximated via a method described in @Mehta2007.
 
 ```{stan output.var = "nfi_inra", cache = TRUE}
 data {
@@ -231,7 +231,7 @@ n_chains = 4
 iter_warmup = 350
 iter_sampling = 500
 
-nfi_inra = cmdstan_model("./test_nfi-inra.stan")
+# nfi_inra = cmdstan_model("./test_nfi-inra.stan")
 
 stanData$total_volume_m3 = NULL
 stanData$crown_volume_m3[is.na(stanData$crown_volume_m3)] = Inf
@@ -256,6 +256,7 @@ if (!file.exists("fit_inra-nfi.rds"))
 ## Results
 As can be seen here in what follows there is no problem of convergence:
 ```{r}
+#| results: hold
 mcmc_trace(fit$draws(c("a_bole", "a_crown")))
 mcmc_trace(fit$draws(c("b_bole", "b_crown")))
 mcmc_trace(fit$draws(c("c_bole", "c_crown")))
@@ -283,192 +284,10 @@ So far, I fit a model on $X = \log(V) \sim \N(\mu, \sigma)$. Following @Wasserma
 		&= \int_{-\infty}^{y} \frac{1}{\sqrt{2 \pi} \sigma z} \exp\left[ -\frac{1}{2} \left(\frac{\log(z) - \mu}{\sigma} \right) \right] \, dz && \text{with change of variable } z = \exp(x)
 \end{align*}
 which is the lognormal distribution $\logN(\mu, \sigma)$.
-3. Now the total volume can be approximated by the formula of @Lo2012.
-
-### Residuals
-We compute the residuals as the mean of the bayesian simulations minus the observed. Note that we use the lognormal distribution and the real observations rather than the normal distribution and the log-transformed observation.
-
-```{stan output.var = "genQ", cache = TRUE}
-// This standalone script generates volume for a given species
-
-data {
-	// Dimensions and indices for parameters
-	int S; // Number of species
-	
-	// New data for generating posterior
-	int N_new; // Number of new individuals
-	int<lower = 1, upper = S> species_id; // Index of the species
-	int<lower = 1, upper = 2> fct_type; // Functional type, 1 = broadleaf, 2 = conifer
-
-	// Predictors
-	vector [N_new] hdn_new;
-	vector [N_new] slenderness_new;
-	vector [N_new] corrected_cyl_vol_new;
-}
-
-parameters {
-	// Fixed effects (population parameters) for broadleaf and conifer
-	vector[2] b0;
-	vector[2] b1;
-	vector[2] b2;
-	
-	// Random effects (group parameters)
-	vector[S] beta0;
-	vector[S] beta2;
-
-	// Variances
-	real<lower = 0> sigma; // sd residuals
-	real<lower = 0> sigma_beta0; // sd random effect beta0
-	real<lower = 0> sigma_beta2; // sd random effect beta2
-}
-
-generated quantities {
-	vector[N_new] avg = (beta0[species_id] + b1[fct_type]*hdn_new + beta2[species_id]*slenderness_new) .*
-		corrected_cyl_vol_new;
-	array[N_new] real volume_new = normal_rng(avg, sigma);
-}
-```
+3. Now the total volume can be approximated by the formula of @Mehta2007 coded below.
 
 ```{r}
-genQ = cmdstan_model("./genQ_nfi-inra.stan")
-
-stanData_new = stanData
-stanData_new$N_new = stanData$N
-stanData_new$N_inra_new = stanData$N_inra
-stanData_new$n_sp_broad_inra_new = stanData_new$n_sp_broad_inra
-stanData_new$n_sp_conif_inra_new = stanData_new$n_sp_conif_inra
-
-stanData_new$start_broad_new = stanData_new$ind_start_broad
-stanData_new$end_broad_new = stanData_new$ind_end_broad
-stanData_new$start_conif_new = stanData_new$ind_start_conif
-stanData_new$end_conif_new = stanData_new$ind_end_conif
-
-stanData_new$start_broad_inra_new = stanData_new$ind_start_broad_inra
-stanData_new$end_broad_inra_new = stanData_new$ind_end_broad_inra
-stanData_new$start_conif_inra_new = stanData_new$ind_start_conif_inra
-stanData_new$end_conif_inra_new = stanData_new$ind_end_conif_inra
-
-stanData_new$circumference_m_new = stanData_new$circumference_m
-
-stanData_new$predict_crown = 1 # Stan uses 0 to encode false, and 1 to encode true
-
-posteriorVols = genQ$generate_quantities(fitted_params = fit$draws(inc_warmup = FALSE), data = stanData_new,
-	parallel_chains = min(n_chains, 4))
-
-sim_bole = apply(X = posteriorVols$draws("bole_volume_new"), MARGIN = 3, FUN = mean)
-sim_crown = apply(X = posteriorVols$draws("crown_volume_new"), MARGIN = 3, FUN = mean)
-
-approx_dt = forest_dt[!is.na(crown_volume_m3), .(fct_type, circumference_m, total_volume_m3)]
-
-approx_dt[fct_type == "broadleaf", c("mu_bole", "sd_bole") := .(apply(X = fit$draws("a_bole[1]"), MARGIN = 3, FUN = mean) +
-	apply(X = fit$draws("b_bole[1]", inc_warmup = FALSE), MARGIN = 3, FUN = mean)*log(circumference_m) +
-	apply(X = fit$draws("c_bole[1]", inc_warmup = FALSE), MARGIN = 3, FUN = mean)*log(circumference_m)^4,
-	apply(X = fit$draws("sigma_bole[1]"), MARGIN = 3, FUN = mean))]
-approx_dt[fct_type == "conifer", c("mu_bole", "sd_bole") := .(apply(X = fit$draws("a_bole[2]"), MARGIN = 3, FUN = mean) +
-	apply(X = fit$draws("b_bole[2]", inc_warmup = FALSE), MARGIN = 3, FUN = mean)*log(circumference_m) +
-	apply(X = fit$draws("c_bole[2]", inc_warmup = FALSE), MARGIN = 3, FUN = mean)*log(circumference_m)^4,
-	apply(X = fit$draws("sigma_bole[2]"), MARGIN = 3, FUN = mean))]
-
-approx_dt[fct_type == "broadleaf", c("mu_crown", "sd_crown") := .(apply(X = fit$draws("a_crown[1]"), MARGIN = 3, FUN = mean) +
-	apply(X = fit$draws("b_crown[1]", inc_warmup = FALSE), MARGIN = 3, FUN = mean)*log(circumference_m) +
-	apply(X = fit$draws("c_crown[1]", inc_warmup = FALSE), MARGIN = 3, FUN = mean)*log(circumference_m)^4,
-	apply(X = fit$draws("sigma_crown[1]"), MARGIN = 3, FUN = mean))]
-approx_dt[fct_type == "conifer", c("mu_crown", "sd_crown") := .(apply(X = fit$draws("a_crown[2]"), MARGIN = 3, FUN = mean) +
-	apply(X = fit$draws("b_crown[2]", inc_warmup = FALSE), MARGIN = 3, FUN = mean)*log(circumference_m) +
-	apply(X = fit$draws("c_crown[2]", inc_warmup = FALSE), MARGIN = 3, FUN = mean)*log(circumference_m)^4,
-	apply(X = fit$draws("sigma_crown[2]"), MARGIN = 3, FUN = mean))]
-
-
-matmat = vector(mode = "list", length = approx_dt[, .N])
-
-a_bole = fit$draws("a_bole")
-b_bole = fit$draws("b_bole")
-c_bole = fit$draws("c_bole")
-
-a_crown = fit$draws("a_crown")
-b_crown = fit$draws("a_crown")
-c_crown = fit$draws("a_crown")
-
-sigma_bole = fit$draws("sigma_bole")
-sigma_crown = fit$draws("sigma_crown")
-
-for (i in seq_along(matmat))
-{
-	if (approx_dt[i, fct_type] == "broadleaf")
-	{
-		temp = data.table(
-			mu_bole = as.vector(a_bole[, , 1] + b_bole[, , 1]*log(approx_dt[i, circumference_m]) +
-				c_bole[, , 1]*log(approx_dt[i, circumference_m])^4),
-			mu_crown = as.vector(a_crown[, , 1] + b_crown[, , 1]*log(approx_dt[i, circumference_m]) +
-				c_crown[, , 1]*log(approx_dt[i, circumference_m])^4),
-			sigma_bole = as.vector(sigma_bole),
-			sigma_crown = as.vector(sigma_crown)
-		)
-		matmat[[i]] = cor(temp)
-	} else {
-		temp = data.table(
-			mu_bole = as.vector(a_bole[, , 2] + b_bole[, , 2]*log(approx_dt[i, circumference_m]) +
-				c_bole[, , 2]*log(approx_dt[i, circumference_m])^4),
-			mu_crown = as.vector(a_crown[, , 2] + b_crown[, , 2]*log(approx_dt[i, circumference_m]) +
-				c_crown[, , 2]*log(approx_dt[i, circumference_m])^4),
-			sigma_bole = as.vector(sigma_bole),
-			sigma_crown = as.vector(sigma_crown)
-		)
-		matmat[[i]] = cor(temp)
-	}
-}
-
-approx_dt[, c("mu_tot", "sigma_tot") := as.list(estimateSumLognormal(mu = c(mu_bole, mu_crown),
-	sigma = c(sd_bole, sd_crown), corr = matmat[[.I]])), by = .I]
-
-approx_dt[, v_tot_pred := exp(mu_tot + sigma_tot^2/2)]
-
-curve(dlnorm(x, meanlog = -1.084176, sdlog = 0.2897294), lwd = 2, col = "#CD212A", to = 1.5)
-abline(v = 0.51050, lwd = 2)
-abline(v = 0.35267655, lwd = 2)
-
-estimateSumLognormal(mu = c(-1.347949, -2.709285), sigma = c(0.3366277, 0.5570702), corr = matmat[[1]]) -
-estimateSumLognormal(mu = c(-1.347949, -2.709285), sigma = c(0.3366277, 0.5570702))
-
-exp(-1.083712 + 0.288125^2/2) - exp(-1.1880649 + 0.5401125^2/2)
-
-rm(posteriorVols)
-rm(stanData_new)
-
-res = sim_bole - stanData$bole_volume_m3
-
-pdf("density_res.pdf")
-plot(density(res))
-dev.off()
-
-pdf("res.pdf")
-plot(res, pch = 19, col = forest_dt[, origin_colour], cex = 0.05)
-legend(x = "topright", legend = c("inra", "nfi"), fill = colours[c("inra", "nfi")])
-dev.off()
-
-pdf("pred_bole.pdf")
-plot(stanData$bole_volume_m3, sim_bole, pch = 19, col = forest_dt[, fct_colour], cex = 0.2)
-abline(a = 0, b = 1, lwd = 2, col = "#020202")
-legend(x = "topright", legend = c("conifer", "broadleaf"), fill = colours[c("conifer", "broadleaf")])
-dev.off()
-
-pdf("pred_crown.pdf")
-plot(forest_dt[!is.na(crown_volume_m3), crown_volume_m3], sim_crown, pch = 19,
-	col = forest_dt[!is.na(crown_volume_m3), fct_colour], cex = 0.2)
-abline(a = 0, b = 1, lwd = 2, col = "#020202")
-legend(x = "topright", legend = c("conifer", "broadleaf"), fill = colours[c("conifer", "broadleaf")])
-dev.off()
-
-pdf("pred_vtot.pdf")
-plot(approx_dt[, total_volume_m3], approx_dt[, v_tot_pred], pch = 19,
-	col = forest_dt[!is.na(crown_volume_m3), fct_colour], cex = 0.2)
-abline(a = 0, b = 1, lwd = 2, col = "#020202")
-legend(x = "topright", legend = c("conifer", "broadleaf"), fill = colours[c("conifer", "broadleaf")])
-dev.off()
-```
-
-```{r}
-approx_logN = function(mu1, mu2, sigma1, sigma2, s1 = 0.2, s2 = 1, N = 12, start = c(1, 1))
+approx_logN = function(mu1, mu2, sigma1, sigma2, s1 = 0.2, s2 = 1, N = 12, start = c(-0.5, 0.5))
 {
 	# The source of the method is:
 	#	Mehta, N.B. and Wu, Jingxian and Molisch, A.F. and Zhang, Jin, 2007
@@ -527,20 +346,326 @@ approx_logN = function(mu1, mu2, sigma1, sigma2, s1 = 0.2, s2 = 1, N = 12, start
 	return(c(mu = mu_sigma[["root"]][1], sigma = mu_sigma[["root"]][2], iter = mu_sigma[["iter"]],
 		estimated_prec = mu_sigma[["estim.precis"]]))
 }
+```
 
-## Parameters of the lognormals
+Test of the function `approx_logN`:
+```{r}
+#| label: fig-approx_logN
+#| fig-cap: "Approximation of the sum of two lognormal variables"
+
+## Test of the function
+# Parameters of the lognormals
 mu1 = 1
 mu2 = -3
 sigma1 = 0.25
 sigma2 = 0.42
 
+# Generate numbers
 set.seed(1968 - 08 - 18)
 aa = rlnorm(1e4, mu1, sigma1)
 bb = rlnorm(1e4, mu2, sigma2)
 cc = aa + bb
 
-test = approx_logN(mu1, mu2, sigma1, sigma2)
+# Test
+test = approx_logN(mu1, mu2, sigma1, sigma2, start = c(1, 1))
 
-plot(density(cc), lwd = 4)
+plot(density(cc), lwd = 5)
 curve(dlnorm(x, test["mu"], test["sigma"]), lwd = 2, col = "#CD212A", add = TRUE)
+```
+
+### Residuals
+We compute the residuals as the mean of the bayesian simulations minus the observed. Note that we use the lognormal distribution and the real observations rather than the normal distribution and the log-transformed observation.
+
+```{stan output.var = "genQ", cache = TRUE}
+data {
+	// Dimensions and indices
+	int <lower = 1> N_new; // Total number of individuals for simulations
+	int <lower = 0, upper = N_new> N_inra_new; // Number of individuals with a measured crown for simulations
+	int <lower = 0> n_sp_broad_inra_new; // Number of broadleaf species for simulations
+	int <lower = 0> n_sp_conif_inra_new; // Number of conifer species for simulations
+
+	int <lower = 0, upper = N_new> start_broad_new; // Broadleaf index start (for simulations)
+	int <lower = 0, upper = N_new> end_broad_new; // Broadleaf index end (for simulations)
+	int <lower = 0, upper = N_new> start_conif_new; // Conifer index start (for simulations)
+	int <lower = 0, upper = N_new> end_conif_new; // Conifer index end (for simulations)
+	
+	array[n_sp_broad_inra_new] int start_broad_inra_new; // Broadleaf crown species index start (for simulations)
+	array[n_sp_broad_inra_new] int end_broad_inra_new; // Broadleaf crown species index end (for simulations)
+	array[n_sp_conif_inra_new] int start_conif_inra_new; // Conifer crown species index start (for simulations)
+	array[n_sp_conif_inra_new] int end_conif_inra_new; // Conifer crown species index end (for simulations)
+
+	// Predictors
+	vector <lower = 0> [N_new] circumference_m_new;
+
+	// Boolean, Stan uses 0 to encode false, and 1 to encode true
+	int <lower = 0, upper = 1> predict_crown; // Should crown volume predicted for trees without crown measurements
+}
+
+transformed data {
+	// Predictors
+	vector [N_new] log_circumference_m_new = log(circumference_m_new);
+}
+
+parameters {
+	// Intercepts
+	vector [2] a_bole;
+	vector [2] a_crown;
+
+	// Slopes
+	vector [2] b_bole;
+	vector [2] b_crown;
+	vector [2] c_bole;
+	vector [2] c_crown;
+
+	// Variances
+	vector <lower = 0> [2] sigma_bole;
+	vector <lower = 0> [2] sigma_crown;
+}
+
+generated quantities {
+	// Declare quantities
+	array[N_new] real bole_volume_new;
+	array[N_inra_new] real crown_volume_new;
+	array[N_new] real crown_volume_new_pred;
+
+	// Generate bole volume simulations
+	bole_volume_new[start_broad_new:end_broad_new] = lognormal_rng(a_bole[1] + 
+			b_bole[1]*log_circumference_m_new[start_broad_new:end_broad_new] +
+			c_bole[1]*log_circumference_m_new[start_broad_new:end_broad_new].^4, sigma_bole[1]);
+
+	bole_volume_new[start_conif_new:end_conif_new] = lognormal_rng(a_bole[2] + 
+			b_bole[2]*log_circumference_m_new[start_conif_new:end_conif_new] +
+			c_bole[2]*log_circumference_m_new[start_conif_new:end_conif_new].^4, sigma_bole[2]);
+
+	// Generate crown volume simulations
+	if (N_inra_new > 0)
+	{
+		int temp_start = 1;
+		int temp_end;
+
+		// --- Broadleaves, crown
+		for (i in 1:n_sp_broad_inra_new)
+		{
+			temp_end = temp_start + end_broad_inra_new[i] - start_broad_inra_new[i];
+			
+			crown_volume_new[temp_start:temp_end] = lognormal_rng(a_crown[1] + 
+				b_crown[1]*log_circumference_m_new[start_broad_inra_new[i]:end_broad_inra_new[i]] +
+				c_crown[1]*log_circumference_m_new[start_broad_inra_new[i]:end_broad_inra_new[i]].^4, sigma_crown[1]);
+			
+			temp_start = temp_end + 1;
+		}
+		
+		// --- Conifers, crown
+		for (i in 1:n_sp_conif_inra_new)
+		{
+			temp_end = temp_start + end_conif_inra_new[i] - start_conif_inra_new[i];
+
+			crown_volume_new[temp_start:temp_end] = lognormal_rng(a_crown[2] + 
+				b_crown[2]*log_circumference_m_new[start_conif_inra_new[i]:end_conif_inra_new[i]] +
+				c_crown[2]*log_circumference_m_new[start_conif_inra_new[i]:end_conif_inra_new[i]].^4, sigma_crown[2]);
+
+			temp_start = temp_end + 1;
+		}
+	}
+
+	// Generate crown volume simulations with predictions for non crown-measured trees
+	if (predict_crown)
+	{
+		// --- Broadleaves, crown
+		crown_volume_new_pred[start_broad_new:end_broad_new] = lognormal_rng(a_crown[1] + 
+				b_crown[1]*log_circumference_m_new[start_broad_new:end_broad_new] +
+				c_crown[1]*log_circumference_m_new[start_broad_new:end_broad_new].^4, sigma_crown[1]);
+
+		// --- Conifers, crown
+		crown_volume_new_pred[start_conif_new:end_conif_new] = lognormal_rng(a_crown[2] + 
+				b_crown[2]*log_circumference_m_new[start_conif_new:end_conif_new] +
+				c_crown[2]*log_circumference_m_new[start_conif_new:end_conif_new].^4, sigma_crown[2]);
+	}
+}
+```
+
+```{r}
+#| warning: false
+#| output: false
+
+stanData_new = stanData
+stanData_new$N_new = stanData$N
+stanData_new$N_inra_new = stanData$N_inra
+stanData_new$n_sp_broad_inra_new = stanData_new$n_sp_broad_inra
+stanData_new$n_sp_conif_inra_new = stanData_new$n_sp_conif_inra
+
+stanData_new$start_broad_new = stanData_new$ind_start_broad
+stanData_new$end_broad_new = stanData_new$ind_end_broad
+stanData_new$start_conif_new = stanData_new$ind_start_conif
+stanData_new$end_conif_new = stanData_new$ind_end_conif
+
+stanData_new$start_broad_inra_new = stanData_new$ind_start_broad_inra
+stanData_new$end_broad_inra_new = stanData_new$ind_end_broad_inra
+stanData_new$start_conif_inra_new = stanData_new$ind_start_conif_inra
+stanData_new$end_conif_inra_new = stanData_new$ind_end_conif_inra
+
+stanData_new$circumference_m_new = stanData_new$circumference_m
+
+stanData_new$predict_crown = 1 # Stan uses 0 to encode false, and 1 to encode true
+
+posteriorVols = genQ$generate_quantities(fitted_params = fit$draws(inc_warmup = FALSE), data = stanData_new,
+	parallel_chains = min(n_chains, 4))
+
+sim_bole = apply(X = posteriorVols$draws("bole_volume_new"), MARGIN = 3, FUN = mean)
+sim_crown = apply(X = posteriorVols$draws("crown_volume_new"), MARGIN = 3, FUN = mean)
+
+rm(posteriorVols, stanData_new)
+
+a_bole = apply(X = fit$draws("a_bole"), MARGIN = 3, FUN = mean)
+b_bole = apply(X = fit$draws("b_bole"), MARGIN = 3, FUN = mean)
+c_bole = apply(X = fit$draws("c_bole"), MARGIN = 3, FUN = mean)
+
+a_crown = apply(X = fit$draws("a_crown"), MARGIN = 3, FUN = mean)
+b_crown = apply(X = fit$draws("a_crown"), MARGIN = 3, FUN = mean)
+c_crown = apply(X = fit$draws("a_crown"), MARGIN = 3, FUN = mean)
+
+sigma_bole = apply(X = fit$draws("sigma_bole"), MARGIN = 3, FUN = mean)
+sigma_crown = apply(X = fit$draws("sigma_crown"), MARGIN = 3, FUN = mean)
+
+ind_crown = unlist(mapply(seq, ind_species[origin_data == "inra", start_sp_orig],
+	ind_species[origin_data == "inra", end_sp_orig]))
+
+approx_dt = forest_dt[!is.na(crown_volume_m3), .(fct_type, circumference_m, bole_volume_m3, crown_volume_m3,
+	total_volume_m3, fct_colour, origin_colour)]
+
+approx_dt[, sim_bole_m3 := sim_bole[ind_crown]]
+approx_dt[, sim_crown_m3 := sim_crown]
+approx_dt[, sim_tot_m3 := sim_bole_m3 + sim_crown_m3]
+
+approx_dt[, res_bole_m3 := sim_bole_m3 - bole_volume_m3]
+approx_dt[, res_crown_m3 := sim_crown_m3 - crown_volume_m3]
+approx_dt[, res_tot_m3 := sim_tot_m3 - total_volume_m3]
+
+## Compute the mu_bole for each tree, and add sd_bole
+approx_dt[fct_type == "broadleaf", c("mu_bole", "sd_bole") := .(a_bole[1] +
+	b_bole[1]*log(circumference_m) + c_bole[1]*log(circumference_m)^4, sigma_bole[1])]
+approx_dt[fct_type == "conifer", c("mu_bole", "sd_bole") := .(a_bole[2] +
+	b_bole[2]*log(circumference_m) + c_bole[2]*log(circumference_m)^4, sigma_bole[2])]
+
+## Compute the mu_crown for each tree, and add sd_crown
+approx_dt[fct_type == "broadleaf", c("mu_crown", "sd_crown") := .(a_crown[1] +
+	b_crown[1]*log(circumference_m) + c_crown[1]*log(circumference_m)^4, sigma_crown[1])]
+approx_dt[fct_type == "conifer", c("mu_crown", "sd_crown") := .(a_crown[2] +
+	b_crown[2]*log(circumference_m) + c_crown[2]*log(circumference_m)^4, sigma_crown[2])]
+
+approx_dt = approx_dt[mu_crown > -15]
+
+approx_dt[, c("mu_tot_est", "sigma_tot_est") := as.list(approx_logN(mu_bole, mu_crown, sd_bole, sd_crown)[c("mu", "sigma")]),
+	by = .I]
+
+approx_dt[sigma_tot_est < 0, c("mu_tot_est", "sigma_tot_est") := as.list(
+	approx_logN(mu_bole, mu_crown, sd_bole, sd_crown, start = c(1, 1))[c("mu", "sigma")]), by = .I]
+
+approx_dt[abs(mu_tot_est) > 100, c("mu_tot_est", "sigma_tot_est") := as.list(
+	approx_logN(mu_bole, mu_crown, sd_bole, sd_crown, start = c(1, 1))[c("mu", "sigma")]), by = .I]
+
+approx_dt[, mean_v_tot_pred := exp(mu_tot_est + sigma_tot_est^2/2)]
+```
+
+```{r}
+#| echo: false
+#| label: fig-residual_densities
+#| fig-cap: "Densities of the residuals for bole, crown, and total volume"
+#| fig-subcap: 
+#|   - "Bole"
+#|   - "Crown"
+#|   - "Total"
+#| layout-nrow: 3
+#| fig-asp: 0.7
+#| out-width: 95%
+#| fig-width: 8.142857
+
+plot(density(approx_dt[, res_bole_m3]), lwd = 2, main = "Bole")
+plot(density(approx_dt[, res_crown_m3]), lwd = 2, main = "Crown")
+plot(density(approx_dt[, res_tot_m3]), lwd = 2, main = "Total")
+```
+
+```{r}
+#| echo: false
+#| label: fig-residuals
+#| fig-cap: "Scatter plots of the residuals for bole, crown, and total volume"
+#| fig-subcap: 
+#|   - "Bole"
+#|   - "Crown"
+#|   - "Total"
+#| layout-nrow: 3
+#| fig-asp: 0.7
+#| out-width: 95%
+#| fig-width: 8.142857
+
+plot(approx_dt[, res_bole_m3], pch = 19, cex = 0.05, xlab = "", ylab = "Residuals bole")
+plot(approx_dt[, res_crown_m3], pch = 19, cex = 0.05, xlab = "", ylab = "Residuals crown")
+plot(approx_dt[, res_tot_m3], pch = 19, cex = 0.05, xlab = "", ylab = "Residuals tot")
+```
+
+```{r}
+#| echo: false
+#| label: fig-bole_pred
+#| fig-cap: "Predicted vs measured bole volumes"
+#| fig-subcap: 
+#|   - "Conifer *vs* broadleaf (whole dataset)"
+#|   - "Conifer *vs* broadleaf (Inra)"
+#|   - "NFI *vs* Inra"
+#| layout-nrow: 3
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 8.142857
+
+plot(forest_dt[, bole_volume_m3], sim_bole, pch = 19, col = forest_dt[, fct_colour], cex = 0.2,
+	xlab = "Measured bole volume (m³)", ylab = "Predicted bole volume (m³)")
+abline(a = 0, b = 1, lwd = 2, col = "#020202")
+legend(x = "topright", legend = c("conifer", "broadleaf"), fill = colours[c("conifer", "broadleaf")])
+
+plot(approx_dt[, bole_volume_m3], approx_dt[, sim_bole_m3], pch = 19, col = approx_dt[, fct_colour], cex = 0.2,
+	xlab = "Measured bole volume (m³)", ylab = "Predicted bole volume (m³)")
+abline(a = 0, b = 1, lwd = 2, col = "#020202")
+legend(x = "topright", legend = c("conifer", "broadleaf"), fill = colours[c("conifer", "broadleaf")])
+
+plot(forest_dt[, bole_volume_m3], sim_bole, pch = 19, col = forest_dt[, origin_colour], cex = 0.2,
+	xlab = "Measured bole volume (m³)", ylab = "Predicted bole volume (m³)")
+points(approx_dt[, bole_volume_m3], approx_dt[, sim_bole_m3], , pch = 19, col = approx_dt[, origin_colour], cex = 0.2)
+abline(a = 0, b = 1, lwd = 2, col = "#020202")
+legend(x = "topright", legend = c("NFI", "Inra"), fill = colours[c("nfi", "inra")])
+```
+
+```{r}
+#| echo: false
+#| label: fig-crown_pred
+#| fig-cap: "Predicted vs measured crown volumes"
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 8.142857
+
+plot(approx_dt[, crown_volume_m3], approx_dt[, sim_crown_m3], pch = 19, col = approx_dt[, fct_colour],
+	cex = 0.2, xlab = "Measured crown volume (m³)", ylab = "Predicted crown volume (m³)")
+abline(a = 0, b = 1, lwd = 2, col = "#020202")
+legend(x = "topright", legend = c("conifer", "broadleaf"), fill = colours[c("conifer", "broadleaf")])
+```
+
+```{r}
+#| echo: false
+#| label: fig-tot_pred
+#| fig-cap: "Predicted vs measured total volumes"
+#| fig-subcap: 
+#|   - "Averaged simulation"
+#|   - "Averaged value of the approximation, using the formula of @Mehta2007"
+#| layout-nrow: 2
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 8.142857
+
+plot(approx_dt[, total_volume_m3], approx_dt[, sim_tot_m3], pch = 19, col = approx_dt[, fct_colour], cex = 0.2,
+	xlab = "Total measured volume", ylab = "Avg volume")
+abline(a = 0, b = 1, lwd = 2, col = "#020202")
+legend(x = "topright", legend = c("conifer", "broadleaf"), fill = colours[c("conifer", "broadleaf")])
+
+plot(approx_dt[, total_volume_m3], approx_dt[, mean_v_tot_pred], pch = 19, col = approx_dt[, fct_colour], cex = 0.2,
+	xlab = "Total measured volume", ylab = "Approx sum logN avg volume")
+abline(a = 0, b = 1, lwd = 2, col = "#020202")
+legend(x = "topright", legend = c("conifer", "broadleaf"), fill = colours[c("conifer", "broadleaf")])
 ```
