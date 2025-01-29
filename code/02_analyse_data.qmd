@@ -62,6 +62,7 @@ library(rootSolve)
 library(bayesplot)
 library(cmdstanr)
 	register_knitr_engine(override = TRUE)
+library(inventR)
 ```
 
 ## Introduction
@@ -114,13 +115,20 @@ forest_dt[origin_data == "nfi", origin_colour := colours["nfi"]]
 #| out-width: 95%
 #| fig-width: 8.142857
 
+par(pty = "s")
 plot(forest_dt[, log(circumference_m)], forest_dt[, log(bole_volume_m3)], col = forest_dt[, fct_colour], pch = 19,
-	xlab = "Circumference", ylab = "Bole volume")
-legend(x = "topright", legend = c("Broadleaf", "Conifer"), fill = colours[c("broadleaf", "conifer")])
+	xlab = "Circumference", ylab = "Bole volume", asp = 1, axes = FALSE)
+legend(x = "topleft", bty = "n", legend = c("Broadleaf", "Conifer"), fill = colours[c("broadleaf", "conifer")])
+axis(1)
+axis(2, las = 1)
 
+par(pty = "s")
 plot(forest_dt[!is.na(crown_volume_m3), log(circumference_m)], forest_dt[!is.na(crown_volume_m3), log(crown_volume_m3)],
-	col = forest_dt[!is.na(crown_volume_m3), fct_colour], pch = 19, xlab = "Circumference", ylab = "Crown volume")
-legend(x = "topright", legend = c("Broadleaf", "Conifer"), fill = colours[c("broadleaf", "conifer")])
+	col = forest_dt[!is.na(crown_volume_m3), fct_colour], pch = 19, xlab = "Circumference", ylab = "Crown volume",
+	asp = 1, axes = FALSE)
+legend(x = "topleft", bty = "n", legend = c("Broadleaf", "Conifer"), fill = colours[c("broadleaf", "conifer")])
+axis(1)
+axis(2, las = 1)
 ```
 
 ## Methods
@@ -352,11 +360,14 @@ Test of the function `approx_logN`:
 ```{r}
 #| label: fig-approx_logN
 #| fig-cap: "Approximation of the sum of two lognormal variables"
+#| fig-asp: 0.7
+#| out-width: 95%
+#| fig-width: 8.142857
 
 ## Test of the function
 # Parameters of the lognormals
 mu1 = 1
-mu2 = -3
+mu2 = 0.21
 sigma1 = 0.25
 sigma2 = 0.42
 
@@ -369,8 +380,14 @@ cc = aa + bb
 # Test
 test = approx_logN(mu1, mu2, sigma1, sigma2, start = c(1, 1))
 
-plot(density(cc), lwd = 5)
+plot(density(aa), lwd = 2, lty = "dashed", ylim = c(0, 0.82), col = "#0F7BA2", main = "", axes = FALSE, xlab = "x")
+lines(density(bb), lwd = 2, lty = "dashed", col = "#0F7BA2")
+lines(density(cc), lwd = 5)
 curve(dlnorm(x, test["mu"], test["sigma"]), lwd = 2, col = "#CD212A", add = TRUE)
+legend(x = "topright", legend = c("logN(1, 0.25)", "logN(0.21, 0.42)", "Sum", "Approx"),
+	lwd = 3, bty = "n", col = c("#0F7BA2", "#0F7BA2", "black", "#CD212A"))
+axis(1, at = seq(0, 8, 2))
+axis(2, las = 1)
 ```
 
 ### Residuals
@@ -580,9 +597,15 @@ approx_dt[, mean_v_tot_pred := exp(mu_tot_est + sigma_tot_est^2/2)]
 #| out-width: 95%
 #| fig-width: 8.142857
 
-plot(density(approx_dt[, res_bole_m3]), lwd = 2, main = "Bole")
-plot(density(approx_dt[, res_crown_m3]), lwd = 2, main = "Crown")
-plot(density(approx_dt[, res_tot_m3]), lwd = 2, main = "Total")
+plot(density(approx_dt[, res_bole_m3]), lwd = 2, xlab = "Residuals", axes = FALSE, main = FALSE)
+axis(1)
+axis(2, las = 1)
+plot(density(approx_dt[, res_crown_m3]), lwd = 2, xlab = "Residuals", axes = FALSE, main = FALSE)
+axis(1)
+axis(2, las = 1)
+plot(density(approx_dt[, res_tot_m3]), lwd = 2, xlab = "Residuals", axes = FALSE, main = FALSE)
+axis(1)
+axis(2, las = 1)
 ```
 
 ```{r}
@@ -598,9 +621,9 @@ plot(density(approx_dt[, res_tot_m3]), lwd = 2, main = "Total")
 #| out-width: 95%
 #| fig-width: 8.142857
 
-plot(approx_dt[, res_bole_m3], pch = 19, cex = 0.05, xlab = "", ylab = "Residuals bole")
-plot(approx_dt[, res_crown_m3], pch = 19, cex = 0.05, xlab = "", ylab = "Residuals crown")
-plot(approx_dt[, res_tot_m3], pch = 19, cex = 0.05, xlab = "", ylab = "Residuals tot")
+plot(approx_dt[, res_bole_m3], pch = 19, cex = 0.4, xlab = "", ylab = "Residuals bole")
+plot(approx_dt[, res_crown_m3], pch = 19, cex = 0.4, xlab = "", ylab = "Residuals crown")
+plot(approx_dt[, res_tot_m3], pch = 19, cex = 0.4, xlab = "", ylab = "Residuals tot")
 ```
 
 ```{r}
@@ -616,21 +639,30 @@ plot(approx_dt[, res_tot_m3], pch = 19, cex = 0.05, xlab = "", ylab = "Residuals
 #| out-width: 95%
 #| fig-width: 8.142857
 
+par(pty = "s")
 plot(forest_dt[, bole_volume_m3], sim_bole, pch = 19, col = forest_dt[, fct_colour], cex = 0.2,
-	xlab = "Measured bole volume (m³)", ylab = "Predicted bole volume (m³)")
+	xlab = "Measured bole volume (m³)", ylab = "Predicted bole volume (m³)", axes = FALSE, asp = 1)
 abline(a = 0, b = 1, lwd = 2, col = "#020202")
-legend(x = "topright", legend = c("conifer", "broadleaf"), fill = colours[c("conifer", "broadleaf")])
+axis(1)
+axis(2, las = 1)
+legend(x = "topleft", bty = "n", legend = c("conifer", "broadleaf"), fill = colours[c("conifer", "broadleaf")])
 
+par(pty = "s")
 plot(approx_dt[, bole_volume_m3], approx_dt[, sim_bole_m3], pch = 19, col = approx_dt[, fct_colour], cex = 0.2,
-	xlab = "Measured bole volume (m³)", ylab = "Predicted bole volume (m³)")
+	xlab = "Measured bole volume (m³)", ylab = "Predicted bole volume (m³)", axes = FALSE, asp = 1)
 abline(a = 0, b = 1, lwd = 2, col = "#020202")
-legend(x = "topright", legend = c("conifer", "broadleaf"), fill = colours[c("conifer", "broadleaf")])
+axis(1)
+axis(2, las = 1)
+legend(x = "topleft", bty = "n", legend = c("conifer", "broadleaf"), fill = colours[c("conifer", "broadleaf")])
 
+par(pty = "s")
 plot(forest_dt[, bole_volume_m3], sim_bole, pch = 19, col = forest_dt[, origin_colour], cex = 0.2,
-	xlab = "Measured bole volume (m³)", ylab = "Predicted bole volume (m³)")
+	xlab = "Measured bole volume (m³)", ylab = "Predicted bole volume (m³)", axes = FALSE, asp = 1)
 points(approx_dt[, bole_volume_m3], approx_dt[, sim_bole_m3], , pch = 19, col = approx_dt[, origin_colour], cex = 0.2)
 abline(a = 0, b = 1, lwd = 2, col = "#020202")
-legend(x = "topright", legend = c("NFI", "Inra"), fill = colours[c("nfi", "inra")])
+axis(1)
+axis(2, las = 1)
+legend(x = "topleft", bty = "n", legend = c("NFI", "Inra"), fill = colours[c("nfi", "inra")])
 ```
 
 ```{r}
@@ -641,10 +673,14 @@ legend(x = "topright", legend = c("NFI", "Inra"), fill = colours[c("nfi", "inra"
 #| out-width: 95%
 #| fig-width: 8.142857
 
+par(pty = "s")
 plot(approx_dt[, crown_volume_m3], approx_dt[, sim_crown_m3], pch = 19, col = approx_dt[, fct_colour],
-	cex = 0.2, xlab = "Measured crown volume (m³)", ylab = "Predicted crown volume (m³)")
+	cex = 0.2, xlab = "Measured crown volume (m³)", ylab = "Predicted crown volume (m³)", axes = FALSE, asp = 1)
 abline(a = 0, b = 1, lwd = 2, col = "#020202")
-legend(x = "topright", legend = c("conifer", "broadleaf"), fill = colours[c("conifer", "broadleaf")])
+axis(1)
+axis(2, las = 1)
+legend(x = "topleft", bty = "n", legend = c("conifer", "broadleaf"), fill = colours[c("conifer", "broadleaf")])
+
 ```
 
 ```{r}
@@ -659,13 +695,21 @@ legend(x = "topright", legend = c("conifer", "broadleaf"), fill = colours[c("con
 #| out-width: 95%
 #| fig-width: 8.142857
 
+par(pty = "s")
 plot(approx_dt[, total_volume_m3], approx_dt[, sim_tot_m3], pch = 19, col = approx_dt[, fct_colour], cex = 0.2,
-	xlab = "Total measured volume", ylab = "Avg volume")
+	xlab = "Total measured volume", ylab = "Avg volume", axes = FALSE, asp = 1)
 abline(a = 0, b = 1, lwd = 2, col = "#020202")
+axis(1)
+axis(2, las = 1)
 legend(x = "topright", legend = c("conifer", "broadleaf"), fill = colours[c("conifer", "broadleaf")])
 
+par(pty = "s")
 plot(approx_dt[, total_volume_m3], approx_dt[, mean_v_tot_pred], pch = 19, col = approx_dt[, fct_colour], cex = 0.2,
-	xlab = "Total measured volume", ylab = "Approx sum logN avg volume")
+	xlab = "Total measured volume", ylab = "Approx sum logN avg volume", axes = FALSE, asp = 1)
 abline(a = 0, b = 1, lwd = 2, col = "#020202")
+axis(1)
+axis(2, las = 1)
 legend(x = "topright", legend = c("conifer", "broadleaf"), fill = colours[c("conifer", "broadleaf")])
 ```
+
+### Prediction on an independent dataset and comparison with `inventR::TarEmerge`
