@@ -301,7 +301,6 @@ inra_arbres[, genus := as.character(genus)]
 
 ## Number of individuals per species
 inra_arbres[, nb_indiv := .N, by = speciesName_sci]
-# inra_arbres = inra_arbres[nb_indiv > 20]
 ```
 
 ### Request of the French NFI data (using inventR package) {#sec-nfi_query}
@@ -357,7 +356,7 @@ v_3 = \frac{\pi}{4}\sum_{n \geqslant 0} d^2 l
 $$
 
 ```{r}
-#| hold: true
+#| results: hold
 nfi_data[, v1 := c13^2/(4*pi)*2.6] # Volume first part: from 0 to 2.6m high
 nfi_data[, v2 := pi/24*(d26^2 + 4*dmed^2 + ddec^2)*(hdec - 2.6)] # Volume 2nd part: from 2.6m to hdec
 nfi_data[, v3 := pi/4*sum(surdia^2*surlon), by = .(npp, a)] # Volume 3rd part: from hdec to diameter = 7cm
@@ -449,6 +448,29 @@ forest_dt = rbindlist(l = list(inra = inra_arbres, nfi = nfi_data), fill = TRUE,
 
 ## Remove the unknown broadleaf and conifer
 forest_dt = forest_dt[!stri_detect(speciesName_sci, regex = "inconnu")]
+
+## Remove null volumes
+if (forest_dt[, any(bole_volume_m3 <= 0)])
+{
+	warning(paste(forest_dt[bole_volume_m3 == 0, .N], "null volumes. Removed as juge impossible"))
+	if (forest_dt[, any(bole_volume_m3 < 0)])
+		warning(paste("There were even", forest_dt[bole_volume_m3 < 0, .N], "negative volumes!"))
+	forest_dt = forest_dt[bole_volume_m3 > 0]
+}
+
+## Subsample forest_dt for testing
+subsample = TRUE
+if (subsample)
+{
+	warning("Subsample is TRUE, not all the data are saved! Set it to false to use the whole dataset")
+	set.seed(1968 - 08 - 18)
+	n = round(forest_dt[, .N]/10)
+	selected = sort(sample(x = forest_dt[, .N], size = n, replace = FALSE))
+
+	forest_dt = forest_dt[selected]
+	forest_dt[, nb_indiv := .N, by = speciesName_sci]
+	forest_dt = forest_dt[nb_indiv > 30]
+}
 ```
 
 ### Compute the indices for Stan
@@ -471,8 +493,8 @@ if (unique(ind_species[, .(speciesName_sci, n_indiv)])[, sum(n_indiv)] != forest
 ind_species[, colour := if(fct_type == "broadleaf") "#FFAF37" else "#007BA5", by = .(speciesName_sci, origin_data)]
 setorder(ind_species, start)
 
-n_sp = ind_species[, .N, by = fct_type]
-setkey(n_sp, fct_type)
+n_sp = ind_species[, .N, by = .(fct_type, origin_data)]
+setkey(n_sp, fct_type, origin_data)
 ```
 
 ### Format the data for stan
@@ -481,19 +503,26 @@ setkey(n_sp, fct_type)
 ## Stan data
 stanData = list(
 	N = forest_dt[, .N],
+	N_inra = forest_dt[!is.na(crown_volume_m3), .N],
 	S = ind_species[, .N],
-	n_sp_conif = n_sp["conifer", N],
-	n_sp_broad = n_sp["broadleaf", N],
+	n_sp_broad_tot = n_sp["broadleaf", sum(N)],
+	n_sp_conif_tot = n_sp["conifer", sum(N)],
+	n_sp_broad_inra = n_sp[CJ("broadleaf", "inra"), N],
+	n_sp_conif_inra = n_sp[CJ("conifer", "inra"), N],
+
 	ind_start_broad = ind_species[fct_type == "broadleaf", start],
 	ind_start_conif = ind_species[fct_type == "conifer", start],
 	ind_end_broad = ind_species[fct_type == "broadleaf", end],
 	ind_end_conif = ind_species[fct_type == "conifer", end],
+
 	ind_start_broad_inra = ind_species[(fct_type == "broadleaf") & (origin_data == "inra"), start_sp_orig],
 	ind_start_conif_inra = ind_species[(fct_type == "conifer") & (origin_data == "inra"), start_sp_orig],
 	ind_end_broad_inra = ind_species[(fct_type == "broadleaf") & (origin_data == "inra"), end_sp_orig],
 	ind_end_conif_inra = ind_species[(fct_type == "conifer") & (origin_data == "inra"), end_sp_orig],
+
 	height = forest_dt[, height],
 	circumference_m = forest_dt[, circumference_m],
+
 	total_volume_m3 = forest_dt[, total_volume_m3],
 	bole_volume_m3 = forest_dt[, bole_volume_m3],
 	crown_volume_m3 = forest_dt[, crown_volume_m3]
@@ -505,6 +534,7 @@ stanData = list(
 The data are now ready and can be saved:
 ```{r}
 saveRDS(stanData, paste0(mnt_point, "data/stanData_nfi-inra.rds"))
+saveRDS(forest_dt, paste0(mnt_point, "data/nfi-inra_dt.rds"))
 saveRDS(ind_species, paste0(mnt_point, "data/ind_species_nfi-inra.rds"))
 writeVector(x = coords_inra, filename = paste0(mnt_point, "data/coords_inra"), filetype = "ESRI Shapefile")
 writeVector(x = coords_nfi, filename = paste0(mnt_point, "data/coords_nfi"), filetype = "ESRI Shapefile")
