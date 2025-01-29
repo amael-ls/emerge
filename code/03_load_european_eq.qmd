@@ -1,0 +1,67 @@
+---
+title: "Extract European tree volume equations"
+date: today
+author: Amaël Le Squin
+date-format: iso
+filters:
+  - fontawesome
+execute:
+  error: true
+  cache: true
+bibliography: references.bib
+lightbox:
+  match: auto
+css: style.css
+knitr:
+  opts_chunk: 
+    dev: ragg_png
+    crop: null
+    out.width: "70%"
+    fig.width: 6
+    fig.asp: 0.618
+    fig.align: "center"
+format:
+  html:
+    toc: true
+    include-in-header: mathjax.html
+    code-fold: true
+    df-print: paged
+    number-sections: true
+    theme:
+      light: cerulean
+      dark: darkly
+    margin: 5% 0;
+---
+
+\newcommand{\ie}{*i.e.,*}
+
+```{r}
+#| output: false
+#### Clear space and load packages
+rm(list = ls())
+graphics.off()
+
+options(max.print = 500)
+
+library(data.table)
+library(pdftools)
+library(stringi)
+library(tm)
+```
+
+## Introduction
+A bunch of equations (230) on bole volume has been collected [@Zianis2005], and I want to extract them automatically rather than copy-paste and format...
+
+## Load pdf
+```{r}
+test = pdf_text("~/work/library/Zianis2005.pdf")
+length(test) # 63 pages
+
+toto = stri_split(str = test[52], regex = "\n")
+toto = toto[[1]][10:length(toto[[1]])]
+
+for (r in seq_along(toto)) # r is the row
+{
+	stri_split(str = toto[3], regex = " ")
+}
+```
