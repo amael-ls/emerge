@@ -1,5 +1,5 @@
 ---
-title: "Extract European tree volume equations"
+title: "Extract European tree volume equations from @Zianis2005"
 date: today
 author: Amaël Le Squin
 date-format: iso
@@ -52,10 +52,11 @@ library(tm)
 ## Introduction
 A bunch of equations (230) on bole volume has been collected [@Zianis2005], and I want to extract them automatically rather than copy-paste and format...
 
-## Load pdf
+## Extract equations and parameters from the pdf
+In this section I extract the species/country-specific equations and parameters from the pdf. The equations are in appendix C @Zianis2005 (pp. 52--63).
+
 ```{r}
-test = pdf_text("~/work/library/Zianis2005.pdf")
-# length(test) # 63 pages
+pdf_file = pdf_text("~/work/library/Zianis2005.pdf")
 
 dt = data.table(species = character(230), country = character(230), equation = character(230))
 dt[, letters[1:7] := numeric(.N)]
@@ -71,7 +72,7 @@ ls_country = c("Austria", "Belgium", "Croatia", "Czech Republic", "Finland", "Ge
 
 for (p in 52:63)
 {
-	current_page = stri_split(str = test[p], regex = "\n")
+	current_page = stri_split(str = pdf_file[p], regex = "\n")
 	if (p %% 2 == 0) # Even pages contain the country and species
 	{
 		start = 1
@@ -155,4 +156,50 @@ for (p in 52:63)
 			stop("Counters mismatch!")
 	}
 }
+```
+
+## Correcting some errors
+It seems that there are some errors in @Zianis2005. For instance, equations 5 and 6 clearly miss one closing parenthesis. I assume this parenthesis is at the end of the equation, since equation 45 or 82, or ... (also coming from Austria) have an extra parenthesis at the end.
+
+```{r}
+dt[5, equation := paste0(equation, ")")]
+dt[6, equation := paste0(equation, ")")]
+```
+## Transform the equations (class char) to R functions
+
+```{r}
+create_function = function(equation)
+{
+	equation = gsub("·", "*", equation) # Replace · with *
+	
+	equation = gsub("([A-Z])([0-9]+)", "\\1^\\2", equation) # Replace Xn with X^n, n an integer
+	equation = gsub("([A-Z)])([0-9]+)", "\\1^\\2", equation) # Replace ...X)n with ...X)^n, n an integer
+	equation = gsub("([A-Z])([a-z]+)", "\\1^\\2", equation) # Replace Xb with X^b, b a parameter
+	equation = gsub("([A-Z)])([a-z]+)", "\\1^\\2", equation) # Replace ...X)b with ...X)^b, b a parameter
+	equation = gsub("(\\^\\d)([A-Z])", "\\1*\\2", equation) # Replace ...^nX with ...^n*X, n an integer; no change for 10a
+
+	equation = gsub("\u03C0", "pi", equation) # Replace π with pi
+
+	equation = gsub("log", "log10", equation) # Replace log with log10 (see in the article)
+	equation = gsub("ln", "log", equation) # Replace ln with log (see in the article)
+	
+	equation = gsub("(\\d)\\(", "\\1^(", equation)  # Replace 10(...) by 10^(...), I have only seen power
+	equation = gsub("(10)([a-z])", "\\1^\\2", equation)  # Replace 10a by 10^a, I have only seen power
+	
+	equation = gsub("\u2013", "-", equation)  # Replace en dash by minus sign
+	
+	expr = paste0("function(a, b, c, d, e, f, g, H, D) {return(", equation, ")}") # Convert string into R fct
+	return(eval(parse(text = expr)))
+}
+
+# qq = copy(dt)
+# dt = copy(qq)
+
+for (i in 1:230)
+	fct = create_function(dt[i, equation])
+
+dt[, test := lapply(equation, create_function)]
+
+dt[1, test[[1]](a, b, c, d, e, f, g, H = 8, D = 9)]
+dt[4, test[[1]](a, b, c, d, e, f, g, H = 8, D = 9)]
 ```
