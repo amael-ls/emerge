@@ -57,11 +57,61 @@ A bunch of equations (230) on bole volume has been collected [@Zianis2005], and 
 test = pdf_text("~/work/library/Zianis2005.pdf")
 length(test) # 63 pages
 
-toto = stri_split(str = test[52], regex = "\n")
+# toto = stri_split(str = test[52], regex = "\n")
+toto = stri_split(str = test[53], regex = "\n")
 toto = toto[[1]][10:length(toto[[1]])]
 
-for (r in seq_along(toto)) # r is the row
+dt = data.table(species = character(230), country = character(230), equation = character(230))
+dt[, letters[1:7] := numeric(.N)]
+params_names = letters[1:7]
+
+ls_country = c("Austria", "Belgium", "Croatia", "Czech Republic", "Finland", "Germany", "Iceland", "Italy",
+	"Netherlands", "Norway", "Poland", "Romania", "Sweden", "UK")
+
+for (p in 52:63)
 {
-	stri_split(str = toto[3], regex = " ")
+	counter = 1
+	if (p %% 2 == 0) # Even pages contain the country and species
+		print(paste("page", p))
+	
+	# Odd pages contain the parameters
 }
+
+for (r in seq_along(toto)) # r is the row, even pages
+{
+	current_line = stri_split(str = toto[r], regex = " ", simplify = TRUE)
+
+	if (stri_detect(str = current_line[1, 1], regex = "^[A-Z]")) # It means it is a species
+	{
+		sp = paste(current_line[1, 1:2], collapse = "_")
+		dt[counter, species := sp]
+	} else if (stri_detect(str = current_line[1, 1], regex = "^[[:digit:]]")) { # It means it is a country
+		if (ncol(current_line) <= 1)
+			next;
+		cc = current_line[1, 2]
+		eq = current_line[1, ncol(current_line)]
+		if (!(cc %in% ls_country))
+			stop("This country is unknown")
+		dt[counter, c("species", "country", "equation") := .(sp, cc, eq)]
+		counter = counter + 1
+	}
+}
+
+
+for (r in seq_along(toto)) # r is the row, odd pages
+{
+	current_line = stri_split(str = toto[r], regex = " ", simplify = TRUE)
+	current_line = current_line[, current_line != ""]
+	current_line = stri_replace_all_regex(current_line, "\u2013", "-") # Change the En dash to hyphen (minus sign)
+
+	if (stri_detect(str = current_line[1], regex = "^[[:digit:]]")) # It means it is a row of parameters
+	{
+		current_line = current_line[2:length(current_line)]
+		values = as.numeric(current_line)
+		dt[counter, c(params_names) := as.list(values)]
+		counter = counter + 1
+	}
+}
+
+dt[1:40]
 ```
