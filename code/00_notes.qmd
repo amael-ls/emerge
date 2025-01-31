@@ -33,7 +33,6 @@ format:
 \newcommand{\ie}{*i.e.,*}
 \newcommand{\F}{\mathscr{F}}
 \newcommand{\N}{\mathbfscr{N}}
-\renewcommand{\epsilon}{\varepsilon}
 
 ::: {.callout-important}
 ## Available on Gitlab
@@ -53,7 +52,7 @@ Few things raised a flag in my mind:
 1. The R package `nlme`, non-linear mixed effect, is for repeated measured data and is based on @Lindstrom1990. Here, the repetition occurs within the species level, so I am not sure this package is the best adapted... I feel that `lme4` would have been better
 2. `hdn` is the hardiness $\sqrt{c}/h$ while `hsurd` is what I call the 'slenderness', $h/c$. Therefore, there is a high (negative) correlation between these two explanatory variables!
 
-The model `Modele_mai2` should be understood as follows, for an individual of height $h$ and circumference at breast height $c$, of species $j$ and functional group (conifer or broadleaf) $i$:
+The model `Modele_mai2` computes the form factor $\F$ for an individual of height $h$ and circumference at breast height $c$, of species $j$ and functional group (conifer or broadleaf) $i$ as:
 \begin{equation} \label{eq::deleuze}
 \begin{aligned}
 	\F &\sim \N(\mu, \sigma) \\
@@ -121,7 +120,7 @@ generate_random_partition = function(n, k)
 ```
 
 ### Parameters
-I define the following parameters, that will be used to generate data according to equation \eqref{eq::deleuze}:
+I define the following parameters, that will be used to generate data according to equation \eqref{eq::deleuze-modified}:
 ```{r}
 #### Define parameters
 set.seed(1969 - 08 - 18) # Woodstock seed
@@ -300,7 +299,7 @@ fit = simplest_model$sample(data = stanData, chains = n_chains, parallel_chains 
 It gives the following results (see @tbl-params for real values):
 ```{r}
 #| html-table-processing: none
-#| echi: false
+#| echo: false
 info_dt = pretty_summary(fit = fit, params = fit$metadata()$model_params[-1]) # -1 to remove lp__
 info_dt |>
 	gt() |>
@@ -569,4 +568,4 @@ lazyPosterior(draws = fit$draws("sigma_beta0"))
 boxplot(x = fit$draws("sigma_beta0"))
 ```
 
-Note that I made the test with $\sigma = 35$ (instead of $\sigma = `{r} sigma`$). In other words, I put the data less informative. It was  still working, although the parameters' variance increased a lot (makes sense!). I do not show these results.
+Note that I made the test with $\sigma = 35$ (instead of $\sigma = `{r} sigma`$). In other words, I provided less informative data. It was  still working, although the parameters' variance increased a lot (makes sense!). I do not show these results.
