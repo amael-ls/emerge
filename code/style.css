@@ -5,3 +5,35 @@
 .gt_table .gt_row_striped {
     background-color: transparent !important;
 }
+
+.egypt_red {
+	display: inline-block;
+	width: 1ex;
+	height: 1ex;
+	background-color: #DD5129;
+	border: 0px solid black;
+}
+
+.egypt_blue {
+	display: inline-block;
+	width: 1ex;
+	height: 1ex;
+	background-color: #0F7BA2;
+	border: 0px solid black;
+}
+
+.egypt_green {
+	display: inline-block;
+	width: 1ex;
+	height: 1ex;
+	background-color: #43B284;
+	border: 0px solid black;
+}
+
+.egypt_yellow {
+	display: inline-block;
+	width: 1ex;
+	height: 1ex;
+	background-color: #FAB255;
+	border: 0px solid black;
+}
