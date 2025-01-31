@@ -36,7 +36,6 @@ format:
       - text: |
           \usepackage{unicode-math}
           \usepackage{siunitx}
-server: shiny
 ---
 
 \newcommand{\ie}{\textit{i.e.,} }
@@ -45,48 +44,17 @@ server: shiny
 
 ## Introduction
 
-The European Union \textit{i.e.,} a test developed a [New EU Forest Strategy for 2030](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:52021DC0572) as part of the plan to adapt to and fight against climate change and make Europe a climate neutral continent by 2050. This strategy relies on improved monitoring of European forests to better understand their condition and respond accordingly. Specifically, it calls for assessing carbon sequestration in forests to evaluate whether or not Europe reached carbon neutrality. One bottleneck is the harmonisation of the forest monitoring methods between European member states, if not within them. The [PathFinder project](https://pathfinder-heu.eu/#top) supports member states in implementing a European Forest Monitoring System in order to standardise or harmonise forest data collection and reporting across the EU. This prompted the Institut National de l'information Géographique et forestière (IGN), which is in charge of the French National Forest Inventory (NFI) data, to update its methods for assessing forest carbon storage.
+The European Union \textit{i.e.,} developed a [New EU Forest Strategy for 2030](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:52021DC0572) as part of the plan to adapt to and fight against climate change and make Europe a climate neutral continent by 2050. This strategy relies on improved monitoring of European forests to better understand their condition and respond accordingly. Specifically, it calls for assessing carbon sequestration in forests to evaluate whether or not Europe reached carbon neutrality. One bottleneck is the harmonisation of the forest monitoring methods between European member states, if not within them. The [PathFinder project](https://pathfinder-heu.eu/#top) supports member states in implementing a European Forest Monitoring System in order to standardise or harmonise forest data collection and reporting across the EU. This prompted the Institut National de l'information Géographique et forestière (IGN), which is in charge of the French National Forest Inventory (NFI) data, to update its methods for assessing forest carbon storage.
 
 In most countries, carbon content is estimated via two quantities: (*i*) the volume in \unit{\cubic\metre}, and (*ii*) the wood density in \unit{\kilogram\per\cubic\metre}. However, often numerous models and methods are currently used across countries, contingent upon the tree species and geographic location within each country [@Westfall2023; @Longuetaud2013; @Gregoire1996], but also the definition of tree parts [@Gschwantner2009].
 
 ## Methods
 
-The original models can be found in @Westfall2023:
-
-Model of Schumacher-Hall
-$$
-y_i = a D_i^b H_i^c
-$$ {#eq-schumacherHall}
-
-Segmented model:
-
-$$
-y_i =
-\begin{cases}
-    a D_i^b H_i^c & D_i < k \\
-    a k^{b - b_1} D_i^{b_1} H_i^c & D_i \geqslant k
-\end{cases}
-$$ {#eq-cases}
-
-Continuously variable model:
-$$
-y_i = a D_i^{a_1(1 - \exp[-b D_i])^c} H_i^c
-$$ {#eq-continuous}
-
-and the modified Wiley model:
-$$
-y_i = a D_i^b H_i^c \exp[-b_1 D_i]
-$$ {#eq-wiley}
-
-The @eq-schumacherHall is the default model.
-
-### Load the dataset
-
+### Data
 The dataset has already been prepared in `testEmerge.qmd`. First, I load the necessary packages:
 
 ```{r}
 #| output: false
-#| context: setup
 #### Clear space and load packages
 rm(list = ls())
 graphics.off()
@@ -99,8 +67,8 @@ library(bayesplot)
 library(cmdstanr)
 	register_knitr_engine(override = TRUE)
 library(stringi)
-library(shiny)
-library(bslib)
+library(lognorm)
+library(terra)
 library(gt)
 
 setHook(packageEvent("grDevices", "onLoad"),
@@ -131,7 +99,44 @@ if (!dir.exists(path_data))
 
 stanData = readRDS(paste0(path_data, "stanData_westfall2023.rds"))
 ind_species = readRDS(paste0(path_data, "ind_species.rds"))
+
+france = vect(inventR::france)
+coords = vect(paste0(path_data, "coords"))
+# coords_ifn = vect(paste0(path_data, "coords_ifn"))
+france = project(france, coords)
 ```
+Our dataset come from three sources [@Deleuze2013]:
+
+1. the 'Protocole Oudin' (in <span class="oudin_colour"></span> on the @fig-map), which is a collection of \num{`{r} ind_species[, sum(n_indiv)]`} felled-tree destructively sampled into logs of one \unit{\metre} long (for merchantable wood, \ie trunks and branches larger than \qty{7}{\centi\metre}) and weighted branches (diameter smaller than \qty{7}{\centi\metre}) then converted into a volume. These data were collected between 1930 and 1950.
+
+2. the French NFI (in <span class="nfi_colour"></span> on the @fig-map), which destructively sampled \num{1106099} felled-tree into two logs for the trunk and regular logs for the branches, up to a diameter of \qty{7}{\centi\metre}. Note that smaller branches were not weighted. These data were collected between the 60's and 1983.
+
+3. the Emerge data, which gather `{r}` 
+
+
+```{r}
+#| label: fig-map
+#| fig-cap: "Plots location of the INRA data"
+#| fig-height: 8
+#| fig-width: 8
+#| fig-align: center
+#| echo: false
+
+plot(france, axes = FALSE, lwd = 1.5)
+# points(coords_ifn, pch = 19, col = "#007BA5", cex = 0.75)
+points(coords, pch = 15, col = "#FFAF37", cex = 1.25)
+legend(x = "topright", legend = c("NFI", "Oudin"), pch = c(19, 15), col = c("#007BA5", "#FFAF37"), bty = "n")
+```
+
+### Model
+
+I start building a model based on the equation of Schumacher-Hall for its parsimonious definition [@Westfall2023]:
+
+$$
+y_i = a D_i^b H_i^c,
+$$ {#eq-schumacherHall}
+
+where $y_i$ is the volume, $D_i$ is the diameter at breast height (dbh, in \unit{\metre}), and $H_i$ is the height of individual $i$. The parameters $a$, $b$, and $c$ are to be estimated. It is expected to have variation between species, and between ecodivisions [@Westfall2023], therefore the model (@eq-schumacherHall) is fitted by species, and I added a group effect on functional type (conifer or broadleaf, as in @Deleuze2014) to help rare species. I have not yet used ecodivisions. Therefore, I should add indices $j[t]$ to the parameters, to represent species $j$ in functional group $t$.
 
 ### Prepare the priors
 
@@ -200,7 +205,7 @@ set.seed(1969 - 08 - 18) # Woodstock seed
 n_sim = 200
 gen_data = vector(mode = "list", length = 20)
 S = ind_species[, .N]
-volume = numeric(length = length(stanData[["volume_m3"]]))
+volume = numeric(length = length(stanData[["total_volume_m3"]]))
 n_sp_broad = stanData[["n_sp_broad"]]
 n_sp_conif = stanData[["n_sp_conif"]]
 
@@ -258,15 +263,26 @@ for (sim in seq_len(n_sim))
 
 gen_data = rbindlist(l = gen_data, idcol = "simulation")
 bounds = quantile(x = gen_data[, volume], probs = c(0.025, 0.975))
-gen_data = gen_data[(bounds["2.5%"] < volume) & (volume < bounds["97.5%"]), volume]
-dens_gen = density(gen_data)
+dens_gen = density(gen_data[, volume], from = bounds["2.5%"], to = bounds["97.5%"])
 
 plot(dens_gen, axes = FALSE, lwd = 2, main = "",
-	xlab = expression("Prior predicted volume in m"^3*" (from 2.5 up to 97.5 percentile)"))
+	xlab = expression("Prior predicted volume in m"^3*" (from 2.5 to 97.5 percentiles)"))
+abline(v = 0, lwd = 2, col = "#CD212A")
 axis(1)
 axis(2, las = 1)
+
+f = approxfun(dens_gen$x, dens_gen$y)
+normCst = integrate(f, min(dens_gen$x), max(dens_gen$x))$value # To force the integral to 1 on the domain
+proba_negative = integrate(f, min(dens_gen$x), 0)$value/normCst
+
+
+#### REMOVE AFTER, JUST FOR TEST:
+estimateSumLognormal(mu = c(1, -2), sigma = c(0.25, 0.15))
+aa = rlnorm(1e6, 1, 0.25) + rlnorm(1e6, -2, 0.15)
+density(aa)
+curve(dlnorm(x, 1.0504640, 0.2384695), lwd = 2, col = "#CD212A", add = TRUE)
 ```
-which gives plausible results (although few negatives when $a < 0$), with a 2.5 percentile of `{r} round(min(gen_data), 3)` \unit{\cubic\metre}, and a 97.5 quantile of `{r} round(max(gen_data, 0.975), 3)` \unit{\cubic\metre}.
+which gives plausible results, although a probability of `{r} round(proba_negative, 2)` \unit{\percent} of being negative (which occurs when $a < 0$). Note that the density was cut at the 2.5 and 97.5 percentiles, while the minimum and maximum are `{r} round(min(gen_data), 3)` \unit{\cubic\metre} and `{r} round(max(gen_data), 3)` \unit{\cubic\metre}, respectively.
 
 ### Stan model
 
@@ -299,7 +315,7 @@ data {
 	vector<lower = 0> [N] circumference_m;
 
 	// Response variable
-	vector [N] volume_m3;
+	vector [N] total_volume_m3;
 }
 
 parameters {
@@ -344,7 +360,7 @@ model {
 	// Likelihood broadleaves, i = species
 	for (i in 1:n_sp_broad)
 	{
-		target += normal_lpdf(volume_m3[ind_start_broad[i]:ind_end_broad[i]] | beta0[i] *
+		target += normal_lpdf(total_volume_m3[ind_start_broad[i]:ind_end_broad[i]] | beta0[i] *
 			circumference_m[ind_start_broad[i]:ind_end_broad[i]]^beta1[i] .*
 			height[ind_start_broad[i]:ind_end_broad[i]]^beta2[i],
 			sigma);
@@ -353,7 +369,7 @@ model {
 	// Likelihood conifers, i = species
 	for (i in 1:n_sp_conif)
 	{
-		target += normal_lpdf(volume_m3[ind_start_conif[i]:ind_end_conif[i]] | beta0[n_sp_broad + i] +
+		target += normal_lpdf(total_volume_m3[ind_start_conif[i]:ind_end_conif[i]] | beta0[n_sp_broad + i] +
 			circumference_m[ind_start_conif[i]:ind_end_conif[i]]^beta1[n_sp_broad + i] .*
 			height[ind_start_conif[i]:ind_end_conif[i]]^beta2[n_sp_broad + i],
 			sigma);
@@ -365,7 +381,6 @@ model {
 ### Run the model
 In total, there are `{r} 3*(S + 2 + 1) + 1 + 1` parameters to estimate.
 ```{r}
-#| context: setup
 n_chains = 4
 iter_warmup = 750
 iter_sampling = 1250
@@ -389,32 +404,7 @@ mcmc_neff(neff_ratio(fit))
 mcmc_nuts_divergence(nuts_params(fit), lp = log_posterior(fit))
 ```
 
-```{r}
-# Define UI
-selectInput(
-	inputId = "params1",
-	label = "Select 1s parameter",
-	choices = list("a", "b", "c"),
-	selected = "a",
-	width = "600px")
-selectInput(
-	inputId = "params2",
-	label = "Select 2nd parameter",
-	choices = list("a", "b", "c"),
-	selected = "b",
-	width = "600px")
-```
-
-```{r}
-plotOutput("mcmc")
-```
-
-```{r}
-#| context: server
-output$mcmc = renderPlot({
-	mcmc_pairs(x = fit$draws(c(input$params1,input$params2)), np = nuts_params(fit))
-})
-```
+It seems that there is no convergence problem in the model of @Westfall2023 with the INRA data
 
 ## Feet and inches to metres {#sec-app_convert .apendix}
 
@@ -438,5 +428,5 @@ y_m3 = alpha^3*y # In metre
 D_m = alpha/12*D # In metre
 H_m = alpha*H # In metre
 
-a*alpha^(3 - b - c)*12^b*D_m^b*H_m^c - y_m3  # Should be 0 (in metre)
+all.equal(a*alpha^(3 - b - c)*12^b*D_m^b*H_m^c, y_m3)  # Should be TRUE
 ```
