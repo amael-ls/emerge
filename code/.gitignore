@@ -1,4 +1,12 @@
-00_notes_files/
+*_files/
+*_cache/
 _extensions/
 dummy/
 *.html
+/.luarc.json
+*.csv
+*.pdf
+*.tex
+*.rds
+*.stan
+.vscode/
