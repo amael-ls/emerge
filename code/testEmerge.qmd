@@ -87,6 +87,7 @@ library(MetBrewer)
 library(cmdstanr)
 	register_knitr_engine(override = TRUE)
 library(stringi)
+library(DHARMa)
 library(nlme)
 library(gt)
 
@@ -141,7 +142,7 @@ This step should be done only once.
 #| code-fold: false
 sudo mount -t cifs -o username=your_name,domain=ign,uid=your_name //del1509n015/2024_faircarbon /mnt/local_share/
 ```
-Maybe two passwords will be asked, first your **admin** password to execute the `sudo`, and then your **usual** password. If you just did step 2, then the prompt will not ask again for your password.
+Maybe two passwords will be asked, first your **admin** password to execute the `sudo`, and then your **usual** password. If you just did step 2, then the prompt will not ask again for your **admin** password again.
 
 4. Check that it worked, especially the reading and writting rigths:
 ```{sh}
@@ -176,13 +177,18 @@ if (list.files(path = path_data) != "EMERGE.RData")
 
 load(paste0(path_data, "EMERGE.RData"))
 setDT(inra_arbres)
+setDT(codesforets)
+setDT(ifn_arbres)
 
 ## Keep only column of interest and rename them
 inra_arbres[, tot_vol := v_tronc_verif + v_fourche_verif + v_fourche2_verif + v_br_verif + v_menu_verif]
-inra_arbres = unique(inra_arbres[, .(nom_fichier, essence, c130, h_tot, tot_vol, genre)])
+inra_arbres = unique(inra_arbres[, .(nom_fichier, essence, c130, h_tot, tot_vol, v_tronc_verif, genre, id_codesforets)])
+inra_arbres = merge.data.table(inra_arbres, codesforets[, .(id, x_lambert_ii, y_lambert_ii, longitude, latitude)],
+	by.x = "id_codesforets", by.y = "id")
 inra_arbres = na.omit(inra_arbres)
 
-setnames(inra_arbres, new = c("unique_id", "speciesName_sci", "circumference_cm", "height", "tot_vol", "genus"))
+setnames(inra_arbres, new = c("plot_id", "unique_id", "speciesName_sci", "circumference_cm", "height", "tot_vol",
+	"v_BFT", "genus", "x_lambert_2", "y_lambert_2", "lon", "lat"))
 
 inra_arbres[, fct_type := "broadleaf"] # Functional type, either broadleaf or conifer
 inra_arbres[genus %in% c("Abies", "Cedrus", "Larix", "Picea", "Pinus", "Pseudotsuga", "Thuya", "Tsuga"),
@@ -222,6 +228,29 @@ setorder(ind_species, start)
 n_sp = ind_species[, .N, by = fct_type]
 setkey(n_sp, fct_type)
 
+## Coordinates
+coords = unique(inra_arbres[, .(plot_id, x_lambert_2, y_lambert_2, lon, lat)])
+
+coords[, lon := as.character(lon)]
+coords[, lat := as.character(lat)]
+
+angle2dec = function(angle)
+{
+	x = stri_match(angle, regex = "([+-]?\\d+)°(\\d+)'(\\d+)") # To split the degree from minute and second
+	x = apply(x[, 2:4], 1L, function(y) {
+		y = as.numeric(y)
+		y[1] + y[2]/60 + y[3]/3600
+	})
+	return(x)
+}
+
+coords[, lon_dec := angle2dec(lon)]
+coords[, lat_dec := angle2dec(lat)]
+
+coords = terra::vect(x = coords[, .(plot_id, lon_dec, lat_dec)],
+	geom = c("lon_dec", "lat_dec"),
+	crs = "EPSG:4326")
+
 ## Stan data
 stanData = list(
 	N = inra_arbres[, .N],
@@ -234,8 +263,22 @@ stanData = list(
 	ind_end_conif = ind_species[fct_type == "conifer", end],
 	height = inra_arbres[, height],
 	circumference_m = inra_arbres[, circumference_cm/100],
-	volume_m3 = inra_arbres[, volume_m3]
+	volume_m3 = inra_arbres[, volume_m3],
+	v_BFT_m3 = inra_arbres[, v_BFT/1000]
 )
+
+## French NFI data
+ifn_arbres[, cpp := as.character(cpp)]
+#! RESTART HERE
+# coords_nfi = fread(paste0(path_data, "nfi_coords.csv"))
+# ifn_abres = merge.data.table(ifn_arbres, coords_nfi, by = "cpp")
+# # keep columns of interest
+# ifn_arbres[, c("id", "id_codesforets", "id_codesorganismes") := NULL]
+
+saveRDS(stanData, paste0(mnt_point, "data/stanData_westfall2023.rds"))
+saveRDS(ind_species, paste0(mnt_point, "data/ind_species.rds"))
+saveRDS(ifn_arbres, paste0(mnt_point, "data/trees_nfi.rds"))
+terra::writeVector(x = coords, filename = paste0(mnt_point, "data/coords"), filetype = "ESRI Shapefile")
 ```
 
 The data are now ready! Here is the composition:
@@ -654,7 +697,7 @@ Modele_mai2 = nlme(formTotNew ~ a + b*hdn + d*slenderness, data = inra_arbres,
 	fixed = list(a + b + d ~ feuil.res), random = a + d ~ 1|speciesName_sci)
 ```
 
-Rebuild the parameters for *Fagus sylvatica*:
+Rebuild the parameters for *`{r} selected_sp`*:
 ```{r}
 ## Rebuild species-specific params from nlme
 fixed_effects_nlme = fixed.effects(Modele_mai2)
@@ -786,4 +829,13 @@ abline(v = ind_species[fct_type == "broadleaf", max(end)], lwd = 2)
 abline(h = 0)
 axis(1)
 axis(2, las = 1)
+```
+
+And the residuals according to the package [`DHARMa`](https://cran.r-project.org/web/packages/DHARMa/vignettes/DHARMa.html):
+```{r}
+simulationOutput = simulateResiduals(fittedModel = test_lme4, plot = F, use.u = TRUE, n = 1e3)
+
+# plotResiduals(simulationOutput, form = inra_arbres[, speciesName_sci])
+plotResiduals(simulationOutput)
+plotQQunif(simulationOutput)
 ```
