@@ -9,4 +9,5 @@ dummy/
 *.tex
 *.rds
 *.stan
+!test_nfi-inra.stan
 .vscode/
