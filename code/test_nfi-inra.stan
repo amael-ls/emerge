@@ -1,7 +1,14 @@
+functions {
+	// Returns the circumference class for a given circumference
+	int find_class(real diameter, real lower_bound, real class_width)
+		return int(floor((diameter - lower_bound) / class_width)) + 1;
+}
+
 data {
 	// Dimensions and indices
 	int <lower = 1> N; // Total number of individuals
 	int <lower = 1, upper = N> N_inra; // Number of individuals with a measured crown
+	int <lower = 1, upper = N> N_class; // Number of circumference classes
 	int <lower = 1, upper = N> S; // Number of species
 	int <lower = 0, upper = S> n_sp_broad_inra; // Number of broadleaf species
 	int <lower = 0, upper = S - n_sp_broad_inra> n_sp_conif_inra; // Number of conifer species
@@ -18,6 +25,7 @@ data {
 
 	// Predictors
 	vector <lower = 0> [N] circumference_m;
+	vector <lower = 0> [N] circumference_class;
 
 	// Response variables
 	vector <lower = 0> [N] bole_volume_m3;
@@ -45,8 +53,20 @@ parameters {
 	vector [2] c_crown;
 
 	// Variances
-	vector <lower = 0> [2] sigma_bole;
+	vector <lower = 0> [5] linReg_sigma_bole;
 	vector <lower = 0> [2] sigma_crown;
+}
+
+transformed parameters {
+	vector <lower = 0> [N] sigma_bole;
+	for (i in 1:N)
+	{
+		sigma_bole[i] = linReg_sigma_bole[1] +
+			linReg_sigma_bole[2]*circumference_class[i] +
+			linReg_sigma_bole[3]*circumference_class[i]^2 +
+			linReg_sigma_bole[4]*circumference_class[i]^3 +
+			linReg_sigma_bole[5]*circumference_class[i]^4;
+	}
 }
 
 model {
@@ -63,19 +83,19 @@ model {
 	target += normal_lpdf(c_crown | 0, 2);
 
 	// --- Variances
-	target += gamma_lpdf(sigma_bole | 1.0^2/5.0, 1.0/5.0);
+	target += normal_lpdf(linReg_sigma_bole | 0, 0.35);
 	target += gamma_lpdf(sigma_crown | 1.0^2/5.0, 1.0/5.0);
 
 	// Likelihood
 	// --- Broadleaves, bole
 	target += normal_lpdf(log_bole_volume_m3[ind_start_broad:ind_end_broad] | a_bole[1] + 
 		b_bole[1]*log_circumference_m[ind_start_broad:ind_end_broad] +
-		c_bole[1]*log_circumference_m[ind_start_broad:ind_end_broad].^4, sigma_bole[1]);
+		c_bole[1]*log_circumference_m[ind_start_broad:ind_end_broad].^4, sigma_bole[ind_start_conif:ind_end_conif]);
 	
 	// --- Conifers, bole
 	target += normal_lpdf(log_bole_volume_m3[ind_start_conif:ind_end_conif] | a_bole[2] + 
 		b_bole[2]*log_circumference_m[ind_start_conif:ind_end_conif] +
-		c_bole[2]*log_circumference_m[ind_start_conif:ind_end_conif].^4, sigma_bole[2]);
+		c_bole[2]*log_circumference_m[ind_start_conif:ind_end_conif].^4, sigma_bole[ind_start_conif:ind_end_conif]);
 
 	// --- Broadleaves, crown
 	for (i in 1:n_sp_broad_inra)
@@ -89,3 +109,5 @@ model {
 			b_crown[2]*log_circumference_m[ind_start_conif_inra[i]:ind_end_conif_inra[i]] +
 			c_crown[2]*log_circumference_m[ind_start_conif_inra[i]:ind_end_conif_inra[i]].^4, sigma_crown[2]);
 }
+
+
