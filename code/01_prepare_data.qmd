@@ -195,20 +195,31 @@ if (os == "Linux" || os == "Darwin")
 {
 	if (!dir.exists(mnt_point))
 		stop(paste0("The mounting point <", mnt_point, "> does not exist"))
+	path_data = paste0(mnt_point, "/data_orig/")
+	if (!dir.exists(path_data))
+		stop(paste0("Folder <", path_data, "> does not exist! Check mounting point and mounted folder"))
 } else if (os == "Windows") {
-	stop("TO DO!!! No idea how that works on Windows!")
+	path_data = "//Del1509n015/2024_FairCarbon/data_orig/"
+	if (!dir.exists(path_data))
+		stop(paste0("Folder <", path_data, "> does not exist!"))
 } else {
 	stop(paste("Unknown Operating System:", os))
 }
 
-path_data = paste0(mnt_point, "/data_orig/")
-if (!dir.exists(path_data))
-	stop(paste0("Folder <", path_data, "> does not exist! Are you sure you mounted the good remote folder?"))
+# Emerge data
+filename_emerge = paste0(path_data, "EMERGE.RData")
+if (!file.exists(filename_emerge))
+	stop(paste0("The file <", filename_emerge, "> does not exist"))
 
-if (list.files(path = path_data) != "EMERGE.RData")
-	stop("There should be only the file <EMERGE.RData> in the data_orig folder")
+load(filename_emerge)
 
-load(paste0(path_data, "EMERGE.RData"))
+# Swiss data
+filename_switzerland = paste0(path_data, "switzerland/stembranchchwood_2024-04-25.txt")
+if (!file.exists(filename_switzerland))
+	stop(paste0("The file <", filename_switzerland, "> does not exist"))
+
+swiss_dt = fread(filename_switzerland)
+swiss_sp = fread(paste0(path_data, "switzerland/Species_correspondance_table.csv"))
 ```
 
 ### Variable names
@@ -223,8 +234,8 @@ The variable names are not necessarily unified (but the species names are, I che
 | c130            | c13  | circumference_m    | Circumference at 1.3 m             |
 | h_tot           | htot | height             | Height in m                        |
 | total_volume_m3 | \-   | total_volume_m3    | Total above-ground volume          |
-| v_tronc         | v    | bole_volume_m3 | Volume bole up to 7 cm       |
-| v_courrone      | \-   | crown_volume_m3    | Total volume minus bole volume |
+| v_tronc         | v    | bole_volume_m3     | Volume bole up to 7 cm             |
+| v_courrone      | \-   | crown_volume_m3    | Total volume minus bole volume     |
 | genre           | \-   | genus              | Genus                              |
 | longitude       | xl   | \-                 | Coordinates in different proj      |
 | latitude        | yl   | \-                 | Coordinates in different proj      |
@@ -298,9 +309,6 @@ setnames(inra_arbres, new = c("plot_id", "unique_id", "circumference_m", "height
 ## Change type of cols
 inra_arbres[, unique_id := as.character(unique_id)]
 inra_arbres[, genus := as.character(genus)]
-
-## Number of individuals per species
-inra_arbres[, nb_indiv := .N, by = speciesName_sci]
 ```
 
 ### Request of the French NFI data (using inventR package) {#sec-nfi_query}
@@ -314,7 +322,7 @@ db = connect_db()
 nfi_data = exec_req(conn = db, req = "
 	SELECT
 		tree.NPP, tree.A, tree.ESS, tree.C13, tree.HTOT, tree.R, tree.V, tree.VTOT,
-		tree.d26, tree.ddec, tree.dmed, tree.hdec,
+		tree.d26, tree.ddec, tree.dmed, tree.cmed, tree.hdec,
 		log.surlon, log.surdia, log.ns,
 		coords1.XL, coords1.YL,
 		EXTRACT(YEAR FROM coords2.DATEPOINT) AS year
@@ -330,9 +338,9 @@ nfi_data = exec_req(conn = db, req = "
 		LEFT JOIN inv_exp_am.e2point AS coords2
 		ON coords2.npp = tree.npp
 	WHERE
-		tree.cube = 'M' AND -- Tree volume measured rather than evaluated by a model
+		tree.CUBE = 'M' AND -- Tree volume measured rather than evaluated by a model
 		tree.MC IN ('4', '5') AND -- Circumference measured, and not diameter
-		tree.DOM BETWEEN '0' AND '5' -- No pollarded nor heavily pruned tree
+		(tree.DOM BETWEEN '0' AND '5') -- No pollarded nor heavily pruned tree
 		-- coords2.DATEPOINT >= '1988-01-01'::date -- I think there is no need for this one
 	ORDER BY
 		npp, a;", DT = TRUE)
@@ -342,11 +350,23 @@ disconnect_db(db)
 
 I believe that it is important to know how the data are built! Here, `vtot` is the sum of three volumes coming from:
 
-1. A first log, from the base level to \qty{2.60}{\metre}, measured using the cylinder formula:
+1. A first log, from the base level to either \qty{2.60}{\metre} or $h_{\text{dec}}$, measured using the cylinder formula:
 $$
-v_1 = \frac{2.60 c^2}{4 \pi}
+v_1 = \begin{cases}
+	\frac{2.60 c^2}{4 \pi} & \text{if } h_{\text{dec}} > 2.6 \\
+	\frac{h_{\text{dec}} c_{\text{med}}^2}{4 \pi} & \text{if } h_{\text{dec}} > 2.6
+\end{cases}
 $$
-
+where $c_{\text{med}}$ is the median circumference measured at $h_{\text{dec}}/2$. Note that when $h_{\text{dec}} = 2.6$, the median circumference is not necessarily equal to $c$! The difference, remains however quite small (see @fig-dens_cmed).
+```{r}
+#| echo: false
+#| fig-cap: Density of $c_{\text{med}} - c$
+#| label: fig-dens_cmed
+plot(density(nfi_data[hdec == 2.6, cmed - c13]), main = "", xlab = "Median minus breast height circumferences",
+	lwd = 3, axes = FALSE)
+axis(1)
+axis(2, las =  1)
+```
 2. A second log, from \qty{2.60}{\metre} to the taper cut-off height (height at which there is at least a 10% decrease in diameter within a meter), measured using the three-level Newton-Simpson formula:
 $$
 v_2 = \frac{\pi}{24} \cdot (d_{26}^2 + 4 d_{\text{m}}^2 + d_{\text{dec}}^2) \cdot (h_{\text{dec}} - 2.60)
@@ -356,9 +376,12 @@ $$
 v_3 = \frac{\pi}{4}\sum_{n \geqslant 0} d^2 l
 $$
 
+In the data, I downloaded both $v$ and $v_{\text{tot}}$ which should be equal only when there is no cull. Otherwise, $v > v_{\text{tot}}$ since $v = (1 - r) v_{\text{tot}}$, $r$ being the cull. However, I found that these two variables are always equal and that the cull volume is always removed! My reconstruction of the volume does not remove the cull, and should be used later on to relate volume and circumference.
+
 ```{r}
 #| results: hold
-nfi_data[, v1 := c13^2/(4*pi)*2.6] # Volume first part: from 0 to 2.6m high
+nfi_data[hdec < 2.6, v1 := cmed^2/(4*pi)*hdec] # Volume first part: from 0 to hdec. Note that hdec == 2.6 still uses cmed
+nfi_data[hdec >= 2.6, v1 := c13^2/(4*pi)*2.6] # Volume first part: from 0 to 2.6m high
 nfi_data[, v2 := pi/24*(d26^2 + 4*dmed^2 + ddec^2)*(hdec - 2.6)] # Volume 2nd part: from 2.6m to hdec
 nfi_data[, v3 := pi/4*sum(surdia^2*surlon), by = .(npp, a)] # Volume 3rd part: from hdec to diameter = 7cm
 
@@ -367,11 +390,15 @@ nfi_data[, c("surlon", "surdia", "ns") := NULL]
 nfi_data[is.na(v2), v2 := 0]
 nfi_data[is.na(v3), v3 := 0]
 nfi_data[, bole_volume_reconstruct_m3 := v1 + v2 + v3]
-nfi_data[, verif := v1 + v2 + v3 - vtot]
+nfi_data[, verif := (1 - r)*bole_volume_reconstruct_m3 - vtot] # This shows that the cull is removed from both v and vtot
 
 hist(nfi_data$verif)
+plot(nfi_data[abs(verif) > 1e-2, density(hdec)], xlab = "hdec", main = "", axes = FALSE, lwd = 3)
+abline(v = 2.6, lwd = 2, col = "#CD212A")
+axis(1)
+axis(2, las = 1)
 
-nfi_data[, c("v1", "v2", "v3", "d26", "dmed", "ddec", "hdec", "verif") := NULL]
+nfi_data[, c("v1", "v2", "v3", "d26", "dmed", "cmed", "ddec", "hdec", "verif") := NULL]
 
 nfi_data = na.omit(nfi_data)
 
@@ -451,7 +478,7 @@ forest_dt = rbindlist(l = list(inra = inra_arbres, nfi = nfi_data), fill = TRUE,
 ## Remove the unknown broadleaf and conifer
 forest_dt = forest_dt[!stri_detect(speciesName_sci, regex = "inconnu")]
 
-## Remove null volumes
+## Remove null volumes (all from inra actually)
 if (forest_dt[, any(bole_volume_m3 <= 0)])
 {
 	warning(paste(forest_dt[bole_volume_m3 == 0, .N], "null volumes. Removed as juge impossible"))
@@ -460,19 +487,39 @@ if (forest_dt[, any(bole_volume_m3 <= 0)])
 	forest_dt = forest_dt[bole_volume_m3 > 0]
 }
 
-## Subsample forest_dt for testing
-subsample = FALSE
-if (subsample)
-{
-	warning("Subsample is TRUE, not all the data are saved! Set it to false to use the whole dataset")
-	set.seed(1968 - 08 - 18)
-	n = round(forest_dt[, .N]/10)
-	selected = sort(sample(x = forest_dt[, .N], size = n, replace = FALSE))
+## Set bole_volume_reconstruct_m3 of inra data to bole_volume_m3. TO DO: RECONSTRUCT THE VOLUMES
+forest_dt[origin_data == "inra", bole_volume_reconstruct_m3 := bole_volume_m3] # TO DO: RECONSTRUCT THE VOLUMES
 
-	forest_dt = forest_dt[selected]
-	forest_dt[, nb_indiv := .N, by = speciesName_sci]
-	forest_dt = forest_dt[nb_indiv > 30]
-}
+## Compute number of individuals per species
+forest_dt[, nb_indiv := .N, by = speciesName_sci]
+
+## Subsample forest_dt for testing
+set.seed(1969 - 08 - 18)
+n = round(forest_dt[, .N]/10)
+selected = sort(sample(x = forest_dt[, .N], size = n, replace = FALSE))
+
+forest_dt_sub = forest_dt[selected]
+forest_dt_sub[, nb_indiv := .N, by = speciesName_sci]
+forest_dt_sub = forest_dt_sub[nb_indiv > 30]
+setkey(forest_dt_sub, fct_type, speciesName_sci, origin_data, unique_id)
+
+## Subsample forest_dt for testing, INRA alone
+forest_dt_inra = forest_dt[origin_data == "inra"]
+forest_dt_inra[, nb_indiv := .N, by = speciesName_sci]
+forest_dt_inra = forest_dt_inra[nb_indiv > 30]
+setkey(forest_dt_inra, fct_type, speciesName_sci, origin_data, unique_id)
+
+## Subsample forest_dt for testing, 50-50 Inra/NFI
+set.seed(1969 - 08 - 18)
+n = forest_dt[origin_data == "inra", .N]
+selected = forest_dt[origin_data == "nfi"][sort(sample(x = .N, size = n, replace = FALSE))]
+
+forest_dt_50 = rbind(forest_dt[origin_data == "inra"], selected)
+forest_dt_50[, nb_indiv := .N, by = speciesName_sci]
+forest_dt_50 = forest_dt_50[nb_indiv > 30]
+setkey(forest_dt_50, fct_type, speciesName_sci, origin_data, unique_id)
+
+setkey(forest_dt, fct_type, speciesName_sci, origin_data, unique_id)
 ```
 
 ### Compute the indices for Stan
@@ -482,61 +529,91 @@ Stan language uses vectors and arrays (think matrices), but does not know data.f
 ```{r}
 ## Indices
 # Find start and end indices for each species
-setkey(forest_dt, fct_type, speciesName_sci, origin_data, unique_id)
-ind_species_1 = forest_dt[, .(start = .I[1], end = .I[.N], fct_type = unique(fct_type)), by = .(speciesName_sci)]
-ind_species_2 = forest_dt[, .(start_sp_orig = .I[1], end_sp_orig = .I[.N], genus = unique(genus)),
-	by = .(speciesName_sci, origin_data)]
-ind_species = merge.data.table(x = ind_species_1, y = ind_species_2, by = "speciesName_sci")
-ind_species[, n_indiv := end - start + 1, by = speciesName_sci]
+ind_fct = function(dt)
+{
+	if (!all.equal(key(dt), c("fct_type", "speciesName_sci", "origin_data", "unique_id")))
+		stop("DT must have the following keys in the same order: fct_type, speciesName_sci, origin_data, unique_id")
 
-if (unique(ind_species[, .(speciesName_sci, n_indiv)])[, sum(n_indiv)] != forest_dt[, .N])
-	stop("The number of individuals in ind_species does not correspond to the number of individuals in forest_dt!")
+	ind_species_1 = dt[, .(start = .I[1], end = .I[.N], fct_type = unique(fct_type)), by = .(speciesName_sci)]
+	ind_species_2 = dt[, .(start_sp_orig = .I[1], end_sp_orig = .I[.N], genus = unique(genus)),
+		by = .(speciesName_sci, origin_data)]
+	ind_species = merge.data.table(x = ind_species_1, y = ind_species_2, by = "speciesName_sci")
+	ind_species[, n_indiv := end - start + 1, by = speciesName_sci]
 
-ind_species[, colour := if(fct_type == "broadleaf") "#FFAF37" else "#007BA5", by = .(speciesName_sci, origin_data)]
-setorder(ind_species, start)
+	if (unique(ind_species[, .(speciesName_sci, n_indiv)])[, sum(n_indiv)] != dt[, .N])
+		stop("The number of individuals in ind_species does not correspond to the number of individuals in dt!")
 
-n_sp = ind_species[, .N, by = .(fct_type, origin_data)]
-setkey(n_sp, fct_type, origin_data)
+	ind_species[, colour := if(fct_type == "broadleaf") "#FFAF37" else "#007BA5", by = .(speciesName_sci, origin_data)]
+	setorder(ind_species, start)
+
+	n_sp = ind_species[, .N, by = .(fct_type, origin_data)]
+	setkey(n_sp, fct_type, origin_data)
+	return(list(ind_species = ind_species, n_sp = n_sp))
+}
+
+ind_species = ind_fct(forest_dt)
+ind_species_sub = ind_fct(forest_dt_sub)
+ind_species_inra = ind_fct(forest_dt_inra)
+ind_species_50 = ind_fct(forest_dt_50)
 ```
 
 ### Format the data for stan
 
 ```{r}
 ## Stan data
-stanData = list(
-	N = forest_dt[, .N],
-	N_inra = forest_dt[!is.na(crown_volume_m3), .N],
-	S = ind_species[, .N],
-	n_sp_broad_tot = n_sp["broadleaf", sum(N)],
-	n_sp_conif_tot = n_sp["conifer", sum(N)],
-	n_sp_broad_inra = n_sp[CJ("broadleaf", "inra"), N],
-	n_sp_conif_inra = n_sp[CJ("conifer", "inra"), N],
+makeData = function(dt, ind_ls)
+{
+	if (!is.list(ind_ls))
+		stop("ind_ls should be a list")
 
-	ind_start_broad = ind_species[fct_type == "broadleaf", start],
-	ind_start_conif = ind_species[fct_type == "conifer", start],
-	ind_end_broad = ind_species[fct_type == "broadleaf", end],
-	ind_end_conif = ind_species[fct_type == "conifer", end],
+	if (!all(names(ind_ls) %in% c("n_sp", "ind_species")))
+		stop("ind_ls must contain n_sp and ind_species. Run ind_fct first")
 
-	ind_start_broad_inra = ind_species[(fct_type == "broadleaf") & (origin_data == "inra"), start_sp_orig],
-	ind_start_conif_inra = ind_species[(fct_type == "conifer") & (origin_data == "inra"), start_sp_orig],
-	ind_end_broad_inra = ind_species[(fct_type == "broadleaf") & (origin_data == "inra"), end_sp_orig],
-	ind_end_conif_inra = ind_species[(fct_type == "conifer") & (origin_data == "inra"), end_sp_orig],
+	n_sp = ind_ls[["n_sp"]]
+	ind_species = ind_ls[["ind_species"]]
 
-	height = forest_dt[, height],
-	circumference_m = forest_dt[, circumference_m],
+	stanData = list(
+		N = dt[, .N],
+		N_inra = dt[!is.na(crown_volume_m3), .N],
+		S = ind_species[, .N],
+		n_sp_broad_tot = n_sp["broadleaf", sum(N)],
+		n_sp_conif_tot = n_sp["conifer", sum(N)],
+		n_sp_broad_inra = n_sp[CJ("broadleaf", "inra"), N],
+		n_sp_conif_inra = n_sp[CJ("conifer", "inra"), N],
 
-	total_volume_m3 = forest_dt[, total_volume_m3],
-	bole_volume_m3 = forest_dt[, bole_volume_m3],
-	crown_volume_m3 = forest_dt[, crown_volume_m3]
-)
+		ind_start_broad = ind_species[fct_type == "broadleaf", start],
+		ind_start_conif = ind_species[fct_type == "conifer", start],
+		ind_end_broad = ind_species[fct_type == "broadleaf", end],
+		ind_end_conif = ind_species[fct_type == "conifer", end],
+
+		ind_start_broad_inra = ind_species[(fct_type == "broadleaf") & (origin_data == "inra"), start_sp_orig],
+		ind_start_conif_inra = ind_species[(fct_type == "conifer") & (origin_data == "inra"), start_sp_orig],
+		ind_end_broad_inra = ind_species[(fct_type == "broadleaf") & (origin_data == "inra"), end_sp_orig],
+		ind_end_conif_inra = ind_species[(fct_type == "conifer") & (origin_data == "inra"), end_sp_orig],
+
+		height = dt[, height],
+		circumference_m = dt[, circumference_m],
+
+		total_volume_m3 = dt[, total_volume_m3],
+		bole_volume_m3 = dt[, bole_volume_reconstruct_m3],
+		crown_volume_m3 = dt[, crown_volume_m3]
+	)
+
+	return(stanData)
+}
+
+stanData = makeData(forest_dt, ind_species)
+stanData_sub = makeData(forest_dt_sub, ind_species)
+stanData_inra = makeData(forest_dt_inra, ind_species)
+stanData_50 = makeData(forest_dt_50, ind_species)
 ```
 
 ### Save the data
 
 The data are now ready and can be saved:
 ```{r}
-add_name = ifelse(subsample, "", "_full")
-
+## Complete dataset
+add_name = "_full"
 saveRDS(stanData, paste0(mnt_point, "data/stanData_nfi-inra", add_name, ".rds"))
 saveRDS(forest_dt, paste0(mnt_point, "data/nfi-inra_dt", add_name, ".rds"))
 saveRDS(ind_species, paste0(mnt_point, "data/ind_species_nfi-inra", add_name, ".rds"))
@@ -544,6 +621,24 @@ writeVector(x = coords_inra, filename = paste0(mnt_point, "data/coords_inra", ad
 	overwrite = TRUE)
 writeVector(x = coords_nfi, filename = paste0(mnt_point, "data/coords_nfi", add_name), filetype = "ESRI Shapefile",
 	overwrite = TRUE)
+
+## Random sub dataset
+add_name = ""
+saveRDS(stanData_sub, paste0(mnt_point, "data/stanData_nfi-inra", add_name, ".rds"))
+saveRDS(forest_dt_sub, paste0(mnt_point, "data/nfi-inra_dt", add_name, ".rds"))
+saveRDS(ind_species_sub, paste0(mnt_point, "data/ind_species_nfi-inra", add_name, ".rds"))
+
+## Inra dataset
+add_name = "_inra"
+saveRDS(stanData_inra, paste0(mnt_point, "data/stanData_nfi-inra", add_name, ".rds"))
+saveRDS(forest_dt_inra, paste0(mnt_point, "data/nfi-inra_dt", add_name, ".rds"))
+saveRDS(ind_species_inra, paste0(mnt_point, "data/ind_species_nfi-inra", add_name, ".rds"))
+
+## 50-50 dataset
+add_name = "_50"
+saveRDS(stanData_50, paste0(mnt_point, "data/stanData_nfi-inra", add_name, ".rds"))
+saveRDS(forest_dt_50, paste0(mnt_point, "data/nfi-inra_dt", add_name, ".rds"))
+saveRDS(ind_species_50, paste0(mnt_point, "data/ind_species_nfi-inra", add_name, ".rds"))
 ```
 
 ## Presentation of the data
@@ -711,6 +806,18 @@ My reconstruction matches the provided branch volumes except for the trees `{r} 
 ### Join my reconstructions together
 
 Here, it would be good to join both profile and branches tables. However, there remains some questions! See @sec-TODO where I details what to do
+
+```{r}
+## Join both profile and branches table
+emerge_2010 = merge.data.table(x = unique(emerge_2010_branches[, .(tree_id, vol_tot_branch_m3)]),
+	y = unique(emerge_2010_profils[, .(tree_id, bole_volume_cyl_m3, bole_volume_conic_m3)]), all.y = TRUE)
+
+emerge_2010 = merge.data.table(emerge_2010, emerge_2010_arbres[, .(tree, id_codesforets, id_codesessences, c130,
+	v_br_verif, v_tronc_cone_verif, v_menu_verif)], by.x = "tree_id", by.y = "tree")
+
+emerge_2010[is.na(vol_tot_branch_m3)] # I checked, v_br_verif is set to 0 in this case, so no branch
+```
+
 ```{r}
 # trees_2010 = merge.data.table(unique(emerge_2010_branches[, .(tree_id, vol_tot_branch_m3)]),
 # 	unique(emerge_2010_profils[, .(tree_id, bole_volume_cyl_m3, bole_volume_conic_m3)]))
@@ -758,3 +865,23 @@ Here, it would be good to join both profile and branches tables. However, there 
 
 ## TO DO!!!!! {#sec-TODO}
 Menus bois?? Je fais comment pour reconstruire ça??? Comment ça a été calculé? Demandé à Christine Deleuze.
+
+## Felled trees across Switzwerland 
+The data are described in @Didion2024. I reconstruct the volume as follow TO CONTINUE DESCRIPTION
+
+
+```{r}
+#### Reshape data
+## Melt
+swiss_dt = fread(filename_switzerland)
+swiss_dt = melt(swiss_dt, measure = patterns("^DM[[:digit:]]"), variable.name = "diameter_height", value.name = "diameter",
+	variable.factor = FALSE)
+
+swiss_dt[, c("dbh_m", "height", "circumference_m") := .(DBH/1e3, H_total/10, pi*DBH/1e3)]
+swiss_dt[, c("dbh_m", "height", "circumference_m") := .(DBH/1e3, H_total/10, pi*DBH/1e3)]
+
+swiss_dt[, c("Elevation", "NFI_PR", "StandAge", "StandComp", "TreeAge", "NFI_mainspecies", "DBH", "H_total") := NULL]
+
+setnames(swiss_dt, old = c("SiteID", "Lat", "Long", "InvYear", "TreeID", "TreeSpecies"),
+	new = c("plot_id", "latitude", "longitude", "year", "tree_id", "sp_code"))
+```
