@@ -168,6 +168,7 @@ library(data.table)
 library(MetBrewer)
 library(inventR)
 library(stringi)
+library(hexbin)
 library(terra)
 library(gt)
 ```
@@ -261,10 +262,13 @@ I noticed one error in the `codesessences` data.table for the species `essence_i
 codesessences[essence_ifn == 65, c("nomessence", "espece") := .("cèdre de l Atlas", "atlantica")]
 ```
 
-Then, I also decided to merge *Pinus nigra ssp pallasiana* with *Pinus nigra* because there are only 7 individuals *v.s.* 240. Note that after all, *Pinus nigra ssp pallasiana* [is a synonym](https://inpn.mnhn.fr/espece/listeEspeces/pinus+nigra/) of *Pinus nigra ssp nigra*, which is quite close to *Pinus nigra*.
+Then, I also decided to merge *Pinus nigra ssp pallasiana* with *Pinus nigra* because there are only 7 individuals *v.s.* 240. Note that after all, *Pinus nigra ssp pallasiana* [is a synonym](https://inpn.mnhn.fr/espece/listeEspeces/pinus+nigra/) of *Pinus nigra ssp nigra*, which is quite close to *Pinus nigra*. There is also a mistake for `Thuja plicata`, it is written `Thuya`. The unknown genus are transformed when possible to `Broadleaves` or `Conifers`.
 
 ```{r}
 codesessences[espece == "nigra ssp pallasiana", espece := "nigra"]
+codesessences[genre == "Thuya", genre := "Thuja"]
+codesessences[genre == "inconnu (feuillus)", genre := "Broadleaves"]
+codesessences[genre == "inconnu (résineux)", genre := "Conifers"]
 codesessences[, c("speciesName_sci", "fct_type") := .(paste(genre, espece), ifelse(feuillu, "broadleaf", "conifer"))]
 ```
 
@@ -301,9 +305,8 @@ inra_arbres = merge.data.table(inra_arbres, codesessences[, .(essence, speciesNa
 	by.x = "id_codesessences", by.y = "essence")
 
 inra_arbres = na.omit(inra_arbres)
-inra_arbres[, id_codesessences := NULL]
 
-setnames(inra_arbres, new = c("plot_id", "unique_id", "circumference_m", "height", "total_volume_m3",
+setnames(inra_arbres, new = c("species_code_inra", "plot_id", "unique_id", "circumference_m", "height", "total_volume_m3",
 	"bole_volume_m3", "crown_volume_m3", "genus", "year", "lon", "lat", "speciesName_sci", "fct_type"))
 
 ## Change type of cols
@@ -475,8 +478,9 @@ coords_inra = unique(coords_inra) # Now that I put the coords in inra_arbres, I 
 ## Merge both INRA and NFI datasets
 forest_dt = rbindlist(l = list(inra = inra_arbres, nfi = nfi_data), fill = TRUE, idcol = "origin_data")
 
-## Remove the unknown broadleaf and conifer
-forest_dt = forest_dt[!stri_detect(speciesName_sci, regex = "inconnu")]
+## Remove the unknown broadleaves and conifers
+forest_dt = forest_dt[speciesName_sci != "Broadleaves sp."]
+forest_dt = forest_dt[speciesName_sci != "Conifers sp."]
 
 ## Remove null volumes (all from inra actually)
 if (forest_dt[, any(bole_volume_m3 <= 0)])
@@ -641,56 +645,6 @@ saveRDS(forest_dt_50, paste0(mnt_point, "data/nfi-inra_dt", add_name, ".rds"))
 saveRDS(ind_species_50, paste0(mnt_point, "data/ind_species_nfi-inra", add_name, ".rds"))
 ```
 
-## Presentation of the data
-
-The data are composed by the following species:
-
-```{r}
-#| echo: false
-#| label: fig-data
-#| fig-cap: "Number of individuals per species, with conifers in blue and broadleaves in orange. Watch out, it is a $\\log_{10}$ scale"
-#| fig-asp: 1
-#| out-width: 95%
-#| fig-width: 9
-species_nb = unique(ind_species[, .(n_indiv = sum(n_indiv), colour), by = genus])
-setorder(species_nb, n_indiv)
-
-par(mar = c(5, 12, 2, 2))
-# Use barplot f or horizontal bars
-barplot(
-	species_nb[, n_indiv],
-	names.arg = species_nb[, genus],
-	horiz = TRUE, # Horizontal bars
-	xlab = "Number of individuals",
-	ylab = "",
-	main = "",
-	las = 1,
-	log = "x",
-	col = species_nb[, colour]
-)
-```
-
-and the plots are located:
-
-```{r}
-#| echo: false
-#| label: fig-map
-#| fig-cap: "Location of the plots"
-#| fig-asp: 1
-#| out-width: 95%
-#| fig-width: 9
-
-#### Coordinates
-## Projections
-coords_inra = project(coords_inra, coords_nfi)
-colours_vec = met.brewer(name = "Egypt", n = 2)
-
-## Plot
-plot(project(vect(inventR::france), coords_inra), lwd = 2, axes = FALSE)
-points(coords_nfi, col = colours_vec[2], pch = 20, cex = 0.55)
-points(coords_inra, col = colours_vec[1], pch = 20, cex = 1.15)
-```
-
 ## Data for posterior checks
 
 After running a Bayesian model, it is important to do a 'predict' on new data to check that the model can generate sensible volume. For this, I use the volume-measured trees dataset from 2009 and 2010, which I format in this section. There are three datasets for each year, one for:
@@ -739,7 +693,7 @@ Now, I compare these reconstructed volumes with those provided in `emerge_2010_a
 ```{r}
 #| echo: false
 #| label: fig-compare_bole_vol
-#| fig-cap: "Compare the volumes (reconstruction - provided)"
+#| fig-cap: Compare the volumes (reconstruction - provided)
 #| fig-subcap: 
 #|   - "Frustum formula"
 #|   - "Cylinder"
@@ -775,7 +729,7 @@ setDT(emerge_2010_branches)
 setnames(emerge_2010_branches, old = "tree", new = "tree_id")
 
 # qq = copy(emerge_2010_branches)
-emerge_2010_branches = copy(qq)
+# emerge_2010_branches = copy(qq)
 
 ## Clean the branch dataset and compute total branch volume per tree
 # Remove lines for which I cannot deduce a volume because all information are missing
@@ -801,7 +755,7 @@ compare = merge.data.table(compare, emerge_2010_arbres[, .(tree, v_br_verif)],
 	by.x = "tree_id", by.y = "tree")
 ```
 
-My reconstruction matches the provided branch volumes except for the trees `{r} compare[abs(vol_tot_branch_m3 - v_br_verif) > 1e-5, tree_id]`. Note that I did like them: for the incomplete trees I use a density of \qty{1000}{\kilogram\per\cubic\metre} to convert the wet weight into a volume when branch's length or circumference are missing.
+My reconstruction matches the provided branch volumes except for the trees `{r} compare[abs(vol_tot_branch_m3 - v_br_verif) > 1e-5, tree_id]`. Note that I did like Christine Deleuze and her team: for the incomplete trees I use a density of \qty{1000}{\kilogram\per\cubic\metre} to convert the wet weight into a volume when branch's length or circumference are missing.
 
 ### Join my reconstructions together
 
@@ -815,7 +769,7 @@ emerge_2010 = merge.data.table(x = unique(emerge_2010_branches[, .(tree_id, vol_
 emerge_2010 = merge.data.table(emerge_2010, emerge_2010_arbres[, .(tree, id_codesforets, id_codesessences, c130,
 	v_br_verif, v_tronc_cone_verif, v_menu_verif)], by.x = "tree_id", by.y = "tree")
 
-emerge_2010[is.na(vol_tot_branch_m3)] # I checked, v_br_verif is set to 0 in this case, so no branch
+# emerge_2010[is.na(vol_tot_branch_m3)] # I checked, v_br_verif is set to 0 in this case, so no branch
 ```
 
 ```{r}
@@ -867,21 +821,436 @@ emerge_2010[is.na(vol_tot_branch_m3)] # I checked, v_br_verif is set to 0 in thi
 Menus bois?? Je fais comment pour reconstruire ça??? Comment ça a été calculé? Demandé à Christine Deleuze.
 
 ## Felled trees across Switzwerland 
-The data are described in @Didion2024. I reconstruct the volume as follow TO CONTINUE DESCRIPTION
+The data are described in @Didion2024. I reconstruct the volume as follow: TO CONTINUE DESCRIPTION
 
 
 ```{r}
 #### Reshape data
 ## Melt
-swiss_dt = fread(filename_switzerland)
 swiss_dt = melt(swiss_dt, measure = patterns("^DM[[:digit:]]"), variable.name = "diameter_height", value.name = "diameter",
 	variable.factor = FALSE)
 
-swiss_dt[, c("dbh_m", "height", "circumference_m") := .(DBH/1e3, H_total/10, pi*DBH/1e3)]
-swiss_dt[, c("dbh_m", "height", "circumference_m") := .(DBH/1e3, H_total/10, pi*DBH/1e3)]
+## Define new variables, convert some to m, and rename some columns
+swiss_dt[, c("diameter", "dbh_m", "height", "L_coarsestemfinal", "L_top", "D_coarsestemfinal", "D_top") :=
+	.(diameter/1e3, DBH/1e3, H_total/10, L_coarsestemfinal/10, L_top/10, D_coarsestemfinal/1e3, D_top/1e3)]
 
 swiss_dt[, c("Elevation", "NFI_PR", "StandAge", "StandComp", "TreeAge", "NFI_mainspecies", "DBH", "H_total") := NULL]
 
 setnames(swiss_dt, old = c("SiteID", "Lat", "Long", "InvYear", "TreeID", "TreeSpecies"),
-	new = c("plot_id", "latitude", "longitude", "year", "tree_id", "sp_code"))
+	new = c("plot_id", "lat", "lon", "year", "tree_id", "sp_code"))
+
+swiss_dt[diameter_height == "DM065", diameter_height_m := 0.65]
+swiss_dt[diameter_height != "DM065",
+	diameter_height_m := as.numeric(stri_replace(str = diameter_height, regex = "DM", replacement = ""))]
+
+## Get coordinates
+coords_swiss = vect(x = unique(swiss_dt[!is.na(lon) | !is.na(lat), .(plot_id, lon, lat)]), crs = "EPSG:4326")
+swiss_dt[, c("lon", "lat") := NULL]
+
+## Sort by tree id, and then diameter height (tree_id is already a unique identifier, no need for plot_id)
+setkey(swiss_dt, tree_id, diameter_height_m)
+
+## Set D_coarsestemfinal, L_coarsestemfinal, D_top, and L_top to 0 when NA
+swiss_dt[is.na(D_coarsestemfinal), D_coarsestemfinal := 0]
+swiss_dt[is.na(L_coarsestemfinal), L_coarsestemfinal := 0]
+swiss_dt[is.na(D_top), D_top := 0]
+swiss_dt[is.na(L_top), L_top := 0]
+
+swiss_dt[is.na(V_coarsebranch), V_coarsebranch := 0]
+swiss_dt[is.na(V_finebranch), V_finebranch := 0]
+swiss_dt[is.na(V_finewoodytotal), V_finewoodytotal := 0] # Includes the top of the tree, but is NA if V_finebranch = NA!
+
+## Remove useless lines
+swiss_dt = swiss_dt[!is.na(diameter)] # Diameters that do not exist or where not given
+swiss_dt = swiss_dt[!is.na(sp_code)] # Missing species information
+
+## Compute volumes
+# Volume trunk using cylindre formula with median diameter: log 0 to 2 --> DM1, log 2 to 4 --> DM3, etc...
+swiss_dt[, vol_log_cyl := pi*diameter^2/4*2] # The *2 comes from the fact that each log is 2m long
+swiss_dt[, bole_volume_cyl_m3 := sum(vol_log_cyl) + pi*D_coarsestemfinal^2/4*L_coarsestemfinal, by = tree_id]
+swiss_dt[, top_volume_m3 := pi*D_top^2/4*L_top, by = tree_id]
+
+# Volume crown (already provided)
+swiss_dt[, V_coarsebranch := V_coarsebranch/1e3] # Conversion to m³
+swiss_dt[, V_finebranch := V_finebranch/1e3] # Conversion to m³
+swiss_dt[, V_finewoodytotal := V_finewoodytotal/1e3] # Conversion to m³
+
+swiss_dt[, crown_volume_m3 := V_coarsebranch + V_finebranch + top_volume_m3]
+
+# Total volume
+swiss_dt[, total_volume_m3 := bole_volume_cyl_m3 + crown_volume_m3]
+
+## Keep only cols and rows of interest
+swiss_dt = unique(swiss_dt[, .(plot_id, year, tree_id, sp_code, dbh_m, height, bole_volume_cyl_m3,
+	crown_volume_m3, total_volume_m3)])
+
+## Add circumference for ease
+swiss_dt[, circumference_m := pi*dbh_m]
 ```
+
+Add species to the swiss data. Few species names are modified to match the French NFI names. For instance, *Pinus mugo Turra subsp. mugo* becomes *Pinus mugo*, while *Acer campestre, platanoides*, and *pseudoplatanus*, become *Acer sp.*. Note that for the second case, it creates two corresponding match: 'petit érable' (for *A. campestre*) and 'grand érable' (for the two others). There is unfortunately no way to distinguish them. Same for the three *Quercus petraea*, *robur*, and *rubra* that are grouped in the swiss EFM, while in France the group is *Quercus petraea*, *pubescens*, and *robur*.
+
+```{r}
+## Add species
+# Change colnames and keep columns of interest
+swiss_sp[, c("NFI main species", "N") := NULL]
+setnames(swiss_sp, old = c("Species ID", "Species name"),
+	new = c("sp_code_swiss", "speciesName_sci"))
+
+# Correct/modify few species to match codesessences
+swiss_sp[speciesName_sci == "Pinus mugo Turra subsp. mugo", speciesName_sci := "Pinus mugo"]
+swiss_sp[speciesName_sci == "Chamaecyparis", speciesName_sci := "Chamaecyparis sp."]
+swiss_sp[speciesName_sci == "Picea omorika", speciesName_sci := "Picea sp."] # There are only 14 individuals...
+swiss_sp[speciesName_sci == "Larix kaempferi (Lamb.) Carrière", speciesName_sci := "Larix kaempferi"]
+swiss_sp[speciesName_sci == "Quercus petraea, Q. robur, Q. rubra", speciesName_sci := "Quercus sp."] # 1821 individuals
+swiss_sp[speciesName_sci == "Fraxinus americana, F. excelsior", speciesName_sci := "Fraxinus sp."] # 141 individuals
+swiss_sp[speciesName_sci == "Acer campestre, A. platanoides, A. pseudoplatanus", speciesName_sci := "Acer sp."] # 90 indiv
+swiss_sp[speciesName_sci == "Juglans regia", speciesName_sci := "Juglans sp."] # 207 individuals
+swiss_sp[speciesName_sci == "Other broadleaves, incl. Sorbus spp and Tilia spp",
+	speciesName_sci := "Broadleaves sp."] # 9 individuals
+
+codesessences = merge.data.table(x = codesessences, y = swiss_sp, all.x = TRUE, by = "speciesName_sci")
+
+non_unique = codesessences[!is.na(sp_code_swiss)][, .N, by = sp_code_swiss][N > 1][, sort(sp_code_swiss)]
+
+# Drop the nfi codes from codesessences that are not present in forest_dt
+nfi_to_check = codesessences[sp_code_swiss %in% non_unique, nfi]
+nfi_to_dump = nfi_to_check[!(nfi_to_check %in% forest_dt$species_code_nfi)]
+codesessences = codesessences[!(nfi %in% nfi_to_dump)]
+
+# Drop the inra codes from codesessences that are not present in forest_dt
+inra_to_check = codesessences[sp_code_swiss %in% non_unique, essence]
+inra_to_dump = inra_to_check[!(inra_to_check %in% forest_dt$species_code_inra)]
+codesessences = codesessences[!(essence %in% inra_to_dump)]
+
+# Check there is no duplicates left
+non_unique = codesessences[!is.na(sp_code_swiss)][, .N, by = sp_code_swiss][N > 1][, sort(sp_code_swiss)]
+
+if (length(non_unique) != 0)
+	warning("There are still duplicates, which might create problems")
+
+swiss_dt = merge.data.table(x = swiss_dt,
+	y = codesessences[!is.na(sp_code_swiss), .(sp_code_swiss, speciesName_sci, genus = genre, fct_type)],
+	by.x = "sp_code", by.y = "sp_code_swiss")
+```
+
+```{r}
+saveRDS(swiss_dt, paste0(mnt_point, "data/switzerland.rds"))
+writeVector(x = coords_swiss, filename = paste0(mnt_point, "data/coords_switzerland"), filetype = "ESRI Shapefile",
+	overwrite = TRUE)
+```
+
+## Presentation of the data
+
+### Distribution of the data in terms of circumference, height, slenderness, and coordinates
+
+The data are composed by the following species:
+```{r}
+#| echo: false
+#| label: fig-data
+#| fig-cap: Number of individuals per genus (French data), with conifers in blue and broadleaves in orange. Watch out, it is a $\\log_{10}$ scale
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 9
+species_nb = unique(ind_species[["ind_species"]][, .(n_indiv = sum(n_indiv), colour), by = genus])[order(n_indiv)]
+
+par(mar = c(5, 12, 2, 2))
+# Use barplot f or horizontal bars
+barplot(
+	species_nb[, n_indiv],
+	names.arg = species_nb[, genus],
+	horiz = TRUE, # Horizontal bars
+	xlab = "Number of individuals",
+	ylab = "",
+	main = "",
+	las = 1,
+	log = "x",
+	col = species_nb[, colour]
+)
+```
+
+::: {.callout-note collapse=true}
+
+```{r}
+unique(forest_dt[, .N, by = speciesName_sci])[order(speciesName_sci)] |>
+	gt() |>
+	cols_label(
+		speciesName_sci = "Species",
+		N = "N. individuals"
+	) |>
+	tab_style(
+		style = cell_borders(sides = "all", style = NULL),
+		locations = cells_body()
+	) |>
+	tab_style(
+		style = cell_text(weight = "bold", align = "right"),
+		locations = list(cells_column_labels(), cells_column_spanners())
+	) |>
+	tab_style(
+		style = list(cell_fill(color = "#FFFFFF"), cell_text(color = "#122112", weight = "bold",
+			align = "right")),
+		locations = cells_body(columns = speciesName_sci)
+	) |>
+	tab_style(
+		style = list(cell_fill(color = "#FFFFFF"), cell_text(align = "left")),
+		locations = cells_body(columns = N)
+	)
+```
+
+:::
+
+and the plots are located:
+
+```{r}
+#| echo: false
+#| label: fig-map
+#| fig-cap: "Location of the plots, with NFI for the Naional Forest Invetory of France, and EFM the Experimental Forest Monitoring of Switzerland [@Didion2024]"
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 9
+
+#### Coordinates
+## Read shapefiles
+switzerland = project(vect(paste0(mnt_point, "data/shapefiles/switzerland/CHE_adm0.shp")), coords_inra)
+france = project(vect(paste0(mnt_point, "data/shapefiles/france/FRA_adm0.shp")), coords_inra)
+belgium = project(vect(paste0(mnt_point, "data/shapefiles/belgium/gadm41_BEL_0.shp")), coords_inra)
+italy = project(vect(paste0(mnt_point, "data/shapefiles/italy/gadm41_ITA_0.shp")), coords_inra)
+luxembourg = project(vect(paste0(mnt_point, "data/shapefiles/luxembourg/gadm41_LUX_0.shp")), coords_inra)
+germany = project(vect(paste0(mnt_point, "data/shapefiles/germany/gadm41_DEU_0.shp")), coords_inra)
+
+fr_ch = project(rbind(france, switzerland), coords_inra)
+
+## Projections
+colours = met.brewer(name = "Lakota", n = 3)
+names(colours) = c("nfi", "swiss", "inra")
+
+## Plot
+plot(fr_ch, lwd = 2, axes = FALSE)
+points(coords_nfi, col = colours["nfi"], pch = 20, cex = 0.35)
+points(coords_inra, col = colours["inra"], pch = 20, cex = 1.15)
+points(project(coords_swiss, coords_inra), col = colours["swiss"], pch = 20, cex = 0.55)
+plot(fr_ch, lwd = 2, add = TRUE, bg = "transparent")
+plot(luxembourg, lwd = 2, add = TRUE)
+plot(germany, lwd = 2, add = TRUE)
+plot(belgium, lwd = 2, add = TRUE)
+plot(italy, lwd = 2, add = TRUE)
+
+legend(x = "bottomleft", legend = c("Emerge", "NFI", "EFM"), fill = colours[c("inra", "nfi", "swiss")], bty = "n", inset = c(0, 0.1))
+```
+
+It is now time to explore how the data are distributed, if they cover the same range of tree diameters, heights, and volumes.
+
+```{r}
+#| echo: false
+#| label: fig-distrib
+#| fig-cap: Distribution of the data
+#| fig-subcap: 
+#|   - "Densities of circumferences"
+#|   - "Densities of heights"
+#|   - "Densities of slenderness (height/circumference)"
+#| layout-nrow: 3
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 9
+
+# --- Circumferences
+dd_fr = density(forest_dt[origin_data == "nfi", circumference_m]) # French NFI
+dd_in = density(forest_dt[origin_data == "inra", circumference_m]) # Inra/Emerge data
+dd_ch = density(swiss_dt[, circumference_m]) # swiss data
+
+plot(dd_fr, col = colours["nfi"], axes = FALSE, lwd = 3, xlab = "Circumference (m)", main = "",
+	ylim = c(0, max(dd_fr$y, dd_in$y, dd_ch$y)))
+polygon(dd_fr, col = paste0(colours["nfi"], 44))
+
+lines(dd_in, col = colours["inra"], lwd = 3)
+polygon(dd_in, col = paste0(colours["inra"], 44))
+
+lines(dd_ch, col = colours["swiss"], lwd = 3)
+polygon(dd_ch, col = paste0(colours["swiss"], 44))
+
+axis(1)
+axis(2, las = 1)
+legend(x = "topright", legend = c("Emerge", "NFI", "EFM"), fill = colours[c("inra", "nfi", "swiss")], bty = "n")
+
+# --- Heights
+dd_fr = density(forest_dt[origin_data == "nfi", height]) # French NFI
+dd_in = density(forest_dt[origin_data == "inra", height]) # Inra/Emerge data
+dd_ch = density(swiss_dt[, height]) # swiss data
+
+plot(dd_fr, col = colours["nfi"], axes = FALSE, lwd = 3, xlab = "Height (m)", main = "",
+	ylim = c(0, max(dd_fr$y, dd_in$y, dd_ch$y)))
+polygon(dd_fr, col = paste0(colours["nfi"], 44))
+
+lines(dd_in, col = colours["inra"], lwd = 3)
+polygon(dd_in, col = paste0(colours["inra"], 44))
+
+lines(dd_ch, col = colours["swiss"], lwd = 3)
+polygon(dd_ch, col = paste0(colours["swiss"], 44))
+
+axis(1)
+axis(2, las = 1)
+legend(x = "topright", legend = c("Emerge", "NFI", "EFM"), fill = colours[c("inra", "nfi", "swiss")], bty = "n")
+
+# --- Slenderness
+dd_fr = density(forest_dt[origin_data == "nfi", height/circumference_m]) # French NFI
+dd_in = density(forest_dt[origin_data == "inra", height/circumference_m]) # Inra/Emerge data
+dd_ch = density(swiss_dt[, height/circumference_m]) # swiss data
+
+plot(dd_fr, col = colours["nfi"], axes = FALSE, lwd = 3, xlab = "Slenderness (height/circumference)", main = "",
+	ylim = c(0, max(dd_fr$y, dd_in$y, dd_ch$y)))
+polygon(dd_fr, col = paste0(colours["nfi"], 44))
+
+lines(dd_in, col = colours["inra"], lwd = 3)
+polygon(dd_in, col = paste0(colours["inra"], 44))
+
+lines(dd_ch, col = colours["swiss"], lwd = 3)
+polygon(dd_ch, col = paste0(colours["swiss"], 44))
+
+axis(1)
+axis(2, las = 1)
+legend(x = "topright", legend = c("Emerge", "NFI", "EFM"), fill = colours[c("inra", "nfi", "swiss")], bty = "n")
+```
+
+### Response plots, bole
+```{r}
+#| echo: false
+
+#### Binding both forest_dt and swiss_dt
+## Temporary data
+temp = rbind(forest_dt[, .(plot_id, tree_id, genus, circumference_m,
+		bole_volume_m3 = bole_volume_reconstruct_m3, crown_volume_m3, origin_data)],
+	swiss_dt[, .(plot_id, tree_id, genus, circumference_m,
+		bole_volume_m3 = bole_volume_cyl_m3, crown_volume_m3)], fill = TRUE)
+
+## Origin data and colours
+temp[is.na(origin_data), origin_data := "swiss"]
+temp[, colour := colours[origin_data], by = origin_data]
+
+# ## Check composition data (complete)
+# n = temp[, .N]
+# # temp[, round(.N/n*100, 2), by = origin_data]
+
+# ## Subset data
+# set.seed(1969 - 08 - 18) # Woodstock seed
+# n_sample = 1e5
+# temp = temp[sort(sample(x = 1:.N, size = n_sample, replace = FALSE))]
+
+# ## Check composition data (sampled)
+# n = temp[, .N]
+# # temp[, round(.N/n*100, 2), by = origin_data]
+
+# ## Remove 'lonely' genus, i.e., less than 1e3 individuals
+# temp[, n_indiv := .N, by = genus]
+# temp = temp[n_indiv > 1000]
+
+## Remove genus that 
+select_genus = temp[, .N, by = .(genus, origin_data)][, .N, by = genus][N > 1, genus]
+
+## List genus and set keys
+temp = temp[genus %in% select_genus]
+
+setkey(temp, genus, origin_data)
+ls_genus = unique(temp[, genus])
+
+print(ls_genus)
+```
+
+::: {.callout-note collapse=true}
+
+```{r}
+temp[, .N, by = .(genus, origin_data)] |>
+	gt() |>
+	tab_options(
+		quarto.disable_processing = TRUE,
+		ihtml.use_highlight = TRUE
+	) |>
+	cols_label(
+		genus = "Genus",
+		origin_data = "Dataset",
+		N = "N. individual"
+	) |>
+	tab_style(
+		style = cell_borders(sides = "all", style = NULL),
+		locations = cells_body()
+	) |>
+	tab_style(
+		style = cell_text(weight = "bold", align = "right"),
+		locations = list(cells_column_labels(), cells_column_spanners())
+	) |>
+	tab_style(
+		style = list(cell_fill(color = "#FFFFFF"), cell_text(color = "#122112", weight = "bold",
+			align = "right")),
+		locations = cells_body(columns = genus)
+	) |>
+	tab_style(
+		style = list(cell_fill(color = "#FFFFFF"), cell_text(align = "left")),
+		locations = cells_body(columns = c(N, origin_data))
+	)
+```
+
+:::
+
+```{r}
+#| echo: false
+#| label: fig-responses
+#| fig-cap: Response of volume to circumference for the 17 genus that are present in at least two datasets
+#| fig-subcap:
+#|   - "Abies"
+#|   - "Acer"
+#|   - "Betula"     
+#|   - "Carpinus"
+#|   - "Castanea"
+#|   - "Cedrus"     
+#|   - "Fagus"
+#|   - "Fraxinus"
+#|   - "Juglans"    
+#|   - "Larix"
+#|   - "Picea"
+#|   - "Pinus"      
+#|   - "Populus"
+#|   - "Prunus"
+#|   - "Pseudotsuga"
+#|   - "Quercus"
+#|   - "Ulmus" 
+#| layout-nrow: 6
+#| layout-col: 3
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 9
+
+for (current_gen in ls_genus)
+{
+	pres_inra = FALSE
+	pres_swiss = FALSE
+
+	plot(temp[.(current_gen, "nfi"), circumference_m], temp[.(current_gen, "nfi"), bole_volume_m3], cex = 0.45,
+		xlab = "Circumference (m)", ylab = "Bole volume (m³)", main = "", axes = FALSE, pch = 19, lwd = 0,
+		col = colours["nfi"], xlim = c(0, max(temp[.(current_gen), circumference_m])))
+	
+	if (temp[.(current_gen, "inra"), .N, nomatch = NULL] > 0)
+	{
+		points(temp[.(current_gen, "inra"), circumference_m], temp[.(current_gen, "inra"), bole_volume_m3],
+			cex = 0.55, col = colours["inra"], pch = 19, lwd = 0)
+		pres_inra = TRUE
+	}
+		
+	if (temp[.(current_gen, "swiss"), .N, nomatch = NULL] > 0)
+	{
+		points(temp[.(current_gen, "swiss"), circumference_m], temp[.(current_gen, "swiss"), bole_volume_m3],
+			cex = 0.55, col = paste0(colours["swiss"], ifelse(pres_inra, "66", "FF")), pch = 19, lwd = 0)
+		pres_swiss = TRUE
+	}
+
+	axis(1)
+	axis(2, las = 1)
+
+	if (pres_inra && pres_swiss)
+		legend(x = "topleft", legend = c("Emerge", "NFI", "EFM"), fill = colours[c("inra", "nfi", "swiss")], bty = "n")
+	if (pres_inra && !pres_swiss)
+		legend(x = "topleft", legend = c("Emerge", "NFI"), fill = colours[c("inra", "nfi")], bty = "n")
+	if (!pres_inra && pres_swiss)
+		legend(x = "topleft", legend = c("NFI", "EFM"), fill = colours[c("nfi", "swiss")], bty = "n")
+}
+```
+
+### Response plots, crown
