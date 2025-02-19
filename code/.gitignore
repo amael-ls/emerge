@@ -8,6 +8,6 @@ dummy/
 *.pdf
 *.tex
 *.rds
-*.stan
+# *.stan
 !test_nfi-inra.stan
 .vscode/
