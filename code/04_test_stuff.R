@@ -12,7 +12,7 @@ b = -1 # Mean slope (i.e., mean improvement waiting time in the afternoon. Impro
 
 sigma_a = 1 # Variance intercept
 sigma_b = 0.5 # Variance change morning afternoon (improvement if < 0, worsen otherwise)
-sigma_cafe = 0.5 # Variance within cafe
+sigma_cafe = 0.15 # Variance within cafe
 
 rho = -0.7 # Covariance between intercepts and slopes
 
@@ -24,7 +24,7 @@ varCov_mat = sigma_mat %*% rho_mat %*% sigma_mat
 
 #### Simulate data
 ## Simulate parameters
-n_cafes = 20
+n_cafes = 40
 set.seed(5)
 
 params_dt = as.data.table(mvrnorm(n_cafes, c(a, b), varCov_mat))
@@ -52,3 +52,37 @@ for (i in 1:n_cafes)
 	visit_dt[.(i), waiting_time := rnorm(n = n_visit,
 		mean = params_dt[i, alpha_cafe] + params_dt[i, beta_cafe]*is_afternoon, sd = sigma_cafe)]
 
+visit_dt[, afternoon_int := ifelse(is_afternoon, 1, 0)]
+
+#### Fit the model
+## Stan data
+stanData = list(
+	N_cafes = n_cafes, # Number of cafes
+	N_visit = n_visit, # Number of visits per cafe
+	N = n_cafes*n_visit,
+	afternoon = visit_dt[, afternoon_int],
+	wait = visit_dt[, waiting_time]
+)
+
+## Common variables
+n_chains = 4
+
+iter_warmup = 1000
+iter_sampling = 1000
+
+## Compile model
+model = cmdstan_model("./04_test.stan")
+
+## Run
+fit = model$sample(data = stanData, chains = n_chains, parallel_chains = ifelse(n_chains < 4, n_chains, 4),
+	seed = NULL, refresh = 50, max_treedepth = 12, save_warmup = TRUE,
+	iter_sampling = iter_sampling, iter_warmup = iter_warmup, adapt_delta = 0.8)
+
+corr_mat = fit$draws("Sigma", inc_warmup = FALSE)
+corr_mat = matrix(apply(X = corr_mat, MARGIN = 3, FUN = mean), ncol = 2)
+
+a_cafes = apply(X = fit$draws("a_cafe", inc_warmup = FALSE), MARGIN = 3, FUN = mean)
+b_cafes = apply(X = fit$draws("b_cafe", inc_warmup = FALSE), MARGIN = 3, FUN = mean)
+
+params_dt[, a_est := a_cafes]
+params_dt[, b_est := b_cafes]
