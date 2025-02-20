@@ -31,10 +31,16 @@ format:
       light: cerulean
       dark: darkly
     margin: 5% 0;
+  pdf:
+    mathspec: true
+    include-in-header:
+      - text: |
+          \usepackage{unicode-math}
 ---
 
 \newcommand{\ie}{*i.e.,*}
-\newcommand{\F}{\mathscr{F}}
+\newcommand{\bOmega}{\symbf{\Omega}}
+\newcommand{\bSigma}{\symbf{\Sigma}}
 \newcommand{\N}{\mathbfscr{N}}
 
 ## Introduction
@@ -125,12 +131,15 @@ This creates an easy, balanced dataset of `{r} n_cafes` cafes visited `{r} n_vis
 ## Fit the model {#sec-fit}
 ### DAG
 ```{mermaid}
+%%| label: fig-model
+%%| fig-cap: Diagram Acyclic Graph
 graph TB
 	Y("$$Y \sim N \left( \mu_{\text{cafe}[i]}, \sigma_{\text{cafe}[i]} \right)$$")
 ```
 
 ### Stan model
-```{stan output.var = "model", cache = TRUE}
+Here is the stan model according to the @fig-model:
+```{stan output.var = "model", cache = TRUE, fold = FALSE}
 data {
 	// Dimensions
 	int <lower = 1> N_cafes; // Number of cafes
@@ -174,7 +183,7 @@ model {
 	target += normal_lpdf(a | 5, 2);
 	target += normal_lpdf(b | -1, 2);
 	
-	target +=  lkj_corr_cholesky_lpdf(L | 2); // It contains sigma_a and sigma_b (diagonal), and rho (non-diag)
+	target +=  lkj_corr_cholesky_lpdf(L | 2); // It contains rho (non-diag), and 1 (diag)
 
 	// Variance (residuals)
 	target += exponential_lpdf(sigma | 1);
@@ -194,9 +203,37 @@ model {
 
 generated quantities { // This is to recover the variance-covariance matrix instead of having its Cholesky factor
 	corr_matrix[2] Sigma;
-	Sigma = multiply_lower_tri_self_transpose(L);
+	Sigma = multiply_lower_tri_self_transpose(diag_pre_multiply(sigma_vec, L));
 }
 ```
+
+All the functions are described in the [Stan Functions Reference](https://mc-stan.org/docs/functions-reference/), however, few explanations are required for the multivariate.
+
+Remember that the variance-covariance matrix of a multivariate distribution, $\bSigma$, can be rewritten as a product of 'pure variance' and 'pure covariance' matrices:
+$$
+\bSigma = \begin{bmatrix} \sigma_a & 0 \\ 0 & \sigma_b \end{bmatrix}
+	\begin{bmatrix} 1 & \rho \\ \rho & 1 \end{bmatrix}
+	\begin{bmatrix} \sigma_a & 0 \\ 0 & \sigma_b \end{bmatrix}
+$$
+
+The diagonal elements of $\bSigma$ are the variances of the parameters ($\sigma_a^2$ and $\sigma_b^2$), and the non-diagonal elements are the covariances ($\rho \sigma_a \sigma_b$). We denote the diagonal matrix by $\symbf{V}$, and the middle matrix by $\bOmega = \begin{bmatrix} 1 & \rho \\ \rho & 1 \end{bmatrix}$. The matrix $\bOmega$ is symmetric positive-definite and can be Cholesky-decomposed:
+$$
+\bOmega = \symbf{L}\symbf{L}^T,
+$$
+where the index $T$ is for transpose, and $L$ is a lower triangular matrix. According to [Stan correlation matrix page](https://mc-stan.org/docs/functions-reference/correlation_matrix_distributions.html), it is much better computationally to work directly with the Cholesky factor of $\bSigma$, which is:
+\begin{equation}
+	\label{eq::cholesky_Sigma}
+	\begin{aligned}
+		\bSigma &= \symbf{V} \bOmega \symbf{V} \\
+			&= \symbf{V} \symbf{L} \symbf{L}^T \symbf{V} \\
+			&= (\symbf{V} \symbf{L}) (\symbf{V} \symbf{L})^T.
+	\end{aligned}
+\end{equation}
+We denote by $\symbf{L_{\Sigma}} = \symbf{V} \symbf{L}$ the Cholesky factor of $\bSigma$.
+
+Now that this is explained, the line `target +=  lkj_corr_cholesky_lpdf(L | 2);` is just the prior on $\symbf{L}$. The prior `target +=  lkj_corr_lpdf(\eta)` just put a prior that is skeptical about high correlation for $\eta \geqslant 1$. The higher $\eta$, the more concentrated around the identity matrix is the prior [@McElreath2020]. [Stan correlation matrix page](https://mc-stan.org/docs/functions-reference/correlation_matrix_distributions.html) recommands to work with the Cholesky decomposition, hence the prior on $\symbf{L}$ rather than $\bOmega$ and the use of `lkj_corr_cholesky_lpdf` instead of `lkj_corr_lpdf` (note the _cholesky_ that disappeared in the name).
+
+Then the second step is `diag_pre_multiply(sigma_vec, L)`. This function just transforms a vector (here $(\sigma_a, \sigma_b)$) to a diagonal matrix and then multiply it by $\symbf{L}$, which gives $\symbf{L_{\Sigma}}$ (see equation \eqref{eq::cholesky_Sigma}). Note that this is valid only because I use `multi_normal_cholesky_lpdf` which requires the Cholesky factor of $\bSigma$, $\symbf{L_{\Sigma}}$, contrary to `multi_normal_lpdf`.
 
 ### Stan data
 ```{r}
@@ -217,12 +254,13 @@ iter_warmup = 1000
 iter_sampling = 1000
 ```
 
-### Run and analyse results
+###  the model
 ```{r}
 #| output: false
+#| fold: false
 ## Run
 fit = model$sample(data = stanData, chains = n_chains, parallel_chains = ifelse(n_chains < 4, n_chains, 4),
-	seed = NULL, refresh = 50, max_treedepth = 12, save_warmup = TRUE,
+	seed = NULL, refresh = 250, max_treedepth = 12, save_warmup = TRUE,
 	iter_sampling = iter_sampling, iter_warmup = iter_warmup, adapt_delta = 0.8)
 ```
 
@@ -232,9 +270,17 @@ fit = model$sample(data = stanData, chains = n_chains, parallel_chains = ifelse(
 corr_mat = fit$draws("Sigma", inc_warmup = FALSE)
 corr_mat = matrix(apply(X = corr_mat, MARGIN = 3, FUN = mean), ncol = 2)
 
+test_mat = fit$draws("Test", inc_warmup = FALSE)
+test_mat = matrix(apply(X = test_mat, MARGIN = 3, FUN = mean), ncol = 2)
+
 a_cafes = apply(X = fit$draws("a_cafe", inc_warmup = FALSE), MARGIN = 3, FUN = mean)
 b_cafes = apply(X = fit$draws("b_cafe", inc_warmup = FALSE), MARGIN = 3, FUN = mean)
 
 params_dt[, a_est := a_cafes]
 params_dt[, b_est := b_cafes]
+
+L_mat = fit$draws("L", inc_warmup = FALSE)
+L_mat = matrix(apply(X = L_mat, MARGIN = 3, FUN = mean), ncol = 2)
+
+L_mat %*% t(L_mat)
 ```
