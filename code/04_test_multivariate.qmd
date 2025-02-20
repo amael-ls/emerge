@@ -1,17 +1,79 @@
+---
+title: "A simple example of a multivariate model"
+date: today
+author: Amaël Le Squin
+date-format: iso
+filters:
+  - fontawesome
+  - diagram
+execute:
+  error: true
+bibliography: references.bib
+lightbox:
+  match: auto
+css: style.css
+knitr:
+  opts_chunk: 
+    dev: ragg_png
+    crop: null
+    out.width: "70%"
+    fig.width: 6
+    fig.asp: 0.618
+    fig.align: "center"
+format:
+  html:
+    toc: true
+    include-in-header: mathjax.html
+    code-fold: true
+    df-print: paged
+    number-sections: true
+    theme:
+      light: cerulean
+      dark: darkly
+    margin: 5% 0;
+---
 
-#### Aim of prog: Test some stuff from statistical rethinking, McElreath
+\newcommand{\ie}{*i.e.,*}
+\newcommand{\F}{\mathscr{F}}
+\newcommand{\N}{\mathbfscr{N}}
+
+## Introduction
+
+The aim of this small file, which might later become an appendix of the main article, is to explore a simple multivariate example in Stan language. I base my code on the example developed by @McElreath2020 (chap. 14) about a cafe robot.
+
+Let a robot visit cafes and order a coffee. The robot measures each time how long did it wait, and when it arrived (a simple categorical variable of two values: morning and afternoon). In the chapter 13 of @McElreath2020, it has been shown that the robot learns better when using partial pooling. In the chapter 14, McElreath claims that we can learn even more by also investigating and accounting for the correlation structure. Why? Because popular cafes have a longer waiting time in the morning (rush hour) and improves significantly the afternoon, while there is little difference in waiting time between the morning and the afternoon for non-popular cafes. Therefore, there are two levels of borrowing information:
+
+1. Between the cafes (partial pooling)
+2. Between the parameters (covariance)
+
+The @sec-create_data is dedicated to simulate data, which are fit in @#sec-fit by jointly modelling slopes and intercepts. The results are analysed in @sec-results.
+
+## Create data {#sec-create_data}
+
+```{r}
+#| output: false
+#### Clear space and load packages
+rm(list = ls())
+graphics.off()
+
+options(max.print = 500)
 
 library(data.table)
 library(cmdstanr)
+	register_knitr_engine(override = TRUE)
 library(ellipse)
 library(MASS)
+library(gt)
+```
 
+The parameters are defined as below:
+```{r}
 #### Population parameters, p. 437
 a = 3.5 # Mean intercept (i.e., mean waiting time)
 b = -1 # Mean slope (i.e., mean improvement waiting time in the afternoon. Improvement because < 0)
 
 sigma_a = 1 # Variance intercept
-sigma_b = 0.5 # Variance change morning afternoon (improvement if < 0, worsen otherwise)
+sigma_b = 0.5 # Variance change morning/afternoon (improvement if < 0, worsen otherwise)
 sigma_cafe = 0.15 # Variance within cafe
 
 rho = -0.7 # Covariance between intercepts and slopes
@@ -21,7 +83,11 @@ sigma_mat = diag(c(sigma_a, sigma_b))
 rho_mat = matrix(c(1, rho, rho, 1), nrow = 2, ncol = 2)
 
 varCov_mat = sigma_mat %*% rho_mat %*% sigma_mat
+```
 
+and the data are created using a multivariate normal distribution for the parameters (intercept and slope for each cafe, all coming from the same distribution---group effect and correlation are then included):
+
+```{r}
 #### Simulate data
 ## Simulate parameters
 n_cafes = 40
@@ -30,19 +96,18 @@ set.seed(5)
 params_dt = as.data.table(mvrnorm(n_cafes, c(a, b), varCov_mat))
 setnames(params_dt, new = c("alpha_cafe", "beta_cafe"))
 
-want_plot = FALSE
-if (want_plot)
-{
-	plot(params_dt[, alpha_cafe], params_dt[, beta_cafe], pch = 19, xlab = "alpha", ylab = "beta", axes = FALSE)
-	axis(1)
-	axis(2, las = 1)
-	for (l in c(0.1, 0.3, 0.5, 0.8, 0.99))
-		lines(ellipse(x = varCov_mat, centre = c(a, b), level = l), col = "#22442233", lwd = 2)
-}
+plot(params_dt[, alpha_cafe], params_dt[, beta_cafe], pch = 19, xlab = "alpha", ylab = "beta", axes = FALSE)
+axis(1)
+axis(2, las = 1)
+for (l in c(0.1, 0.3, 0.5, 0.8, 0.99))
+	lines(ellipse(x = varCov_mat, centre = c(a, b), level = l), col = "#22442233", lwd = 2)
 
 ## Simulate waiting times
 set.seed(22)
 n_visit = 10 # 5 in the morning, 5 in the afternoon
+
+if (n_visit %% 2 != 0)
+	stop("n_visit must be an even integer")
 
 visit_dt = data.table(cafe = rep(1:n_cafes, each = n_visit),
 	is_afternoon = rep(c(rep(FALSE, n_visit/2), rep(TRUE, n_visit/2)), n_cafes))
@@ -53,7 +118,88 @@ for (i in 1:n_cafes)
 		mean = params_dt[i, alpha_cafe] + params_dt[i, beta_cafe]*is_afternoon, sd = sigma_cafe)]
 
 visit_dt[, afternoon_int := ifelse(is_afternoon, 1, 0)]
+```
 
+This creates an easy, balanced dataset of `{r} n_cafes` cafes visited `{r} n_visit` times (equaly shared between mornings and afternoons).
+
+## Fit the model {#sec-fit}
+### DAG
+```{mermaid}
+graph TB
+	Y("$$Y \sim N \left( \mu_{\text{cafe}[i]}, \sigma_{\text{cafe}[i]} \right)$$")
+```
+
+### Stan model
+```{stan output.var = "model", cache = TRUE}
+data {
+	// Dimensions
+	int <lower = 1> N_cafes; // Number of cafes
+	int <lower = 1> N_visit; // Number of visits per cafe
+	int <lower = N_cafes*N_visit, upper = N_cafes*N_visit> N; // Number of data
+
+	// Explanatory variable
+	vector <lower = 0, upper = 1> [N] afternoon; // 0 if morning, 1 otherwise
+
+	// Observations
+	vector <lower = 0> [N] wait;
+}
+
+parameters {
+	// Population parameters...
+	// ... intercept and slope
+	real a; // Intercept
+	real b; // Slope
+	
+	// ... variances
+	real sigma_a;
+	real sigma_b;
+	cholesky_factor_corr[2] L;
+
+	// Variance (residuals)
+	real<lower = 0> sigma; // Variance within same cafe
+
+	// Whatever
+	vector [N_cafes] a_cafe;
+	vector [N_cafes] b_cafe;
+}
+
+transformed parameters {
+	vector <lower = 0>[2] sigma_vec = to_vector({sigma_a, sigma_b});
+}
+
+model {
+	int cc = 0;
+
+	// Population priors
+	target += normal_lpdf(a | 5, 2);
+	target += normal_lpdf(b | -1, 2);
+	
+	target +=  lkj_corr_cholesky_lpdf(L | 2); // It contains sigma_a and sigma_b (diagonal), and rho (non-diag)
+
+	// Variance (residuals)
+	target += exponential_lpdf(sigma | 1);
+
+	// Likelihood and cafe parameters
+	for (i in 1:N_cafes)
+	{
+		target += multi_normal_cholesky_lpdf(to_vector({a_cafe[i], b_cafe[i]}) | to_vector({a, b}),
+			diag_pre_multiply(sigma_vec, L)); // Cafe params
+		for (j in 1:N_visit)
+		{
+			cc = (i - 1)*N_visit + j;
+			target += normal_lpdf(wait[cc] | a_cafe[i] + b_cafe[i]*afternoon[cc], sigma); // Likelihood
+		}
+	}
+}
+
+generated quantities { // This is to recover the variance-covariance matrix instead of having its Cholesky factor
+	corr_matrix[2] Sigma;
+	Sigma = multiply_lower_tri_self_transpose(L);
+}
+```
+
+### Stan data
+```{r}
 #### Fit the model
 ## Stan data
 stanData = list(
@@ -69,15 +215,20 @@ n_chains = 4
 
 iter_warmup = 1000
 iter_sampling = 1000
+```
 
-## Compile model
-model = cmdstan_model("./04_test.stan")
-
+### Run and analyse results
+```{r}
+#| output: false
 ## Run
 fit = model$sample(data = stanData, chains = n_chains, parallel_chains = ifelse(n_chains < 4, n_chains, 4),
 	seed = NULL, refresh = 50, max_treedepth = 12, save_warmup = TRUE,
 	iter_sampling = iter_sampling, iter_warmup = iter_warmup, adapt_delta = 0.8)
+```
 
+## Results {#sec-results}
+
+```{r}
 corr_mat = fit$draws("Sigma", inc_warmup = FALSE)
 corr_mat = matrix(apply(X = corr_mat, MARGIN = 3, FUN = mean), ncol = 2)
 
@@ -86,3 +237,4 @@ b_cafes = apply(X = fit$draws("b_cafe", inc_warmup = FALSE), MARGIN = 3, FUN = m
 
 params_dt[, a_est := a_cafes]
 params_dt[, b_est := b_cafes]
+```
