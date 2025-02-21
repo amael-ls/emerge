@@ -67,9 +67,12 @@ options(max.print = 500)
 library(data.table)
 library(cmdstanr)
 	register_knitr_engine(override = TRUE)
+library(stringi)
 library(ellipse)
 library(MASS)
 library(gt)
+
+source("./toolFunctions.R")
 ```
 
 The parameters are defined as below:
@@ -183,7 +186,7 @@ model {
 	target += normal_lpdf(a | 5, 2);
 	target += normal_lpdf(b | -1, 2);
 	
-	target +=  lkj_corr_cholesky_lpdf(L | 2); // It contains rho (non-diag), and 1 (diag)
+	target +=  lkj_corr_cholesky_lpdf(L | 2); // It contains rho (non-diag)
 
 	// Variance (residuals)
 	target += exponential_lpdf(sigma | 1);
@@ -201,9 +204,15 @@ model {
 	}
 }
 
-generated quantities { // This is to recover the variance-covariance matrix instead of having its Cholesky factor
-	corr_matrix[2] Sigma;
+generated quantities {
+	cov_matrix[2] Sigma;
+	real rho;
+	
+	// This is to recover the variance-covariance matrix instead of having its Cholesky factor
 	Sigma = multiply_lower_tri_self_transpose(diag_pre_multiply(sigma_vec, L));
+
+	// This is to recover the correlation parameter
+	rho = tcrossprod(L)[2, 1];
 }
 ```
 
@@ -265,22 +274,56 @@ fit = model$sample(data = stanData, chains = n_chains, parallel_chains = ifelse(
 ```
 
 ## Results {#sec-results}
-
+The posterior of $\rho$ (which equals to `{r} rho`) can be extracted by multiplying $\symbf{L}$ by its transpose, and then take the subdiagonal value $\symbf{L}\symbf{L}^T[2, 1]$:
 ```{r}
-corr_mat = fit$draws("Sigma", inc_warmup = FALSE)
-corr_mat = matrix(apply(X = corr_mat, MARGIN = 3, FUN = mean), ncol = 2)
+rho_posterior = fit$draws("rho", inc_warmup = FALSE)
+aa = lazyPosterior(rho_posterior, val1 = rho)
+```
 
-test_mat = fit$draws("Test", inc_warmup = FALSE)
-test_mat = matrix(apply(X = test_mat, MARGIN = 3, FUN = mean), ncol = 2)
+The posterior of the population parameters are:
+```{r}
+#| echo: false
+#| label: fig-posteriorPop
+#| fig-cap: "Posterior of the population parameters"
+#| fig-subcap: 
+#|   - "$a$"
+#|   - "$b$"
+#| layout-ncol: 2
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 8.142857
 
-a_cafes = apply(X = fit$draws("a_cafe", inc_warmup = FALSE), MARGIN = 3, FUN = mean)
-b_cafes = apply(X = fit$draws("b_cafe", inc_warmup = FALSE), MARGIN = 3, FUN = mean)
+aa = lazyPosterior(fit$draws("a", inc_warmup = FALSE), val1 = a)
+aa = lazyPosterior(fit$draws("b", inc_warmup = FALSE), val1 = b)
+```
 
-params_dt[, a_est := a_cafes]
-params_dt[, b_est := b_cafes]
+The posterior of the variances are:
+```{r}
+#| echo: false
+#| label: fig-posteriorVar
+#| fig-cap: "Posterior of the variances"
+#| fig-subcap: 
+#|   - "$\\sigma_a$"
+#|   - "$\\sigma_b$"
+#|   - "$\\sigma$"
+#| layout-ncol: 3
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 8.142857
 
-L_mat = fit$draws("L", inc_warmup = FALSE)
-L_mat = matrix(apply(X = L_mat, MARGIN = 3, FUN = mean), ncol = 2)
+aa = lazyPosterior(fit$draws("sigma_a", inc_warmup = FALSE), val1 = sigma_a)
+aa = lazyPosterior(fit$draws("sigma_b", inc_warmup = FALSE), val1 = sigma_b)
+aa = lazyPosterior(fit$draws("sigma", inc_warmup = FALSE), val1 = sigma_cafe)
+```
 
-L_mat %*% t(L_mat)
+And the posterior of the covariance (which is $\rho \sigma_a \sigma_b$)
+```{r}
+#| echo: false
+#| label: fig-posteriorCov
+#| fig-cap: "Posterior of the covariance"
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 8.142857
+
+aa = lazyPosterior(fit$draws("Sigma")[, , "Sigma[2,1]"], val1 = sigma_a*sigma_b*rho)
 ```
