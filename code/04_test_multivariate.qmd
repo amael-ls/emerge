@@ -1,5 +1,5 @@
 ---
-title: "A simple example of a multivariate model"
+title: "Simple examples of multivariate models"
 date: today
 author: Amaël Le Squin
 date-format: iso
@@ -41,12 +41,19 @@ format:
 \newcommand{\ie}{*i.e.,*}
 \newcommand{\bOmega}{\symbf{\Omega}}
 \newcommand{\bSigma}{\symbf{\Sigma}}
+
+\newcommand{\alphai}{\alpha_{\text{actor}[i], \text{TID}[i]}}
+\newcommand{\betai}{\beta_{\text{block}[i], \text{TID}[i]}}
+\newcommand{\gammai}{\gamma_{\text{TID}[i]}}
+
 \newcommand{\N}{\mathbfscr{N}}
+\DeclareMathOperator{\logit}{logit}
 
 ## Introduction
 
-The aim of this small file, which might later become an appendix of the main article, is to explore a simple multivariate example in Stan language. I base my code on the example developed by @McElreath2020 (chap. 14) about a cafe robot.
+The aim of this small file, which might later become an appendix of the main article, is to explore two simple multivariate examples in Stan language. I base my code on two examples developed by @McElreath2020 (chap. 14) about (*i*) a cafe robot and (*ii*) chimpanzees.
 
+### Cafes robot example
 Let a robot visit cafes and order a coffee. The robot measures each time how long did it wait, and when it arrived (a simple categorical variable of two values: morning and afternoon). In the chapter 13 of @McElreath2020, it has been shown that the robot learns better when using partial pooling. In the chapter 14, McElreath claims that we can learn even more by also investigating and accounting for the correlation structure. Why? Because popular cafes have a longer waiting time in the morning (rush hour) and improves significantly the afternoon, while there is little difference in waiting time between the morning and the afternoon for non-popular cafes. Therefore, there are two levels of borrowing information:
 
 1. Between the cafes (partial pooling)
@@ -54,7 +61,13 @@ Let a robot visit cafes and order a coffee. The robot measures each time how lon
 
 The @sec-create_data is dedicated to simulate data, which are fit in @#sec-fit by jointly modelling slopes and intercepts. The results are analysed in @sec-results.
 
-## Create data {#sec-create_data}
+### Chimpanzees example
+The chimpanzee experiment is fully described in @McElreath2020 (chap. XI). Basically, there is a table with two dishes and a lever on the left and right side, respectively. Pulling a lever moves a dish towards you, and move the other dish towards the other side of the table. On one side, only one dish contains food, which comes to you if you pull the corresponding lever, and on the other side both dishes contains food. The aim is to see if a chimpanzees behave differently when there is a congener at the other end of table or not. Humans, for instance, would pull the lever that provides food to both, which is called the *prosocial* option.
+
+The data are described in @sec-data_chimp, which are fit in @sec-fit_chimp by jointly modelling ???. The results are analysed in @sec-results_chimp.
+
+## Cafes robot
+### Create data {#sec-create_data}
 
 ```{r}
 #| output: false
@@ -131,8 +144,8 @@ visit_dt[, afternoon_int := ifelse(is_afternoon, 1, 0)]
 
 This creates an easy, balanced dataset of `{r} n_cafes` cafes visited `{r} n_visit` times (equaly shared between mornings and afternoons).
 
-## Fit the model {#sec-fit}
-### DAG
+### Fit the model {#sec-fit}
+#### DAG
 ```{mermaid}
 %%| label: fig-model
 %%| fig-cap: Diagram Acyclic Graph
@@ -140,7 +153,7 @@ graph TB
 	Y("$$Y \sim N \left( \mu_{\text{cafe}[i]}, \sigma_{\text{cafe}[i]} \right)$$")
 ```
 
-### Stan model
+#### Stan model
 Here is the stan model according to the @fig-model:
 ```{stan output.var = "model", cache = TRUE, fold = FALSE}
 data {
@@ -244,7 +257,7 @@ Now that this is explained, the line `target +=  lkj_corr_cholesky_lpdf(L | 2);`
 
 Then the second step is `diag_pre_multiply(sigma_vec, L)`. This function just transforms a vector (here $(\sigma_a, \sigma_b)$) to a diagonal matrix and then multiply it by $\symbf{L}$, which gives $\symbf{L_{\Sigma}}$ (see equation \eqref{eq::cholesky_Sigma}). Note that this is valid only because I use `multi_normal_cholesky_lpdf` which requires the Cholesky factor of $\bSigma$, $\symbf{L_{\Sigma}}$, contrary to `multi_normal_lpdf`.
 
-### Stan data
+#### Stan data
 ```{r}
 #### Fit the model
 ## Stan data
@@ -263,7 +276,7 @@ iter_warmup = 1000
 iter_sampling = 1000
 ```
 
-###  the model
+#### Run the model
 ```{r}
 #| output: false
 #| fold: false
@@ -273,7 +286,7 @@ fit = model$sample(data = stanData, chains = n_chains, parallel_chains = ifelse(
 	iter_sampling = iter_sampling, iter_warmup = iter_warmup, adapt_delta = 0.8)
 ```
 
-## Results {#sec-results}
+### Results {#sec-results}
 The posterior of $\rho$ (which equals to `{r} rho`) can be extracted by multiplying $\symbf{L}$ by its transpose, and then take the subdiagonal value $\symbf{L}\symbf{L}^T[2, 1]$:
 ```{r}
 rho_posterior = fit$draws("rho", inc_warmup = FALSE)
@@ -327,3 +340,69 @@ And the posterior of the covariance (which is $\rho \sigma_a \sigma_b$)
 
 aa = lazyPosterior(fit$draws("Sigma")[, , "Sigma[2,1]"], val1 = sigma_a*sigma_b*rho)
 ```
+
+## Chimpanzee
+### Data description {#sec-data_chimp}
+```{r}
+#| output: false
+#### Clear space and load packages
+rm(list = ls())
+graphics.off()
+
+library(rethinking)
+
+source("./toolFunctions.R")
+
+data(chimpanzees)
+setDT(chimpanzees)
+```
+
+There are eight variables in the `chimpanzees` dataset:
+
+1. actor: name of the target chimpanzee (which pull the levers)
+2. recipient: name of recipient (NA for partner absent condition)
+3. condition: partner absent (0), partner present (1)
+4. block: block of trials (each actor x each recipient 1 time)
+5. trial: trial number (by chimp = ordinal sequence of trials for each chimp, ranges from 1-72; partner present trials were interspersed with partner absent trials)
+6. prosocial_left: 1 if prosocial (1/1) option was on left
+7. chose_prosoc: choice chimp made (0 = 1/0 option, 1 = 1/1 option)
+8. pulled_left: which side did chimp pull (1 = left, 0 = right)
+
+This dataset is **cross-classified** because actors are not nested within blocks. The `block` represents the batch of experiment, I think this variable could have been called `day` or `batch_id`. Within a day, all the chimpanzees will be actor $2(n - 1)$ times: $n - 1$ times alone, and $n - 1$ times with a partner, where $n$ is the number of chimpanzees. For the recipient, I think they do a $+1$ to the id of the chimpanzees: a chimpanzee $i$ will be in relation with all the other chimpanzee but $i + 1$ (which is I guess himself...). That's a bit odd...
+
+In total, there are `{r} length(unique(chimpanzees[, actor]))` chimpanzees and `length(unique(chimpanzees[, block]))` blocks (or batches of experiment).
+
+### Fit the model {#sec-fit_chimp}
+We are interested in predicting `pulled_left`, $L_i$, which indicates if the studied chimpanzee pulled the left lever (value 1) or the right lever (value 0). The predictors are `prosoc_left`, which indicates if the *prosocial* choice was associated to the left lever, and `condition`, which indicates the congener presence. That creates four treatments:
+
+1. R/N: Right lever is the prosocial choice, no partner
+2. L/N: Left lever is the prosocial choice, no partner
+3. R/P: Right lever is the prosocial choice, presence of a partner
+4. L/P: Left lever is the prosocial choice, presence of a partner
+
+#### Mathematical formulation
+\begin{equation}
+	\begin{aligned}
+		L_i &\sim \text{Binomial}(1, p_i) \\
+		\logit(p_i) &= \gammai + \alphai + \betai,
+	\end{aligned}
+\end{equation}
+where $\gammai$ is the average odds (more precisely log-odds because on log scale) for each treatment, which is then modified by each actor in each treatment, $\alphai$, and by each block in each treatment, $\betai$.
+
+#### Stan model
+
+#### Stan data
+```{r}
+n_chimp = length(unique(chimpanzees[, actor]))
+n_block = length(unique(chimpanzees[, block]))
+
+stanData = list(
+	n_chimp = n_chimp,
+	n_block = n_block
+)
+```
+
+
+#### Run the model
+
+### Results {#sec-results_chimp}
