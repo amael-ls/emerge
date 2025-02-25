@@ -42,7 +42,7 @@ model {
 	target += normal_lpdf(a | 5, 2);
 	target += normal_lpdf(b | -1, 2);
 	
-	target +=  lkj_corr_cholesky_lpdf(L | 2); // It contains sigma_a and sigma_b (diagonal), and rho (non-diag)
+	target +=  lkj_corr_cholesky_lpdf(L | 2); // It contains rho (non-diag)
 
 	// Variance (residuals)
 	target += exponential_lpdf(sigma | 1);
@@ -60,7 +60,13 @@ model {
 	}
 }
 
-generated quantities { // This is to recover the correlation matrix instead of having its Cholesky factor
-	corr_matrix[2] Sigma;
-	Sigma = multiply_lower_tri_self_transpose(L);
+generated quantities {
+	cov_matrix[2] Sigma;
+	real rho;
+	
+	// This is to recover the variance-covariance matrix instead of having its Cholesky factor
+	Sigma = multiply_lower_tri_self_transpose(diag_pre_multiply(sigma_vec, L));
+
+	// This is to recover the correlation parameter
+	rho = tcrossprod(L)[2, 1];
 }
