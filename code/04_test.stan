@@ -64,7 +64,7 @@ model {
 			for (i in 1:N_measure)
 			{
 				odds = gamma[treatment[count]] + alpha[ch][treatment[count]] + beta_[bl][treatment[count]];
-				target += bernoulli_lpmf(left_pull[count] | inv_logit(odds));
+				target += bernoulli_logit_lpmf(left_pull[count] | odds);
 				count = count + 1;
 			}
 		}
