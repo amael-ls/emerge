@@ -469,17 +469,20 @@ lazyPosterior = function(draws, fun = NULL, expand_bounds = FALSE, filename = NU
 		colours = MetBrewer::met.brewer("Hokusai3", length_params)
 		colours_str = grDevices::colorRampPalette(colours)(length_params)
 		colours_str_pol = paste0(colours_str, "66")
-		plot(0, type = "n", xlim = c(min_x, max_x), ylim = c(0, max_y), ylab = "frequence", main = paste("Prior and posterior", params),
-			xlab = ifelse(any(xlab_ind), providedArgs[["xlab"]], ""))
+		plot(0, type = "n", xlim = c(min_x, max_x), ylim = c(0, max_y), axes = FALSE,
+			xlab = ifelse(any(xlab_ind), providedArgs[["xlab"]], ""), ylab = "density", main = "")
 		for (i in 1:length_params)
 		{
 			lines(x = density_from_draws[[i]]$x, y = density_from_draws[[i]]$y, col = colours_str[i], lwd = 2)
 			polygon(density_from_draws[[i]], col = colours_str_pol[i])
 		}
 	} else {
-		plot(density_from_draws, xlim = c(min_x, max_x), col = "#295384", lwd = 2, main = paste("Prior and posterior", params))
+		plot(density_from_draws, xlim = c(min_x, max_x), col = "#295384", lwd = 2,
+			xlab = ifelse(any(xlab_ind), providedArgs[["xlab"]], ""), ylab = "density", main = "", axes = FALSE)
 		polygon(density_from_draws, col = "#29538466")
 	}
+	axis(1)
+	axis(2, las = 1)
 
 	# Plot prior
 	if (!is.null(fun))
@@ -508,15 +511,11 @@ lazyPosterior = function(draws, fun = NULL, expand_bounds = FALSE, filename = NU
 		legend_text = ifelse(is.null(fun), paste("Posterior", if (!is.null(ls_nfi)) ls_nfi else 1:length_params),
 			c("Prior", paste("Posterior", if (!is.null(ls_nfi)) ls_nfi else 1:length_params)))
 		legend_colours = ifelse(is.null(fun), colours_str, c("#E9851D", colours_str))
-
-		legend(x = "topright", legend = legend_text, fill = legend_colours, box.lwd = 0)
 	} else {
-		legend_text = ifelse(is.null(fun), paste("Posterior", ifelse(!is.null(ls_nfi), ls_nfi, "")),
-			c("Prior", paste("Posterior", ifelse(!is.null(ls_nfi), ls_nfi, ""))))
-		legend_colours = ifelse(is.null(fun), "#295384", c("#E9851D", "#295384"))
-
-		legend(x = "topright", legend = legend_text, fill = legend_colours, box.lwd = 0)
+		legend_text = if(is.null(fun)) "Posterior" else c("Prior", "Posterior")
+		legend_colours = if(is.null(fun)) "#295384" else c("#E9851D", "#295384")
 	}
+	legend(x = "topright", legend = legend_text, fill = legend_colours, box.lwd = 0)
 
 	if (!is.null(filename))
 		dev.off()
