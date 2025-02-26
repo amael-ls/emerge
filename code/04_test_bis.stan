@@ -12,6 +12,7 @@ data {
 	int <lower = 1> N_chimp; // Number of chimpanzees
 	int <lower = 1> N_block; // Number of blocks
 	int <lower = 1> N_treatment; // Number of treatments
+	int <lower = 2*(N_chimp - 1), upper = 2*(N_chimp - 1)> N_measure; // Number of measure per group (actor, block)
 
 	// Explanatory variable
 	array[N] int <lower = 1, upper = N_treatment> treatment; // Which treatment is applied for observation i
@@ -41,10 +42,10 @@ transformed parameters {
 	array[N_block] vector[N_treatment] beta_; // Slope block
 
 	for (ch in 1:N_chimp)
-		alpha[ch] = multiply_lower_tri_self_transpose(diag_pre_multiply(sigma_diag_actor, L_actor)) * Z_chimp[ch];
+		alpha[ch] = diag_pre_multiply(sigma_diag_actor, L_actor) * Z_chimp[ch];
 	
 	for (bl in 1:N_block)
-		beta_[bl] = multiply_lower_tri_self_transpose(diag_pre_multiply(sigma_diag_block, L_block)) * Z_block[bl];
+		beta_[bl] = diag_pre_multiply(sigma_diag_block, L_block) * Z_block[bl];
 }
 
 model {
@@ -69,23 +70,43 @@ model {
 	{
 		for (bl in 1:N_block)
 		{
-			odds = gamma[treatment[count]] + alpha[ch][treatment[count]] + beta_[bl][treatment[count]];
-			target += bernoulli_lpmf(left_pull[count] | inv_logit(odds));
-			count = count + 1;
+			for (i in 1:N_measure)
+			{
+				odds = gamma[treatment[count]] + alpha[ch][treatment[count]] + beta_[bl][treatment[count]];
+				target += bernoulli_lpmf(left_pull[count] | inv_logit(odds));
+				count = count + 1;
+			}
 		}
 	}
 }
 
-/*
+
 generated quantities {
-	cov_matrix[2] Sigma;
-	real rho;
+	cov_matrix[N_treatment] Sigma_actor;
+	cov_matrix[N_treatment] Sigma_block;
+	vector[N] log_lik;
 	
 	// This is to recover the variance-covariance matrix instead of having its Cholesky factor
-	Sigma = multiply_lower_tri_self_transpose(diag_pre_multiply(sigma_vec, L));
+	Sigma_actor = multiply_lower_tri_self_transpose(diag_pre_multiply(sigma_diag_actor, L_actor));
+	Sigma_block = multiply_lower_tri_self_transpose(diag_pre_multiply(sigma_diag_block, L_block));
 
-	// This is to recover the correlation parameter
-	rho = tcrossprod(L)[2, 1];
+	{
+		int count = 1;
+		real odds = 0;
+
+		for (ch in 1:N_chimp)
+		{
+			for (bl in 1:N_block)
+			{
+				for (i in 1:N_measure)
+				{
+					odds = gamma[treatment[count]] + alpha[ch][treatment[count]] + beta_[bl][treatment[count]];
+					log_lik[count] = bernoulli_lpmf(left_pull[count] | inv_logit(odds));
+					count = count + 1;
+				}
+			}
+		}
+	}
 }
-*/
+
 
