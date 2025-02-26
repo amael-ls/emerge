@@ -73,18 +73,17 @@ model {
 			for (i in 1:N_measure)
 			{
 				odds = gamma[treatment[count]] + alpha[ch][treatment[count]] + beta_[bl][treatment[count]];
-				target += bernoulli_lpmf(left_pull[count] | inv_logit(odds));
+				target += bernoulli_logit_lpmf(left_pull[count] | odds);
 				count = count + 1;
 			}
 		}
 	}
 }
 
-
 generated quantities {
 	cov_matrix[N_treatment] Sigma_actor;
 	cov_matrix[N_treatment] Sigma_block;
-	vector[N] log_lik;
+	vector[N] new_sim;
 	
 	// This is to recover the variance-covariance matrix instead of having its Cholesky factor
 	Sigma_actor = multiply_lower_tri_self_transpose(diag_pre_multiply(sigma_diag_actor, L_actor));
@@ -101,7 +100,7 @@ generated quantities {
 				for (i in 1:N_measure)
 				{
 					odds = gamma[treatment[count]] + alpha[ch][treatment[count]] + beta_[bl][treatment[count]];
-					log_lik[count] = bernoulli_lpmf(left_pull[count] | inv_logit(odds));
+					new_sim[count] = bernoulli_logit_rng(odds);
 					count = count + 1;
 				}
 			}
