@@ -12,6 +12,7 @@ data {
 	int <lower = 1> N_chimp; // Number of chimpanzees
 	int <lower = 1> N_block; // Number of blocks
 	int <lower = 1> N_treatment; // Number of treatments
+	int <lower = 2*(N_chimp - 1), upper = 2*(N_chimp - 1)> N_measure; // Number of measure per group (actor, block)
 
 	// Explanatory variable
 	array[N] int <lower = 1, upper = N_treatment> treatment; // Which treatment is applied for observation i
@@ -60,9 +61,12 @@ model {
 	{
 		for (bl in 1:N_block)
 		{
-			odds = gamma[treatment[count]] + alpha[ch][treatment[count]] + beta_[bl][treatment[count]];
-			target += bernoulli_lpmf(left_pull[count] | inv_logit(odds));
-			count = count + 1;
+			for (i in 1:N_measure)
+			{
+				odds = gamma[treatment[count]] + alpha[ch][treatment[count]] + beta_[bl][treatment[count]];
+				target += bernoulli_lpmf(left_pull[count] | inv_logit(odds));
+				count = count + 1;
+			}
 		}
 	}
 }
