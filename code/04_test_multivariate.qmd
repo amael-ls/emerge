@@ -48,6 +48,8 @@ format:
 
 \newcommand{\N}{\mathbfscr{N}}
 \DeclareMathOperator{\logit}{logit}
+\DeclareMathOperator{\mvn}{MVN}
+\DeclareMathOperator{\diag}{diag}
 
 ## Introduction
 
@@ -455,11 +457,203 @@ The matrix $\symbf{A}$ has a diagonal of `{r} n_chimp*4` elements ($4 \times \te
 
 Now, we consider a model with correlations between parameters belonging to a same cluster (here, two clusters: actors and blocks). The vector $v_2$ of `{r} n_block*4` elements becomes an array of `{r} n_chimp` vectors of length 4. Each vector is independent of the others and is drawn from the same multivariate normal distribution, which accounts for the correlation between the elements within each vector. Similarly the vector $v_3$ becomes an array of `{r} n_block` vectors of length 4. These model's details are in the Stan code (@sec-stan_chimp).
 
-#### Stan model {#sec-stan_chimp}
-```{stan output.var = "model", cache = TRUE, fold = FALSE}
+#### Stan model, centred parametrisation {#sec-stan_chimp}
+```{stan output.var = "model_chimp", cache = TRUE, fold = FALSE}
+data {
+	// Dimensions
+	int <lower = 1> N; // Number of data
+	int <lower = 1> N_chimp; // Number of chimpanzees
+	int <lower = 1> N_block; // Number of blocks
+	int <lower = 1> N_treatment; // Number of treatments
+	int <lower = 2*(N_chimp - 1), upper = 2*(N_chimp - 1)> N_measure; // Number of measure per group (actor, block)
 
+	// Explanatory variable
+	array[N] int <lower = 1, upper = N_treatment> treatment; // Which treatment is applied for observation i
+	vector <lower = 0, upper = 1> [N] left_prosocial; // Boolean 1 if left lever is prosocial, 0 otherwise
+	vector <lower = 0, upper = N_block> [N] block_id; // Block id, from 1 to N_block
+
+	// Observations
+	array[N] int <lower = 0, upper = 1> left_pull; // Boolean, 1 if left lever pulled, 0 otherwise
+}
+
+parameters {
+	// Population parameters...
+	// ... intercept and slope
+	vector[N_treatment] gamma; // Intercept
+	array[N_chimp] vector[N_treatment] alpha; // Slope actor
+	array[N_block] vector[N_treatment] beta_; // Slope block
+	
+	// Variances (in the variance-covariance matrices)
+	vector<lower = 0> [N_treatment] sigma_diag_actor;
+	vector<lower = 0> [N_treatment] sigma_diag_block;
+	cholesky_factor_corr[N_treatment] L_actor;
+	cholesky_factor_corr[N_treatment] L_block;
+}
+
+model {
+	real odds = 0;
+	int count = 1;
+	// Priors...
+	// ... variance
+	target += lkj_corr_cholesky_lpdf(L_actor | 2);
+	target += lkj_corr_cholesky_lpdf(L_block | 2);
+	target += exponential_lpdf(sigma_diag_actor | 1);
+	target += exponential_lpdf(sigma_diag_block | 1);
+
+	// ... slopes
+	target += multi_normal_cholesky_lpdf(alpha | rep_vector(0, N_treatment),
+		diag_pre_multiply(sigma_diag_actor, L_actor)); // Vectorised, applied to each vector of the array
+	target += multi_normal_cholesky_lpdf(beta_ | rep_vector(0, N_treatment),
+		diag_pre_multiply(sigma_diag_block, L_block)); // Vectorised, applied to each vector of the array
+
+	// ... Intercept
+	target += normal_lpdf(gamma | 0, 1); // Vectorised, applied to each element of the vector
+
+	// Likelihood and cafe parameters
+	for (ch in 1:N_chimp)
+	{
+		for (bl in 1:N_block)
+		{
+			for (i in 1:N_measure)
+			{
+				odds = gamma[treatment[count]] + alpha[ch][treatment[count]] + beta_[bl][treatment[count]];
+				target += bernoulli_logit_lpmf(left_pull[count] | odds);
+				count = count + 1;
+			}
+		}
+	}
+}
 ```
 
+#### Stan model, non-centred parametrisation {#sec-stan_chimp_nc}
+We will see it later, but the centred parametrisation creates divergences, probably due to a funnel-like problem. For the non-centred parametrisation, it is important to remember the following property:
+
+:::{.callout-tip}
+
+## Centred to non-centred parametrisation
+
+Let $X \sim \mvn(\mu, \bSigma)$, then it is equivalent to:
+
+\begin{align*}
+	X &= \mu + \symbf{A}Z \\
+	Z &\sim \mvn(0, \symbf{\mathds{1}}) \\
+	\bSigma &= \symbf{A}\symbf{A}^T,
+\end{align*}
+
+where $Z$ is a multivariate normally distributed vector, $\mathds{1}}$ is the identity matrix, and $\symbf{A}$ a matrix. Note that it is then possible to use $\symbf{A} = \diag(\sigma) \symbf{L}$, with $\symbf{L}$ the Cholesky factor.
+
+:::
+
+```{stan output.var = "model_chimp_nc", cache = TRUE, fold = FALSE}
+/*
+Remarks:
+	1. Note that there is no residual variance here! This is because for Bernoulli variables, B(p), the odds are p,
+		and the variance is p(1 - p). So only one parameter!
+	2. The non-centred parametrisation
+*/
+
+data {
+	// Dimensions
+	int <lower = 1> N; // Number of data
+	int <lower = 1> N_chimp; // Number of chimpanzees
+	int <lower = 1> N_block; // Number of blocks
+	int <lower = 1> N_treatment; // Number of treatments
+	int <lower = 2*(N_chimp - 1), upper = 2*(N_chimp - 1)> N_measure; // Number of measure per group (actor, block)
+
+	// Explanatory variable
+	array[N] int <lower = 1, upper = N_treatment> treatment; // Which treatment is applied for observation i
+	vector <lower = 0, upper = 1> [N] left_prosocial; // Boolean 1 if left lever is prosocial, 0 otherwise
+	vector <lower = 0, upper = N_block> [N] block_id; // Block id, from 1 to N_block
+
+	// Observations
+	array[N] int <lower = 0, upper = 1> left_pull; // Boolean, 1 if left lever pulled, 0 otherwise
+}
+
+parameters {
+	// Population parameters...
+	// ... intercept and slopes
+	vector[N_treatment] gamma; // Intercept
+	array[N_chimp] vector[N_treatment] Z_chimp; // Actor effect
+	array[N_block] vector[N_treatment] Z_block; // Block effect
+	
+	// Variances (in the variance-covariance matrices)
+	vector<lower = 0> [N_treatment] sigma_diag_actor;
+	vector<lower = 0> [N_treatment] sigma_diag_block;
+	cholesky_factor_corr[N_treatment] L_actor;
+	cholesky_factor_corr[N_treatment] L_block;
+}
+
+transformed parameters {
+	array[N_chimp] vector[N_treatment] alpha; // Slope actor
+	array[N_block] vector[N_treatment] beta_; // Slope block
+
+	for (ch in 1:N_chimp)
+		alpha[ch] = diag_pre_multiply(sigma_diag_actor, L_actor) * Z_chimp[ch];
+	
+	for (bl in 1:N_block)
+		beta_[bl] = diag_pre_multiply(sigma_diag_block, L_block) * Z_block[bl];
+}
+
+model {
+	real odds = 0;
+	int count = 1;
+	// Priors...
+	// ... variance
+	target += lkj_corr_cholesky_lpdf(L_actor | 2);
+	target += lkj_corr_cholesky_lpdf(L_block | 2);
+	target += exponential_lpdf(sigma_diag_actor | 1);
+	target += exponential_lpdf(sigma_diag_block | 1);
+
+	// ... slopes
+	target += multi_normal_lpdf(Z_chimp | rep_vector(0, N_treatment), identity_matrix(N_treatment));
+	target += multi_normal_lpdf(Z_block | rep_vector(0, N_treatment), identity_matrix(N_treatment));
+
+	// ... Intercept
+	target += normal_lpdf(gamma | 0, 1); // Vectorised, applied to each element of the vector
+
+	// Likelihood and cafe parameters
+	for (ch in 1:N_chimp)
+	{
+		for (bl in 1:N_block)
+		{
+			for (i in 1:N_measure)
+			{
+				odds = gamma[treatment[count]] + alpha[ch][treatment[count]] + beta_[bl][treatment[count]];
+				target += bernoulli_logit_lpmf(left_pull[count] | odds);
+				count = count + 1;
+			}
+		}
+	}
+}
+
+generated quantities {
+	cov_matrix[N_treatment] Sigma_actor;
+	cov_matrix[N_treatment] Sigma_block;
+	vector[N] new_sim;
+	
+	// This is to recover the variance-covariance matrix instead of having its Cholesky factor
+	Sigma_actor = multiply_lower_tri_self_transpose(diag_pre_multiply(sigma_diag_actor, L_actor));
+	Sigma_block = multiply_lower_tri_self_transpose(diag_pre_multiply(sigma_diag_block, L_block));
+
+	{
+		int count = 1;
+		real odds = 0;
+
+		for (ch in 1:N_chimp)
+		{
+			for (bl in 1:N_block)
+			{
+				for (i in 1:N_measure)
+				{
+					odds = gamma[treatment[count]] + alpha[ch][treatment[count]] + beta_[bl][treatment[count]];
+					new_sim[count] = bernoulli_logit_rng(odds);
+					count = count + 1;
+				}
+			}
+		}
+	}
+}
+```
 
 #### Stan data
 ```{r}
@@ -497,7 +691,7 @@ fit = model$sample(data = stanData, chains = n_chains, parallel_chains = ifelse(
 	seed = NULL, refresh = 250, max_treedepth = 12, save_warmup = TRUE,
 	iter_sampling = iter_sampling, iter_warmup = iter_warmup, adapt_delta = 0.8)
 
-fit_bis = model_bis$sample(data = stanData, chains = n_chains, parallel_chains = ifelse(n_chains < 4, n_chains, 4),
+fit_nc = model_bis$sample(data = stanData, chains = n_chains, parallel_chains = ifelse(n_chains < 4, n_chains, 4),
 	seed = NULL, refresh = 250, max_treedepth = 12, save_warmup = TRUE,
 	iter_sampling = iter_sampling, iter_warmup = iter_warmup, adapt_delta = 0.8)
 ```
@@ -505,7 +699,49 @@ fit_bis = model_bis$sample(data = stanData, chains = n_chains, parallel_chains =
 ### Results {#sec-results_chimp}
 
 ```{r}
-gamma_est = round(apply(X = fit_bis$draws("gamma", inc_warmup = FALSE), MARGIN = 3, FUN = mean), 2)
-sigma_act_est = round(apply(X = fit_bis$draws("sigma_diag_actor", inc_warmup = FALSE), MARGIN = 3, FUN = mean), 2)
-sigma_blo_est = round(apply(X = fit_bis$draws("sigma_diag_block", inc_warmup = FALSE), MARGIN = 3, FUN = mean), 2)
+gamma_est = round(apply(X = fit_nc$draws("gamma", inc_warmup = FALSE), MARGIN = 3, FUN = mean), 2)
+sigma_act_est = round(apply(X = fit_nc$draws("sigma_diag_actor", inc_warmup = FALSE), MARGIN = 3, FUN = mean), 2)
+sigma_blo_est = round(apply(X = fit_nc$draws("sigma_diag_block", inc_warmup = FALSE), MARGIN = 3, FUN = mean), 2)
+```
+
+```{r}
+lazyPosterior(fit_nc$draws("gamma[1]", inc_warmup = FALSE), fun = dnorm, mean = 0, sd = 1,
+	xlab = "gamma[1]")
+lazyPosterior(fit_nc$draws("sigma_diag_actor[1]", inc_warmup = FALSE), fun = dexp, rate = 1,
+	xlab = "sigma_diag_actor[1]")
+```
+
+Before finishing this example, let us check the average posterior predictions for the block 5, as done in @McElreath2020 (p. 451-452). For this, I use the generated quantity `new_sim`:
+
+```{r}
+
+ind_bl_5 = chimpanzees[, which(block == 5)]
+n_measure = 2*(n_chimp - 1)
+
+dt = data.table(chimp = rep(1:n_chimp, each = 4), treatment = rep(1:4, n_chimp), avg = rep(-Inf, 4*n_chimp),
+	pch = rep(c(1, 1, 19, 19), n_chimp), key = c("chimp", "treatment"))
+
+posterior_sim = fit_nc$draws("new_sim", inc_warmup = FALSE)[, , ind_bl_5]
+
+for (i in seq_len(n_chimp))
+{
+	for (tt in 1:4)
+	{
+		ind = chimpanzees[ind_bl_5][.(i), which(treatment == tt)] + (i - 1)*n_measure
+		dt[.(i, tt), avg := mean(posterior_sim[, , ind])]
+	}
+}
+
+
+plot(1:dt[, .N], dt[, avg], axes = FALSE, xlab = "", ylab = "Prop. left lever", ylim = c(0, 1),
+	pch = dt[, pch])
+abline(h = 0.5, col = "#11223322")
+for (i in 2:n_chimp - 1)
+	abline(v = 4*i + 0.5, lty = "dashed", col = "#11223322")
+segments(x0 = seq(1, dt[, .N], by = 4), y0 = dt[seq(1, .N, by = 4), avg],
+	x1 = seq(3, dt[, .N], by = 4), y1 = dt[seq(3, .N, by = 4), avg])
+segments(x0 = seq(2, dt[, .N], by = 4), y0 = dt[seq(2, .N, by = 4), avg],
+	x1 = seq(4, dt[, .N], by = 4), y1 = dt[seq(4, .N, by = 4), avg])
+axis(1)
+axis(2, las = 1, at = c(0, 0.5, 1))
 ```
