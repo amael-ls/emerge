@@ -400,6 +400,7 @@ treatment_fct = function(prosoc_lever, partner)
 }
 
 chimpanzees[, treatment := treatment_fct(prosoc_left, condition)]
+setkey(x = chimpanzees, actor, block, treatment)
 ```
 
 #### Mathematical formulation
@@ -468,6 +469,7 @@ stanData = list(
 	N_chimp = n_chimp,
 	N_block = n_block,
 	N_treatment = 4,
+	N_measure = 2*(n_chimp - 1),
 
 	treatment = chimpanzees[, treatment],
 	left_prosocial = chimpanzees[, prosoc_left],
@@ -477,6 +479,7 @@ stanData = list(
 )
 
 model = cmdstan_model("./04_test.stan")
+model_bis = cmdstan_model("./04_test_bis.stan")
 
 ## Common variables
 n_chains = 4
@@ -493,6 +496,16 @@ iter_sampling = 1000
 fit = model$sample(data = stanData, chains = n_chains, parallel_chains = ifelse(n_chains < 4, n_chains, 4),
 	seed = NULL, refresh = 250, max_treedepth = 12, save_warmup = TRUE,
 	iter_sampling = iter_sampling, iter_warmup = iter_warmup, adapt_delta = 0.8)
+
+fit_bis = model_bis$sample(data = stanData, chains = n_chains, parallel_chains = ifelse(n_chains < 4, n_chains, 4),
+	seed = NULL, refresh = 250, max_treedepth = 12, save_warmup = TRUE,
+	iter_sampling = iter_sampling, iter_warmup = iter_warmup, adapt_delta = 0.8)
 ```
 
 ### Results {#sec-results_chimp}
+
+```{r}
+gamma_est = round(apply(X = fit_bis$draws("gamma", inc_warmup = FALSE), MARGIN = 3, FUN = mean), 2)
+sigma_act_est = round(apply(X = fit_bis$draws("sigma_diag_actor", inc_warmup = FALSE), MARGIN = 3, FUN = mean), 2)
+sigma_blo_est = round(apply(X = fit_bis$draws("sigma_diag_block", inc_warmup = FALSE), MARGIN = 3, FUN = mean), 2)
+```
