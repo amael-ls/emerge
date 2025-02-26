@@ -195,10 +195,11 @@ lazyPosterior = function(draws, fun = NULL, expand_bounds = FALSE, filename = NU
 	{
 		if (!isTRUE(all.equal(fun, dnorm)) &&
 			!isTRUE(all.equal(fun, dlnorm)) &&
+			!isTRUE(all.equal(fun, dexp)) &&
 			!isTRUE(all.equal(fun, dgamma)) &&
 			!isTRUE(all.equal(fun, dbeta))) # isFALSE will not work here, hence !isTRUE
 		{
-			stop("This function only accepts dnorm, dlnorm, dgamma, or dbeta as priors")
+			stop("This function only accepts dnorm, dlnorm, dexp, dgamma, or dbeta as priors")
 		}
 	}
 
@@ -237,6 +238,15 @@ lazyPosterior = function(draws, fun = NULL, expand_bounds = FALSE, filename = NU
 	if (any(scaling_ind)) scaling = providedArgs[["scaling"]] else scaling = 1
 
 	# Get parameters for prior
+	if (isTRUE(all.equal(fun, dexp)))
+	{
+		if (!("rate" %in% names(providedArgs) && !("arg1" %in% names(providedArgs))))
+			stop("You must provide mean and sd for dnorm")
+
+		arg1 = ifelse("rate" %in% names(providedArgs), providedArgs[["rate"]], providedArgs[["arg1"]])
+		arg2 = NULL
+	}
+
 	if (isTRUE(all.equal(fun, dnorm)))
 	{
 		if ((!all(c("mean", "sd") %in% names(providedArgs))) && (!all(c("arg1", "arg2") %in% names(providedArgs))))
@@ -372,34 +382,61 @@ lazyPosterior = function(draws, fun = NULL, expand_bounds = FALSE, filename = NU
 	min_x = ifelse(min_x < 0, 1.1*min_x, 0.9*min_x) # To extend 10% from min_x
 	max_x = ifelse(max_x < 0, 0.9*max_x, 1.1*max_x) # To extend 10% from max_x
 
+	if (isTRUE(all.equal(fun, dexp)))
+	{
+		max_y_prior = optimise(f = fun, interval = c(min_x, max_x), maximum = TRUE, rate = arg1)[["objective"]]
+		if (expand_bounds)
+		{
+			check_min_bound = integrate(fun, lower = ifelse(min_x < 0, 10*min_x, -10*min_x), upper = min_x, rate = arg1,
+				subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
+			while (check_min_bound$value > 0.1)
+			{
+				min_x = ifelse(min_x < 0, 1.1*min_x, 0.9*min_x) # To extend 10% from min_x
+				check_min_bound = integrate(fun, lower = ifelse(min_x < 0, 10*min_x, -10*min_x), upper = min_x, rate = arg1,
+					subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
+			}
+
+			check_max_bound = integrate(fun, lower = max_x, upper = ifelse(max_x < 0, -10*max_x, 10*max_x), rate = arg1,
+				subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
+			while (check_max_bound$value > 0.1)
+			{
+				max_x = ifelse(max_x < 0, 0.9*max_x, 1.1*max_x) # To extend 10% from max_x
+				check_max_bound = integrate(fun, lower = max_x, upper = ifelse(max_x < 0, -10*max_x, 10*max_x), rate = arg1,
+					subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
+			}
+		}
+	}
+
+
 	if (isTRUE(all.equal(fun, dnorm)))
 	{
 		max_y_prior = optimise(f = fun, interval = c(min_x, max_x), maximum = TRUE, mean = arg1, sd = arg2)[["objective"]]
 		if (expand_bounds)
 		{
-			check_min_bound = integrate(fun, lower = ifelse(min_x < 0, 10*min_x, -10*min_x), upper = min_x, mean = arg1, sd = arg2,
-				subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
+			check_min_bound = integrate(fun, lower = ifelse(min_x < 0, 10*min_x, -10*min_x), upper = min_x,
+				mean = arg1, sd = arg2, subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
 			while (check_min_bound$value > 0.1)
 			{
 				min_x = ifelse(min_x < 0, 1.1*min_x, 0.9*min_x) # To extend 10% from min_x
-				check_min_bound = integrate(fun, lower = ifelse(min_x < 0, 10*min_x, -10*min_x), upper = min_x, mean = arg1, sd = arg2,
-					subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
+				check_min_bound = integrate(fun, lower = ifelse(min_x < 0, 10*min_x, -10*min_x), upper = min_x,
+					mean = arg1, sd = arg2, subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
 			}
 
-			check_max_bound = integrate(fun, lower = max_x, upper = ifelse(max_x < 0, -10*max_x, 10*max_x), mean = arg1, sd = arg2,
-				subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
+			check_max_bound = integrate(fun, lower = max_x, upper = ifelse(max_x < 0, -10*max_x, 10*max_x),
+				mean = arg1, sd = arg2, subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
 			while (check_max_bound$value > 0.1)
 			{
 				max_x = ifelse(max_x < 0, 0.9*max_x, 1.1*max_x) # To extend 10% from max_x
-				check_max_bound = integrate(fun, lower = max_x, upper = ifelse(max_x < 0, -10*max_x, 10*max_x), mean = arg1, sd = arg2,
-					subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
+				check_max_bound = integrate(fun, lower = max_x, upper = ifelse(max_x < 0, -10*max_x, 10*max_x),
+					mean = arg1, sd = arg2, subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
 			}
 		}
 	}
 
 	if (isTRUE(all.equal(fun, dlnorm)))
 	{
-		max_y_prior = optimise(f = fun, interval = c(min_x, max_x), maximum = TRUE, meanlog = arg1, sdlog = arg2)[["objective"]]
+		max_y_prior = optimise(f = fun, interval = c(min_x, max_x), maximum = TRUE,
+			meanlog = arg1, sdlog = arg2)[["objective"]]
 		if (expand_bounds)
 		{
 			check_min_bound = integrate(fun, lower = ifelse(min_x < 0, 10*min_x, -10*min_x), upper = min_x, meanlog = arg1,
@@ -427,22 +464,22 @@ lazyPosterior = function(draws, fun = NULL, expand_bounds = FALSE, filename = NU
 		max_y_prior = optimise(f = fun, interval = c(min_x, max_x), maximum = TRUE, shape = arg1, rate = arg2)[["objective"]]
 		if (expand_bounds)
 		{
-			check_min_bound = integrate(fun, lower = ifelse(min_x < 0, 10*min_x, -10*min_x), upper = min_x, shape = arg1, rate = arg2,
-				subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
+			check_min_bound = integrate(fun, lower = ifelse(min_x < 0, 10*min_x, -10*min_x), upper = min_x,
+				shape = arg1, rate = arg2, subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
 			while (check_min_bound$value > 0.1)
 			{
 				min_x = ifelse(min_x < 0, 1.1*min_x, 0.9*min_x) # To extend 10% from min_x
-				check_min_bound = integrate(fun, lower = ifelse(min_x < 0, 10*min_x, -10*min_x), upper = min_x, shape = arg1, rate = arg2,
-					subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
+				check_min_bound = integrate(fun, lower = ifelse(min_x < 0, 10*min_x, -10*min_x), upper = min_x,
+					shape = arg1, rate = arg2, subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
 			}
 
-			check_max_bound = integrate(fun, lower = max_x, upper = ifelse(max_x < 0, -10*max_x, 10*max_x), shape = arg1, rate = arg2,
-				subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
+			check_max_bound = integrate(fun, lower = max_x, upper = ifelse(max_x < 0, -10*max_x, 10*max_x),
+				shape = arg1, rate = arg2, subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
 			while (check_max_bound$value > 0.1)
 			{
 				max_x = ifelse(max_x < 0, 0.9*max_x, 1.1*max_x) # To extend 10% from max_x
-				check_max_bound = integrate(fun, lower = max_x, upper = ifelse(max_x < 0, -10*max_x, 10*max_x), shape = arg1, rate = arg2,
-					subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
+				check_max_bound = integrate(fun, lower = max_x, upper = ifelse(max_x < 0, -10*max_x, 10*max_x),
+					shape = arg1, rate = arg2, subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
 			}
 		}
 	}
@@ -488,7 +525,10 @@ lazyPosterior = function(draws, fun = NULL, expand_bounds = FALSE, filename = NU
 	if (!is.null(fun))
 	{
 		curve(fun(x, arg1, arg2), add = TRUE, lwd = 2, col = "#E9851D")
-		DescTools::Shade(fun(x, arg1, arg2), breaks = c(min_x, max_x), col = "#E9851D66", density = NA)
+		if (!is.null(arg2))
+			DescTools::Shade(fun(x, arg1, arg2), breaks = c(min_x, max_x), col = "#E9851D66", density = NA)
+		if (is.null(arg2))
+			DescTools::Shade(fun(x, arg1), breaks = c(min_x, max_x), col = "#E9851D66", density = NA)
 	}
 
 	if (any(val_ind))
