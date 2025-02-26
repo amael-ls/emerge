@@ -355,6 +355,9 @@ source("./toolFunctions.R")
 
 data(chimpanzees)
 setDT(chimpanzees)
+
+n_chimp = length(unique(chimpanzees[, actor]))
+n_block = length(unique(chimpanzees[, block]))
 ```
 
 There are eight variables in the `chimpanzees` dataset:
@@ -370,7 +373,7 @@ There are eight variables in the `chimpanzees` dataset:
 
 This dataset is **cross-classified** because actors are not nested within blocks. The `block` represents the batch of experiment, I think this variable could have been called `day` or `batch_id`. Within a day, all the chimpanzees will be actor $2(n - 1)$ times: $n - 1$ times alone, and $n - 1$ times with a partner, where $n$ is the number of chimpanzees. For the recipient, I think they do a $+1$ to the id of the chimpanzees: a chimpanzee $i$ will be in relation with all the other chimpanzee but $i + 1$ (which is I guess himself...). That's a bit odd...
 
-In total, there are `{r} length(unique(chimpanzees[, actor]))` chimpanzees and `length(unique(chimpanzees[, block]))` blocks (or batches of experiment).
+In total, there are `{r} n_chimp` chimpanzees and `{r} n_block` blocks (or batches of experiment).
 
 ### Fit the model {#sec-fit_chimp}
 We are interested in predicting `pulled_left`, $L_i$, which indicates if the studied chimpanzee pulled the left lever (value 1) or the right lever (value 0). The predictors are `prosoc_left`, which indicates if the *prosocial* choice was associated to the left lever, and `condition`, which indicates the congener presence. That creates four treatments:
@@ -379,6 +382,25 @@ We are interested in predicting `pulled_left`, $L_i$, which indicates if the stu
 2. L/N: Left lever is the prosocial choice, no partner
 3. R/P: Right lever is the prosocial choice, presence of a partner
 4. L/P: Left lever is the prosocial choice, presence of a partner
+
+```{r}
+treatment_fct = function(prosoc_lever, partner)
+{
+	results = rep(-Inf, length = length(prosoc_lever))
+
+	# Right lever is prosocial and...
+	results[which(prosoc_lever == 0 & partner == 0)] = 1 # ...no partner
+	results[which(prosoc_lever == 0 & partner == 1)] = 3 # ...with partner
+	
+	# Left lever is prosocial and...
+	results[which(prosoc_lever == 1 & partner == 0)] = 2 # ...no partner
+	results[which(prosoc_lever == 1 & partner == 1)] = 4 # ...with partner
+
+	return(results)
+}
+
+chimpanzees[, treatment := treatment_fct(prosoc_left, condition)]
+```
 
 #### Mathematical formulation
 \begin{equation}
@@ -389,20 +411,88 @@ We are interested in predicting `pulled_left`, $L_i$, which indicates if the stu
 \end{equation}
 where $\gammai$ is the average odds (more precisely log-odds because on log scale) for each treatment, which is then modified by each actor in each treatment, $\alphai$, and by each block in each treatment, $\betai$.
 
-#### Stan model
+More specifically, it is possible to rewrite this model with dummy variables, like what would be done in `lme4`. Here is an idea of how it would work in absence of correlation between parameters for the second treatment (hence a 1 at the second position of the vector), chimpanzee 1 (hence the first batch of vector containing the 1, the other values all being 0):
 
-#### Stan data
-```{r}
-n_chimp = length(unique(chimpanzees[, actor]))
-n_block = length(unique(chimpanzees[, block]))
+\begin{align*}
+	\logit(p_i) &=
+		\begin{bmatrix} \gamma_1 & & \\ & \ddots & \\ & & \gamma_4 \end{bmatrix}
+		\begin{pmatrix} 0 \\ 1 \\ 0 \\ 0 \end{pmatrix} +
 
-stanData = list(
-	n_chimp = n_chimp,
-	n_block = n_block
-)
+		\begin{bmatrix}
+			\begin{bmatrix}
+				\alpha_{1, 1} & & \\ & \ddots & \\ & & \alpha_{1, 4}
+			\end{bmatrix} & & \\
+			& \ddots & \\
+			& & \begin{bmatrix}
+				\alpha_{j, 1} & & \\ & \ddots & \\ & & \alpha_{j, 4}
+			\end{bmatrix}
+		\end{bmatrix}
+		\begin{pmatrix}
+			\begin{pmatrix} 0 \\ 1 \\ 0 \\ 0 \end{pmatrix} \\
+			\vdots \\
+			\begin{pmatrix} 0 \\ 0 \\ 0 \\ 0 \end{pmatrix}
+		\end{pmatrix} + \\
+
+		& \qquad \begin{bmatrix}
+			\begin{bmatrix}
+				\beta_{1, 1} & & \\ & \ddots & \\ & & \beta_{1, 4}
+			\end{bmatrix} & & \\
+			& \ddots & \\
+			& & \begin{bmatrix}
+				\beta_{j, 1} & & \\ & \ddots & \\ & & \beta_{j, 4}
+			\end{bmatrix}
+		\end{bmatrix}
+		\begin{pmatrix}
+			\begin{pmatrix} 0 \\ 1 \\ 0 \\ 0 \end{pmatrix} \\
+			\vdots \\
+			\begin{pmatrix} 0 \\ 0 \\ 0 \\ 0 \end{pmatrix}
+		\end{pmatrix} \\
+	&= \symbf{\Gamma} \symbf{v_1} + \symbf{A} \symbf{v_2} + \symbf{B} \symbf{v_3}
+\end{align*}
+
+The matrix $\symbf{A}$ has a diagonal of `{r} n_chimp*4` elements ($4 \times \text{number chimp}$), and the matrix $\symbf{B}$ has a diagonal of `{r} n_block*4` elements ($4 \times \text{number blocks}$). The unit vectors $v_i, \, 1 \geqslant i \geqslant 3$ have a single non-zero value.
+
+Now, we consider a model with correlations between parameters belonging to a same cluster (here, two clusters: actors and blocks). The vector $v_2$ of `{r} n_block*4` elements becomes an array of `{r} n_chimp` vectors of length 4. Each vector is independent of the others and is drawn from the same multivariate normal distribution, which accounts for the correlation between the elements within each vector. Similarly the vector $v_3$ becomes an array of `{r} n_block` vectors of length 4. These model's details are in the Stan code (@sec-stan_chimp).
+
+#### Stan model {#sec-stan_chimp}
+```{stan output.var = "model", cache = TRUE, fold = FALSE}
+
 ```
 
 
+#### Stan data
+```{r}
+## Prepare data
+stanData = list(
+	N = chimpanzees[, .N],
+	N_chimp = n_chimp,
+	N_block = n_block,
+	N_treatment = 4,
+
+	treatment = chimpanzees[, treatment],
+	left_prosocial = chimpanzees[, prosoc_left],
+	block_id = chimpanzees[, block],
+
+	left_pull = chimpanzees[, pulled_left]
+)
+
+model = cmdstan_model("./04_test.stan")
+
+## Common variables
+n_chains = 4
+
+iter_warmup = 1000
+iter_sampling = 1000
+```
+
 #### Run the model
+```{r}
+#| output: false
+#| fold: false
+## Run
+fit = model$sample(data = stanData, chains = n_chains, parallel_chains = ifelse(n_chains < 4, n_chains, 4),
+	seed = NULL, refresh = 250, max_treedepth = 12, save_warmup = TRUE,
+	iter_sampling = iter_sampling, iter_warmup = iter_warmup, adapt_delta = 0.8)
+```
 
 ### Results {#sec-results_chimp}
