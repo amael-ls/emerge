@@ -68,6 +68,9 @@ The chimpanzee experiment is fully described in @McElreath2020 (chap. XI). Basic
 
 The data are described in @sec-data_chimp, which are fit in @sec-fit_chimp by jointly modelling ???. The results are analysed in @sec-results_chimp.
 
+### Spatial autocorrelation in oceanic tools
+
+
 ## Cafes robot
 ### Create data {#sec-create_data}
 
@@ -732,7 +735,6 @@ for (i in seq_len(n_chimp))
 	}
 }
 
-
 plot(1:dt[, .N], dt[, avg], axes = FALSE, xlab = "", ylab = "Prop. left lever", ylim = c(0, 1),
 	pch = dt[, pch])
 abline(h = 0.5, col = "#11223322")
@@ -745,3 +747,80 @@ segments(x0 = seq(2, dt[, .N], by = 4), y0 = dt[seq(2, .N, by = 4), avg],
 axis(1)
 axis(2, las = 1, at = c(0, 0.5, 1))
 ```
+
+This ends the Chimpanzee example. There is a third example about dyad in households (pairs of households that exchange gifts), but I will not do it now, as it does not bring much more stuff.
+
+However, the next example in @McElreath2020 (p. 468) talks about continuous categories and the Gaussian process. So far, the examples only had discrete variables such as cafes, block, chimpanzee. But what about continuous variables such as age or income? People of the same age for instance experienced many things in common (music, political events, ...). People of *similar* age (\ie close but not equal) were also exposed to similar stuff (hence the term generation, which span over few years) although to a lesser degree than people of the same age. It would not make sense to estimate a unique intercept for individuals of the same age and ignoring the fact that people of similar age should have more similar intercepts. The general approach is known as **Gaussian process regression** and is the topic of the next example
+
+## Spatial autocorrelation in Oceanic tools
+
+### Data description {#sec-data_ocean}
+
+### Fit the model {#sec-fit_ocean}
+
+Short description
+
+
+#### Mathematical formulation
+
+Maths eq
+
+
+#### Stan model, non-centred parametrisation {#sec-stan_ocean_nc}
+```{stan output.var = "model_ocean", cache = TRUE, fold = FALSE}
+data {
+	// Dimensions
+
+
+	// Explanatory variable
+
+	// Observations
+
+}
+
+parameters {
+
+}
+
+transformed parameters {
+
+}
+
+model {
+
+}
+
+generated quantities {
+}
+```
+
+
+#### Stan data
+```{r}
+## Prepare data
+stanData = list(
+
+)
+
+## Common variables
+n_chains = 4
+
+iter_warmup = 1000
+iter_sampling = 1000
+```
+
+#### Run the model
+```{r}
+#| output: false
+#| fold: false
+## Run
+fit = model$sample(data = stanData, chains = n_chains, parallel_chains = ifelse(n_chains < 4, n_chains, 4),
+	seed = NULL, refresh = 250, max_treedepth = 12, save_warmup = TRUE,
+	iter_sampling = iter_sampling, iter_warmup = iter_warmup, adapt_delta = 0.8)
+
+fit_nc = model_bis$sample(data = stanData, chains = n_chains, parallel_chains = ifelse(n_chains < 4, n_chains, 4),
+	seed = NULL, refresh = 250, max_treedepth = 12, save_warmup = TRUE,
+	iter_sampling = iter_sampling, iter_warmup = iter_warmup, adapt_delta = 0.8)
+```
+
+### Results {#sec-results_ocean}
