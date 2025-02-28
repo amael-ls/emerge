@@ -46,10 +46,11 @@ format:
 \newcommand{\betai}{\beta_{\text{block}[i], \text{TID}[i]}}
 \newcommand{\gammai}{\gamma_{\text{TID}[i]}}
 
-\newcommand{\N}{\mathbfscr{N}}
+\DeclareMathOperator{\diag}{diag}
 \DeclareMathOperator{\logit}{logit}
 \DeclareMathOperator{\mvn}{MVN}
-\DeclareMathOperator{\diag}{diag}
+\DeclareMathOperator{\N}{\mathcal{N}}
+\DeclareMathOperator{\poiss}{Poisson}
 
 ## Introduction
 
@@ -66,7 +67,7 @@ The @sec-create_data is dedicated to simulate data, which are fit in @#sec-fit b
 ### Chimpanzees example
 The chimpanzee experiment is fully described in @McElreath2020 (chap. XI). Basically, there is a table with two dishes and a lever on the left and right side, respectively. Pulling a lever moves a dish towards you, and move the other dish towards the other side of the table. On one side, only one dish contains food, which comes to you if you pull the corresponding lever, and on the other side both dishes contains food. The aim is to see if a chimpanzees behave differently when there is a congener at the other end of table or not. Humans, for instance, would pull the lever that provides food to both, which is called the *prosocial* option.
 
-The data are described in @sec-data_chimp, which are fit in @sec-fit_chimp by jointly modelling ???. The results are analysed in @sec-results_chimp.
+The data are described in @sec-data_chimp and are fit in @sec-fit_chimp. The results are analysed in @sec-results_chimp.
 
 ### Spatial autocorrelation in oceanic tools
 
@@ -83,10 +84,12 @@ graphics.off()
 options(max.print = 500)
 
 library(data.table)
+library(rethinking)
 library(cmdstanr)
 	register_knitr_engine(override = TRUE)
 library(stringi)
 library(ellipse)
+library(terra)
 library(MASS)
 library(gt)
 
@@ -353,8 +356,6 @@ aa = lazyPosterior(fit$draws("Sigma")[, , "Sigma[2,1]"], val1 = sigma_a*sigma_b*
 #### Clear space and load packages
 rm(list = ls())
 graphics.off()
-
-library(rethinking)
 
 source("./toolFunctions.R")
 
@@ -755,15 +756,70 @@ However, the next example in @McElreath2020 (p. 468) talks about continuous cate
 ## Spatial autocorrelation in Oceanic tools
 
 ### Data description {#sec-data_ocean}
+The dataset `Kline` (renamed `tool_dt`) contains 5 columns:
+
+1. culture: name of the population
+2. population: historical size of the population
+3. contact: the level of contact of a population to its 'outside' world
+4. total_tools: the number of unique tools
+5. mean_TU: a measure of tool complexity
+
+```{r}
+#| output: false
+#### Clear space and load packages
+rm(list = ls())
+graphics.off()
+
+source("./toolFunctions.R")
+
+data(Kline)
+setDT(Kline)
+tool_dt = Kline
+
+data(islandsDistMatrix)
+dist_mat = islandsDistMatrix
+
+rm(Kline, islandsDistMatrix)
+
+coords = data.table(island = c("Malekula", "Tikopia", "Santa Cruz", "Yap", "Lau Fiji",
+	"Trobriand", "Chuuk", "Manus", "Tonga", "Hawaii"),
+	lat = c(-16.3, -12.3, -10.7, 9.5, -17.7, -8.7, 7.4, -2.1, -21.2, 19.9),
+	lon = c(167.5, 168.3, 165.8, 138.1, -179.1, 151.0, 151.8, 146.9, -175.2, -155.5)
+)
+
+coords = project(x = vect(x = coords, crs = "epsg:4326"), y = "EPSG:9191")
+
+oceania = project(x = vect("~/work/database/shapefile/oceania/dt465jv7171.shp"), y = "EPSG:9191")
+zone = ext(oceania)
+zone$ymin = -2.5e6
+oceania = crop(oceania, zone)
+```
+
+This dataset takes place in historical island societies of Oceania (Hawai, Fiji, Santa Cruz to give the most known islands, see @fig-map_islands). It gathers the amout of unique tools (boats, axes, fish hooks, ...) each population had. A theory of technological evolution predicts that larger population will both develop and sustain more complex tool kits. Then, biogeography states that more connected and larger islands are more likely to have larger populations.
+
+```{r}
+#| echo: false
+#| label: fig-map_islands
+#| fig-cap: "Maps of the island locations, next to Australia"
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 8.142857
+plot(oceania, axes = FALSE, lwd = 2, col = "#11223311")
+points(coords, pch = 19, col = "#CD212A")
+text(coords, labels = coords[["island"]][, 1], pos = 4)
+```
 
 ### Fit the model {#sec-fit_ocean}
 
-Short description
-
+In this example, we are interested into predicting the number of tools in function of contact rate and population size. We use a Poisson distribution for this, as they are counts data.
 
 #### Mathematical formulation
-
-Maths eq
+The model that follows is justified in @McElreath2020 (p. 355-356). It represents the amount of tools in a population given the size of the population. Note that we get for free a 0 tool when there is a population of 0 (provided that $\beta > 0$)!
+\begin{align*}
+	T_i &\sim \poiss(\lambda_i) \\
+	\log(\lambda_i) &= \alpha \frac{P_i^{\beta}}{\gamma}
+\end{align*}
+where $\alpha$ is the amount of tools brought by a person, $\beta$ is the rate of tools brought by a person. We expect this rate to be between 0 and 1, that is to say, each additional person adds less to innovation than the previous; $\gamma$ is the rate of tool loss (provided $\gamma > 1$).
 
 
 #### Stan model, non-centred parametrisation {#sec-stan_ocean_nc}
