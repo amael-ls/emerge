@@ -5,7 +5,18 @@ author: Amaël Le Squin
 date-format: iso
 filters:
   - fontawesome
-  - diagram
+  - siunitx-quarto
+  - imagify
+imagify:
+  header-includes: |
+    \usepackage{pgfplots}
+    \pgfplotsset{compat=1.18}
+    \usepgfplotslibrary{fillbetween}
+    \usetikzlibrary{positioning}
+    \usetikzlibrary{calc}
+  pdf-engine: lualatex
+pdf-engine: lualatex
+keep-tex: true
 execute:
   error: true
 bibliography: references.bib
@@ -38,7 +49,10 @@ format:
           \usepackage{unicode-math}
 ---
 
+<!-- Shortcut for text -->
 \newcommand{\ie}{*i.e.,*}
+
+<!-- Shortcut for math -->
 \newcommand{\bOmega}{\symbf{\Omega}}
 \newcommand{\bSigma}{\symbf{\Sigma}}
 
@@ -46,6 +60,11 @@ format:
 \newcommand{\betai}{\beta_{\text{block}[i], \text{TID}[i]}}
 \newcommand{\gammai}{\gamma_{\text{TID}[i]}}
 
+<!-- New symbols -->
+\newcommand\indep{\protect\mathpalette{\protect\independenT}{\perp}}
+\def\independenT#1#2{\mathrel{\rlap{$#1#2$}\mkern2mu{#1#2}}}
+
+<!-- Math operators -->
 \DeclareMathOperator{\diag}{diag}
 \DeclareMathOperator{\logit}{logit}
 \DeclareMathOperator{\mvn}{MVN}
@@ -85,6 +104,7 @@ options(max.print = 500)
 
 library(data.table)
 library(rethinking)
+library(MetBrewer)
 library(cmdstanr)
 	register_knitr_engine(override = TRUE)
 library(stringi)
@@ -676,8 +696,8 @@ stanData = list(
 	left_pull = chimpanzees[, pulled_left]
 )
 
-model = cmdstan_model("./04_test.stan")
-model_bis = cmdstan_model("./04_test_bis.stan")
+# model_chimp = cmdstan_model("./04_test.stan")
+# model_chimp_nc = cmdstan_model("./04_test_bis.stan")
 
 ## Common variables
 n_chains = 4
@@ -691,11 +711,11 @@ iter_sampling = 1000
 #| output: false
 #| fold: false
 ## Run
-fit = model$sample(data = stanData, chains = n_chains, parallel_chains = ifelse(n_chains < 4, n_chains, 4),
+fit = model_chimp$sample(data = stanData, chains = n_chains, parallel_chains = ifelse(n_chains < 4, n_chains, 4),
 	seed = NULL, refresh = 250, max_treedepth = 12, save_warmup = TRUE,
 	iter_sampling = iter_sampling, iter_warmup = iter_warmup, adapt_delta = 0.8)
 
-fit_nc = model_bis$sample(data = stanData, chains = n_chains, parallel_chains = ifelse(n_chains < 4, n_chains, 4),
+fit_nc = model_chimp_nc$sample(data = stanData, chains = n_chains, parallel_chains = ifelse(n_chains < 4, n_chains, 4),
 	seed = NULL, refresh = 250, max_treedepth = 12, save_warmup = TRUE,
 	iter_sampling = iter_sampling, iter_warmup = iter_warmup, adapt_delta = 0.8)
 ```
@@ -718,7 +738,6 @@ lazyPosterior(fit_nc$draws("sigma_diag_actor[1]", inc_warmup = FALSE), fun = dex
 Before finishing this example, let us check the average posterior predictions for the block 5, as done in @McElreath2020 (p. 451-452). For this, I use the generated quantity `new_sim`:
 
 ```{r}
-
 ind_bl_5 = chimpanzees[, which(block == 5)]
 n_measure = 2*(n_chimp - 1)
 
@@ -801,10 +820,7 @@ This dataset takes place in historical island societies of Oceania (Hawai, Fiji,
 #| echo: false
 #| label: fig-map_islands
 #| fig-cap: "Maps of the island locations, next to Australia"
-#| fig-asp: 1
-#| out-width: 95%
-#| fig-width: 8.142857
-plot(oceania, axes = FALSE, lwd = 2, col = "#11223311")
+plot(oceania, axes = FALSE, lwd = 1, col = "#112233")
 points(coords, pch = 19, col = "#CD212A")
 text(coords, labels = coords[["island"]][, 1], pos = 4)
 ```
@@ -824,30 +840,30 @@ where $\alpha$ is the amount of tools brought by a person, $\beta$ is the rate o
 
 #### Stan model, non-centred parametrisation {#sec-stan_ocean_nc}
 ```{stan output.var = "model_ocean", cache = TRUE, fold = FALSE}
-data {
-	// Dimensions
+// data {
+// 	// Dimensions
 
 
-	// Explanatory variable
+// 	// Explanatory variable
 
-	// Observations
+// 	// Observations
 
-}
+// }
 
-parameters {
+// parameters {
 
-}
+// }
 
-transformed parameters {
+// transformed parameters {
 
-}
+// }
 
-model {
+// model {
 
-}
+// }
 
-generated quantities {
-}
+// generated quantities {
+// }
 ```
 
 
@@ -870,13 +886,169 @@ iter_sampling = 1000
 #| output: false
 #| fold: false
 ## Run
-fit = model$sample(data = stanData, chains = n_chains, parallel_chains = ifelse(n_chains < 4, n_chains, 4),
-	seed = NULL, refresh = 250, max_treedepth = 12, save_warmup = TRUE,
-	iter_sampling = iter_sampling, iter_warmup = iter_warmup, adapt_delta = 0.8)
-
-fit_nc = model_bis$sample(data = stanData, chains = n_chains, parallel_chains = ifelse(n_chains < 4, n_chains, 4),
-	seed = NULL, refresh = 250, max_treedepth = 12, save_warmup = TRUE,
-	iter_sampling = iter_sampling, iter_warmup = iter_warmup, adapt_delta = 0.8)
+# fit = model$sample(data = stanData, chains = n_chains, parallel_chains = ifelse(n_chains < 4, n_chains, 4),
+# 	seed = NULL, refresh = 250, max_treedepth = 12, save_warmup = TRUE,
+# 	iter_sampling = iter_sampling, iter_warmup = iter_warmup, adapt_delta = 0.8)
 ```
 
 ### Results {#sec-results_ocean}
+
+## Discussion on where to put the correlation for my own case
+
+```{r}
+#| output: false
+#| echo: false
+
+#### Load the data
+## Path
+os = Sys.info()[['sysname']]
+mnt_point = "/mnt/local_share/"
+if (os == "Linux" || os == "Darwin")
+{
+	if (!dir.exists(mnt_point))
+		stop(paste0("The mounting point <", mnt_point, "> does not exist"))
+} else if (os == "Windows") {
+	stop("TO DO!!! No idea how that works on Windows!")
+} else {
+	stop(paste("Unknown Operating System:", os))
+}
+
+path_data = paste0(mnt_point, "/data/")
+if (!dir.exists(path_data))
+	stop(paste0("Folder <", path_data, "> does not exist! Did you run 01_prepare_data.qmd?"))
+
+opt = "_full"
+
+## Loading
+stanData = readRDS(paste0(path_data, "stanData_nfi-inra", opt, ".rds"))
+forest_dt = readRDS(paste0(path_data, "nfi-inra_dt", opt, ".rds"))
+ind_species = readRDS(paste0(path_data, "ind_species_nfi-inra", opt, ".rds"))
+
+colours = paste0(met.brewer("Egypt")[1:4])
+names(colours) = c("conifer", "broadleaf", "inra", "nfi")
+
+forest_dt[fct_type == "broadleaf", fct_colour := colours["broadleaf"]]
+forest_dt[fct_type == "conifer", fct_colour := colours["conifer"]]
+forest_dt[origin_data == "inra", origin_colour := colours["inra"]]
+forest_dt[origin_data == "nfi", origin_colour := colours["nfi"]]
+
+# forest_dt = forest_dt[speciesName_sci == "Quercus robur"]
+```
+
+I have about \num{10000} felled trees, on which the bole volume, $V_b$, and crown volume, $V_c$, have been measured. The two volumes have a correlation of `{r} round(cor(forest_dt["broadleaf"][origin_data == "inra", bole_volume_m3], forest_dt["broadleaf"][origin_data == "inra", crown_volume_m3]), 3)` for broadleaves and of `{r} round(cor(forest_dt["conifer"][origin_data == "inra", bole_volume_m3], forest_dt["conifer"][origin_data == "inra", crown_volume_m3]), 3)` for conifers(see @fig-correl):
+
+```{r}
+#| echo: false
+#| label: fig-correl
+#| fig-cap: Correlation between the bole volume and the crown volume
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 8.142857
+
+plot(forest_dt[origin_data == "inra", bole_volume_m3], forest_dt[origin_data == "inra", crown_volume_m3],
+	xlab = "Bole volume (m³)", ylab = "Crown volume (m³)", axes = FALSE, pch = 19,
+	col = paste0(forest_dt[origin_data == "inra", fct_colour], "33"))
+
+axis(1)
+axis(2, las = 1)
+legend(x = "topright", legend = c("Conifer", "Broadleaf"), fill = colours[c("conifer", "broadleaf")], bty = "n")
+
+```
+
+However, is it truly the case, or is it a correlation coming from a confounder controlling both volumes, such as diameter (see @fig-correl_scheme for a graphical representation)? The solution is to test for conditional independencies on $\phi$: $[V_b | \phi]$ and $[V_c | \phi]$. In other words, does all the information that $V_b$ brings to $V_c$ come from $\phi$? For this, I do a linear regression (see @McElreath2020, chapters 5 and 6, especially section 6.4).
+
+![Possibility of spurious correlations](img/spurious.tex){#fig-correl_scheme}
+
+```{r}
+cor(forest_dt["broadleaf"][origin_data == "inra", height],
+	forest_dt["broadleaf"][origin_data == "inra", circumference_m])
+cor(forest_dt["conifer"][origin_data == "inra", height],
+	forest_dt["conifer"][origin_data == "inra", circumference_m])
+
+lm_broadleaf = lm(crown_volume_m3 ~ bole_volume_m3 + circumference_m + height,
+	forest_dt["broadleaf"][origin_data == "inra"])
+lm_conifer = lm(crown_volume_m3 ~ bole_volume_m3 + circumference_m + height,
+	forest_dt["conifer"][origin_data == "inra"])
+
+dt = data.table(c = runif(1e3, 0, 100))
+dt[, x := rnorm(.N, 2*c + 5, 1.3)]
+dt[, y := rnorm(.N, 1.2*c - 4, 0.12)]
+
+cor(dt[, x], dt[, y])
+
+l1 = lm(y ~ x, dt)
+l2 = lm(y ~ x + c, dt)
+
+jtools::plot_summs(l1)
+jtools::plot_summs(l2)
+
+jtools::plot_summs(lm_broadleaf)
+jtools::plot_summs(lm_conifer)
+```
+
+This is a very rough test as there is clearly no homoscedasticity, however, the bole volume is actually much more important than expected!
+
+```{r}
+library(dagitty)
+
+dag = dagitty("dag{
+	V_b -> V_c
+	V_b <- phi -> V_c
+	V_b <- h -> V_c
+	V_b <- phi -> h -> V_c
+}")
+
+plot(graphLayout(dag))
+adjustmentSets(dag, exposure = "V_b", outcome = "V_c")
+impliedConditionalIndependencies(dag)
+```
+
+### Form ratio (Facteur de forme)
+
+```{r}
+
+forest_dt[, formFactor := 4*pi*bole_volume_m3/(height*circumference_m^2)*(1 - 1.3/height)^2]
+forest_dt[origin_data == "nfi", origin_colour := paste0(origin_colour, "22")]
+forest_dt[origin_data == "nfi", pt_size := 0.5]
+forest_dt[origin_data == "inra", pt_size := 1]
+
+for (sp in unique(forest_dt[, speciesName_sci]))
+{
+	png(paste0("output/", sp, ".png"), width = 1080, height = 1080)
+	layout(matrix(c(1:4), ncol = 2, nrow = 2))
+	plot(forest_dt[speciesName_sci == sp, height], forest_dt[speciesName_sci == sp, formFactor],
+		xlab = "Height", ylab = "Form factor", axes = FALSE, pch = 3,
+		cex = forest_dt[speciesName_sci == sp, pt_size],
+		col = forest_dt[speciesName_sci == sp, origin_colour])
+	axis(1)
+	axis(2, las = 1)
+
+	plot(forest_dt[speciesName_sci == sp, circumference_m], forest_dt[speciesName_sci == sp, formFactor],
+		xlab = "Circumference", ylab = "Form factor", axes = FALSE, pch = 3,
+		cex = forest_dt[speciesName_sci == sp, pt_size],
+		col = forest_dt[speciesName_sci == sp, origin_colour])
+	axis(1)
+	axis(2, las = 1)
+
+	plot(forest_dt[speciesName_sci == sp, height], forest_dt[speciesName_sci == sp, bole_volume_m3],
+		xlab = "Height", ylab = "Form factor", axes = FALSE, pch = 3,
+		cex = forest_dt[speciesName_sci == sp, pt_size],
+		col = forest_dt[speciesName_sci == sp, origin_colour])
+	axis(1)
+	axis(2, las = 1)
+
+	plot(forest_dt[speciesName_sci == sp, circumference_m], forest_dt[speciesName_sci == sp, bole_volume_m3],
+		xlab = "Circumference", ylab = "Form factor", axes = FALSE, pch = 3,
+		cex = forest_dt[speciesName_sci == sp, pt_size],
+		col = forest_dt[speciesName_sci == sp, origin_colour])
+	axis(1)
+	axis(2, las = 1)
+	dev.off()
+}
+
+aa = forest_dt[speciesName_sci == "Quercus pubescens"]
+
+cor(aa$formFactor, aa$height)
+cor(aa$formFactor, aa$circumference_m)
+
+```
