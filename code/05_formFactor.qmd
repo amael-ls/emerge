@@ -1,0 +1,349 @@
+---
+title: "Exploration du facteur de forme"
+date: today
+author: Amaël Le Squin
+date-format: iso
+filters:
+  - fontawesome
+  - siunitx-quarto
+pdf-engine: lualatex
+keep-tex: true
+execute:
+  error: true
+bibliography: references.bib
+lightbox:
+  match: auto
+css: style.css
+knitr:
+  opts_chunk: 
+    dev: ragg_png
+    crop: null
+    out.width: "70%"
+    fig.width: 6
+    fig.asp: 0.618
+    fig.align: "center"
+format:
+  html:
+    toc: true
+    include-in-header: mathjax.html
+    code-fold: true
+    df-print: paged
+    number-sections: true
+    theme:
+      light: cerulean
+      dark: darkly
+    margin: 5% 0;
+  pdf:
+    mathspec: true
+    include-in-header:
+      - text: |
+          \usepackage{unicode-math}
+          \usepackage{siunitx}
+---
+
+<!-- Shortcut for text -->
+\newcommand{\ie}{*i.e.,*}
+
+<!-- Shortcut for math -->
+\newcommand{\ff}{\text{form}}
+\newcommand{\Vbft}{V_{\text{BFT}}}
+\newcommand{\hdn}{{\text{hdn}}}
+
+```{r}
+#| output: false
+#| echo: false
+
+
+#### Clear space and load packages
+rm(list = ls())
+graphics.off()
+
+options(max.print = 500)
+
+library(data.table)
+library(MetBrewer)
+library(cmdstanr)
+	register_knitr_engine(override = TRUE)
+library(stringi)
+library(mgcv)
+library(gt)
+
+source("./toolFunctions.R")
+```
+
+<!-- Prepare the data (packages and loading) -->
+```{r}
+#| output: false
+#| echo: false
+
+#### Load the data
+## Path
+os = Sys.info()[['sysname']]
+mnt_point = "/mnt/local_share/"
+if (os == "Linux" || os == "Darwin")
+{
+	if (!dir.exists(mnt_point))
+		stop(paste0("The mounting point <", mnt_point, "> does not exist"))
+} else if (os == "Windows") {
+	stop("TO DO!!! No idea how that works on Windows!")
+} else {
+	stop(paste("Unknown Operating System:", os))
+}
+
+path_data = paste0(mnt_point, "/data/")
+if (!dir.exists(path_data))
+	stop(paste0("Folder <", path_data, "> does not exist! Did you run 01_prepare_data.qmd?"))
+
+opt = "_full"
+
+## Loading
+stanData = readRDS(paste0(path_data, "stanData_nfi-inra", opt, ".rds"))
+forest_dt = readRDS(paste0(path_data, "nfi-inra_dt", opt, ".rds"))
+ind_species = readRDS(paste0(path_data, "ind_species_nfi-inra", opt, ".rds"))
+
+colours = paste0(met.brewer("Egypt")[1:4])
+names(colours) = c("conifer", "broadleaf", "inra", "nfi")
+
+forest_dt[fct_type == "broadleaf", fct_colour := colours["broadleaf"]]
+forest_dt[fct_type == "conifer", fct_colour := colours["conifer"]]
+forest_dt[origin_data == "inra", origin_colour := colours["inra"]]
+forest_dt[origin_data == "nfi", origin_colour := colours["nfi"]]
+
+## New variables
+forest_dt[, hdn := sqrt(circumference_m)/height]
+forest_dt[, slenderness := pi*height/circumference_m] # height/diameter
+forest_dt[, formBFT := 4*pi*bole_volume_m3/(height*circumference_m^2)*(1 - 1.3/height)^2]
+forest_dt[, formTot_vallet := 4*pi*total_volume_m3/(height*circumference_m^2)]
+
+## Subset
+forest_dt = forest_dt[origin_data == "inra"]
+species_vallet = c("Abies alba", "Fagus sylvatica", "Picea abies", "Pinus pinaster", "Pinus sylvestris",
+	"Pseudotsuga menziesii", "Quercus petraea")
+forest_dt = forest_dt[speciesName_sci %in% species_vallet]
+
+## Set keys
+setkey(forest_dt, speciesName_sci)
+n_sp = length(forest_dt[, unique(speciesName_sci)])
+```
+
+```{r}
+#| output: false
+#| echo: false
+
+## Fit a simple GAM for Fagus sylvatica
+fam_fagSyl = gam(formula = formTot_vallet ~ 1 + s(circumference_cm),
+	data = list(formTot_vallet = forest_dt[.("Fagus sylvatica"), formTot_vallet],
+	circumference_cm = 100*forest_dt[.("Fagus sylvatica"), circumference_m]), method = "REML")
+
+pred = predict(fam_fagSyl, newdata = list(circumference_cm = sort(100*forest_dt[.("Fagus sylvatica"), circumference_m])))
+```
+
+## Introduction
+
+Le facteur de forme a été introduit par @Vallet2006, puis a été modifié lors du projet Emerge (@Deleuze2013_b) afin de corriger les problèmes survenant pour les petits arbres (explosion du facteur de forme pour compenser un dbh proche de 0). Ce nouveau facteur de forme est défini par:
+$$
+\ff = \frac{4\pi \Vbft}{c^2h} \left( 1 - \frac{1.3}{h} \right)^2
+$$
+Il est notamment utilisé afin de limiter l'hétéroscédasticité du volume bois-fort tige, $\Vbft$, en fonction de la robustesse, $\hdn = \frac{\sqrt{c}}{h}$ (voir @sec-hdn). Il correspond à un taux de remplissage d'un cylindre de hauteur $h$ et de circonférence $c$ par l'arbre en question.
+
+::: {.callout-note}
+
+Dans @Vallet2006, le facteur de forme ne possède pas la correction $\left( 1 - \frac{1.3}{h} \right)^2$. Son facteur de forme est aussi défini pour le volume total, et pas pour le volume bois-for tige (BFT). Cependant, avec @Deleuze2013_b, la formulation du facteur de forme est la même, si on remplace le volume BFT par le volume total.
+
+:::
+
+Dans ce document, je regarde s'il est vraiment plus adapté et plus facile à manipuler que le volume direct. Dans la @sec-hdn, je reviens sur la définition de la robustesse, puis dans la @sec-ff j'étudie le facteur de forme. J'utilise les données du protocole Oudin [@Deleuze2013], mais ne garde que les 7 espèces présentes dans @Vallet2006. Le graphique ci-dessous tente de reproduire la figure 3 de @Vallet2006, mais il semble que les données ne soient pas tout à fait les mêmes. D'après [@Deleuze2013_b, les données de @Vallet2006 sont un sous-échantillon des données que nous avons à disposition, je suppose donc que ses deux jeux de données se ressembles suffisament pour pouvoir discuter de la robustesse et du facteur de forme.
+
+```{r}
+#| echo: false
+#| label: fig-fagSyl
+#| fig-cap: Facteur de forme en fonction de la circonférence pour *Fagus sylvatica*. Les données sont sensées être similaire à celle utilisées dans @Vallet2006
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 8.142857
+
+## Plot
+plot(100*forest_dt[.("Fagus sylvatica"), circumference_m], forest_dt[.("Fagus sylvatica"), formTot_vallet],
+	xlab = "Circonférence en cm", ylab = "Facteur de forme tot", axes = FALSE, pch = 3, cex = 0.5)
+abline(h = c(0.4, 0.6, 0.8, 1), lty = "dotted", col = "#2233FFAA")
+axis(1)
+axis(2, las = 1)
+lines(x = sort(100*forest_dt[.("Fagus sylvatica"), circumference_m]), y = pred, lwd = 3, col = "#CD212A")
+```
+
+## Discussion sur la robustesse, hdn {#sec-hdn}
+
+La robustesse est définie dans @Vallet2006 par:
+$$
+\hdn = \frac{\sqrt{c}}{h},
+$$
+avec $c$ la circonférence à \qty{1.3}{\metre} et $h$ la hauteur. Mais d'où vient cette formule? Pour ça, il faut aller voir l'équation 4 de @Vallet2006 (une régression linéaire de $h$ en fonction de $c$):
+$$
+\log(h) = a + b \log(c).
+$$
+Il a trouvé que $b = 0.5$ pour la plupart des espèces, et donc:
+\begin{align*}
+	h &= \exp[a + 0.5 \log(c)] \\
+		&= \exp[a] \exp[0.5 \log(c)] \\
+		&= \exp[a] \sqrt{c} \\
+\end{align*}
+d'où le ratio $\frac{\sqrt{c}}{h} = \exp[-a]$. Plus $a$ est petit, et plus le ratio est grand (arbre trapu). Vérifions maintenant que j'ai bien $b \approx 0.5$ pour la plupart des espèces, et que les hypothèses d'une régression linéaire sont bien satisfaites.
+
+### Régression linéaire
+```{r}
+#| echo: false
+
+## Run species-specific linear regressions
+reg_lin = vector(mode = "list", length = n_sp)
+names(reg_lin) = species_vallet
+coeff_dt = data.table(speciesName_sci = species_vallet, a = -Inf, b = -Inf, corr_ch = -Inf, corr_chdn = -Inf, corr_cs = -Inf)
+setkey(coeff_dt,speciesName_sci)
+
+for (sp in species_vallet)
+{
+	reg_lin[[sp]] = lm(log(height) ~ 1 + log(circumference_m), forest_dt[sp])
+	coeff_dt[sp, c("a", "b") := as.list(round(unname(coef(reg_lin[[sp]])), 3))]
+	coeff_dt[sp, c("corr_ch", "corr_chdn", "corr_cs") := .(
+		round(cor(forest_dt[sp, circumference_m], forest_dt[sp, height]), 2),
+		round(cor(forest_dt[sp, circumference_m], forest_dt[sp, hdn]), 2),
+		round(cor(forest_dt[sp, circumference_m], forest_dt[sp, slenderness]), 2)
+	)]
+}
+
+forest_dt[, pred := predict(reg_lin[[speciesName_sci]], data.frame(circumference_m = circumference_m)),
+	by = speciesName_sci]
+forest_dt[, pred_05 := reg_lin[[speciesName_sci]]$coefficients["(Intercept)"] + 0.5*log(circumference_m),
+	by = speciesName_sci]
+```
+Comme l'indique les graphiques ci-dessous, les régressions linéaires sont satisfaisantes et les hypothèses satisfaites (voir @fig-regLin). En revanche, contrairement à ce qui est annoncé dans @Vallet2006, les valeurs de $b$ ne sont pas forcément proche 0.5 (voir @tbl-regLin)!
+```{r}
+#| echo: false
+#| label: fig-regLin
+#| fig-cap: Species-specific linear regressions for hardiness
+#| fig-subcap: 
+#|   - Abies alba lm
+#|   - Abies alba std. res
+#|   - Fagus sylvatica lm
+#|   - Fagus sylvatica std. res
+#|   - Picea abies lm
+#|   - Picea abies std. res
+#|   - Pinus pinaster lm
+#|   - Pinus pinaster std. res
+#|   - Pinus sylvestris lm
+#|   - Pinus sylvestris std. res
+#|   - Pseudotsuga menziesii lm
+#|   - Pseudotsuga menziesii std. res
+#|   - Quercus petraea lm
+#|   - Quercus petraea std. res
+#| lightbox: 
+#|   group: linear_reg
+#| layout-ncol: 3
+
+for (sp in species_vallet)
+{
+	plot(forest_dt[sp, log(circumference_m)], forest_dt[sp, log(height)], pch = 19, cex = 0.5,
+		xlab = "Log(circonférence), cm", ylab = "Log(hauteur), m", axes = FALSE)
+	axis(1)
+	axis(2, las = 1)
+	abline(reg_lin[[sp]], col = "#CD212A", lwd = 3)
+
+	res = residuals(reg_lin[[sp]])
+	std_res = sqrt(abs(res))
+	pred = predict(reg_lin[[sp]], forest_dt[sp])
+	plot(x = pred, y = std_res, axes = FALSE, xlab = "Predicted log(h)", ylab = "Std. residuals", pch = 19, cex = 0.5)
+	axis(1)
+	axis(2, las = 1)
+}
+```
+```{r}
+#| echo: false
+#| label: tbl-regLin
+#| tbl-cap: "Coefficients des régressions linéaires par espèce et corrélations de Pearsons $c$ *vs.* $h$ et $c$ *vs.* hdn"
+
+coeff_dt |>
+	gt() |>
+	cols_label(
+		speciesName_sci = "Species",
+		corr_ch = "Corr. c, h",
+		corr_chdn = "Corr. c, hdn",
+		corr_cs = "Corr. c, slend"
+	) |>
+	tab_style(
+		style = cell_borders(sides = "all", style = NULL),
+		locations = cells_body()
+	) |>
+	tab_style(
+		style = list(cell_fill(color = "#FFFFFF"), cell_text(weight = "bold", align = "right")),
+		locations = list(cells_column_labels(), cells_column_spanners())
+	) |>
+	tab_style(
+		style = list(cell_fill(color = "#FFFFFF"), cell_text(align = "right")),
+		locations = cells_body(columns = speciesName_sci)
+	)
+```
+
+Comme on peut le voir, utiliser la robustesse permet en partie de briser la relation linéaire entre $c$ et $h$ (on pouvait s'y attendre au vu de la formule!). Cependant, ce ratio ne semble pas être utilisé dans la littérature, de plus son nom anglais *hardiness coefficient* porte a confusion avec *frost hardiness*, *tree hardiness*, et *cold hardiness* qui réfèrent tous aux *hardiness zones*, à savoir la température minimale acceptée par une espèce. Dans ce cas, il vaut mieux travailler avec un autre nom. A noter que l'élancement, *slenderness*, déjà utilisée dans Emerge (un peu à tort car combiné avec hdn... donc corrélations!) reste très corrélé à la circonférence. L'élancement correspond à remplacer le coefficient de regression par 1. Au pire des cas, je peux utiliser une nouvelle définition de *slenderness*:
+$$
+s = \frac{\pi h}{\sqrt{c}}
+$$
+au lieu de du traditionnel ratio de hauteur sur diamètre. Cette nouvelle définition correspond simplement à l'inverse de hdn, et m'autorise à utiliser le mot *slenderness* (bien que pas la définition traditionnelle).
+
+A titre indicatif, je montre l'influence de remplacer la valeur du coefficient par $0.5$ dans la @fig-regLin_comp.
+```{r}
+#| echo: false
+#| label: fig-regLin_comp
+#| fig-cap: "Influence du remplacement du coefficient de regression par 0.5"
+#| fig-subcap: 
+#|   - "*Abies alba*"
+#|   - "*Fagus sylvatica*"
+#|   - "*Picea abies*"
+#|   - "*Pinus pinaster*"
+#|   - "*Pinus sylvestris*"
+#|   - "*Pseudotsuga menziesii*"
+#|   - "*Quercus petraea*"
+#| lightbox: 
+#|   group: linear_reg_comp
+#| layout-ncol: 2
+
+for (sp in species_vallet)
+{
+	plot(forest_dt[sp, circumference_m], forest_dt[sp, height], pch = 19, cex = 0.25,
+		axes = FALSE, xlab = "Circonférence (m)", ylab = "Hauteur (m)")
+	curve(exp(coeff_dt[sp, a] + coeff_dt[sp, b]*log(x)), col = "#CD212A", lwd = 3, add = TRUE)
+	curve(exp(coeff_dt[sp, a] + 0.5*log(x)), col = "#3355AA", lwd = 3, add = TRUE)
+	curve(exp(coeff_dt[sp, a] + log(x)), col = "#33AA55", lwd = 3, add = TRUE)
+	axis(1)
+	axis(2, las = 1)
+	legend(x = "topleft", legend = c(round(coeff_dt[sp, b], 2), "0.5", "1"), col = c("#CD212A", "#3355AA", "#33AA55"),
+		lwd = 2, lty = 1, bty = "n")
+}
+```
+
+## Discussion sur le facteur de forme {#sec-ff}
+Le facteur de forme semble lui aussi peu utilisé dans la littérature sur les volumes (mais lire @Zhou2021). A titre d'exemple, les suisses (@Fischer2019, chap. 12) et les américains (@Westfall2023) utilisent directement le diamètre et la hauteur. L'avantage est que c'est simple, mais comme ces deux variables sont probablement corrélées, cela pose problème sur l'interprétation du modèle (les prédictions du modèle ne sont pas affectées en revanche).
+
+```{r}
+#| echo: false
+#| label: fig-hdn
+#| fig-cap: "Facteur de forme *vs.* robustesse"
+#| fig-subcap: 
+#|   - "*Abies alba*"
+#|   - "*Fagus sylvatica*"
+#|   - "*Picea abies*"
+#|   - "*Pinus pinaster*"
+#|   - "*Pinus sylvestris*"
+#|   - "*Pseudotsuga menziesii*"
+#|   - "*Quercus petraea*"
+#| lightbox: 
+#|   group: linear_reg_comp
+#| layout-ncol: 2
+
+## Fagus sylvatica
+for (sp in species_vallet)
+{
+	plot(forest_dt[sp, hdn], forest_dt[sp, formTot_vallet], pch = 19, cex = 0.25,
+		axes = FALSE, xlab = "hdn", ylab = "Form factor")
+	axis(1)
+	axis(2, las = 1)
+}
+```
