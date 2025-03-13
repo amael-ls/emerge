@@ -25,29 +25,42 @@ data {
 transformed data {
 	vector[N] log_tot_volume = log(tot_volume);
 	
-	vector[N] DH = circumference.^2 .* height; // Proportional to a cylindre volume
+	vector[N] DH = circumference.^2 .* height/pi()^2; // Divide by pi^2 to keep prior from zhou: he works with dbh
 }
 
 parameters {
+	// Parameters of Zhou2021 (Dynamic allometric scaling of tree biomass and size)
 	vector <lower = 0, upper = 1> [S] m;
 	vector <lower = 0, upper = 1> [S] d;
 	vector <lower = 0> [S] k;
 
+	// Regression parameters around Zhou's volume
+	vector[S] beta0;
+	vector[S] beta1; // Hopefully around 1!
+
 	real <lower = 0> sigma;
 }
 
+transformed parameters {
+	vector [N] zhou_volume;
+	for (i in 1:S)
+		zhou_volume[start[i]:end[i]] = bole_volume[start[i]:end[i]] ./ exp(m[i] - d[i]*exp(-k[i]*DH[start[i]:end[i]]));
+}
+
 model{
-	// Priors
+	// Prior linear regression
+	target += normal_lpdf(beta0 | 0, 1);
+	target += normal_lpdf(beta1 | 1, 0.1);
+
+	// Priors Zhou
 	target += normal_lpdf(m | 0.9, 0.05);
 	target += normal_lpdf(d | 0.3, 0.05);
-	target += gamma_lpdf(k | 0.1, 0.1); // I put a minus in the exponential, hence k > 0
+	target += normal_lpdf(k | 0, 0.1);
 	
 	target += gamma_lpdf(sigma | 0.25^2/0.03, 0.25/0.03);
 
 	// Likelihood
 	for (i in 1:S)
-	{
 		target += normal_lpdf(log_tot_volume[start[i]:end[i]] |
-			log(bole_volume[start[i]:end[i]] ./ (m[i] - d[i]*exp(-k[i]*DH[start[i]:end[i]]))), sigma);
-	}
+			beta0[i] + beta1[i]*log(zhou_volume[start[i]:end[i]]), sigma);
 }
