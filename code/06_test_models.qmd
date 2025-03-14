@@ -1,0 +1,74 @@
+---
+title: "Simple tests of bole volume models"
+date: today
+author: Amaël Le Squin
+date-format: iso
+filters:
+  - fontawesome
+  - siunitx-quarto
+  - imagify
+imagify:
+  header-includes: |
+    \usepackage{pgfplots}
+    \pgfplotsset{compat=1.18}
+    \usepgfplotslibrary{fillbetween}
+    \usetikzlibrary{positioning}
+    \usetikzlibrary{calc}
+  pdf-engine: lualatex
+pdf-engine: lualatex
+keep-tex: true
+execute:
+  error: true
+bibliography: references.bib
+lightbox:
+  match: auto
+css: style.css
+knitr:
+  opts_chunk: 
+    dev: ragg_png
+    crop: null
+    out.width: "70%"
+    fig.width: 6
+    fig.asp: 0.618
+    fig.align: "center"
+format:
+  html:
+    toc: true
+    include-in-header: mathjax.html
+    code-fold: true
+    df-print: paged
+    number-sections: true
+    theme:
+      light: cerulean
+      dark: darkly
+    margin: 5% 0;
+  pdf:
+    mathspec: true
+    include-in-header:
+      - text: |
+          \usepackage{unicode-math}
+---
+
+\newcommand{\Vbft}{V_{\text{BFT}}}
+\newcommand{\Fbft}{F_{\text{BFT}}}
+\newcommand{\hdec}{h_{\text{dec}}}
+\newcommand{\fmax}{f_{\text{max}}}
+
+<!-- Math operators -->
+<!-- \DeclareMathOperator{\ln}{ln} -->
+
+## Introduction
+Florence Gohon a travaillé sur des modèles de volume bois-fort tige, $\Vbft$ qui sont consultables dans le document `~/work/FairCarbon/gohon/rapport_tarifs.pdf`:
+$$
+	\Vbft = \frac{c^2h}{4\pi \left( 1 - \frac{1.3}{h} \right)^2} \left[ \alpha_i + \beta_i c + \gamma_i \frac{\sqrt{c}}{\hdec} + \delta_i \frac{\sqrt{\hdec}}{c^2 h} + \eta_i \left( 1 - \frac{\hdec}{h} \right) \right]
+$$
+
+Pour l'instant, les tarifs utilisés par l'inventaire sont (facteurs de forme):
+
+- $\Fbft = \left[ \alpha + \beta c + \gamma \frac{\sqrt{c}}{h} + \fmax \frac{\hdec}{\hdec + k} + \frac{\delta}{c^{\epsilon}} \right] \left[ 1 - \left(\frac{0.07 \pi}{c}\right)^3 \left(1 - \frac{1.3}{h}\right)^3 \right]$
+- $\Fbft = \alpha + \beta c + \gamma \frac{\sqrt{c}}{h} + \fmax \left( \frac{\hdec}{\hdec + k} \right)^{1 + \rho} + \frac{\delta}{c^{\epsilon}}$
+- $\Fbft = \alpha + \beta c + \eta \hdec + \frac{\delta}{c^{\epsilon}}$
+- $\Fbft = \alpha + \beta c + \gamma \frac{\sqrt{c}}{h} + \eta \ln \left(\frac{\hdec}{h} \right) + \frac{\delta}{c^{\epsilon}}$
+- $\Fbft = \alpha + \beta c + \gamma \frac{\sqrt{c}}{h} + \eta \ln(\hdec) + \frac{\delta}{c^{\epsilon}}$
+
+Cependant, ces modèles sont peu interprétables physiquement et ressemble plus à un 'fit polynomial'. Dans les prochaines sections, je vais explorer des modèles plus simples plus compréhensibles physiquement en me basant sur la littérature. A voir si ça marche...
