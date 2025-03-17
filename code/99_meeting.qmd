@@ -1,0 +1,56 @@
+---
+title: "Document de synthèse pour la réunion du 21 mars 2025"
+date: today
+author: Amaël Le Squin
+date-format: iso
+filters:
+  - fontawesome
+  - siunitx-quarto
+  - imagify
+imagify:
+  header-includes: |
+    \usepackage{pgfplots}
+    \pgfplotsset{compat=1.18}
+    \usepgfplotslibrary{fillbetween}
+    \usetikzlibrary{positioning}
+    \usetikzlibrary{calc}
+  pdf-engine: lualatex
+pdf-engine: lualatex
+keep-tex: true
+execute:
+  error: true
+  echo: false
+bibliography: references.bib
+lightbox:
+  match: auto
+css: style.css
+knitr:
+  opts_chunk: 
+    dev: ragg_png
+    crop: null
+    out.width: "70%"
+    fig.width: 6
+    fig.asp: 0.618
+    fig.align: "center"
+format:
+  html:
+    toc: true
+    include-in-header: mathjax.html
+    code-fold: true
+    df-print: paged
+    number-sections: true
+    theme:
+      light: cerulean
+      dark: darkly
+    margin: 5% 0;
+  pdf:
+    mathspec: true
+    include-in-header:
+      - text: |
+          \usepackage{unicode-math}
+---
+
+## Info réunion:
+21.03.2025 à 10h00: [{{< fa solid at title="Réunion teams" >}} Lien Teams](https://teams.microsoft.com/l/meetup-join/19%3ameeting_MzNiZDA3ZmMtMDNjNy00NzE5LWFjNzMtNjcxZjcxZjBkNjhh%40thread.v2/0?context=%7b%22Tid%22%3a%223876b373-7e2c-4857-b024-53326b5b4bb2%22%2c%22Oid%22%3a%228ea3b1a4-f284-4393-957d-b97b8cc75dc7%22%7d)
+
+## Contexte
