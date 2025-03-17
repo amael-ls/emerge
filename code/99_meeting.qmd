@@ -196,7 +196,6 @@ style SB fill: #99DDFF, color: #030303
 
 ```
 
-
 J'utilise les définitions (inspirées de @Gschwantner2009, voir @fig-partition et @fig-treeDef) pour les différentes parties d'un arbre:
 
 - Tronc: Tige principale avec dominance apicale
@@ -207,6 +206,110 @@ J'utilise les définitions (inspirées de @Gschwantner2009, voir @fig-partition 
 	- Grosses branches: Portions latérales avec diamètre supérieur ou égal à \qty{7}{\centi\metre}
 	- Petites branches: Portions latérales avec diamètre inférieur à \qty{7}{\centi\metre}
 
-![Tree partition, with Bole (<span class="egypt_green"></span>), stem top (<span class="egypt_yellow"></span>), large branches (<span class="egypt_blue"></span>), and small branches (<span class="egypt_red"></span>)](img/tree_ign.png){#fig-treeDef}
+![Partitionnement, avec le tronc (<span class="egypt_green"></span>), le top (<span class="egypt_yellow"></span>), grosses branches (<span class="egypt_blue"></span>), et petites branches (<span class="egypt_red"></span>)](img/tree_ign.png){#fig-treeDef}
 
 ### Distribution des données {#sec-dataDistrib}
+```{r}
+#| output: false
+#### Clear space and load packages
+rm(list = ls())
+graphics.off()
+
+options(max.print = 500)
+
+library(data.table)
+library(MetBrewer)
+library(inventR)
+library(stringi)
+library(terra)
+library(gt)
+
+#### Tool function
+angle2dec = function(angle)
+{
+	x = stri_match(angle, regex = "([+-]?\\d+)°(\\d+)'(\\d+)") # To split the degree from minute and second
+	x = apply(x[, 2:4], 1L, function(y) {
+		y = as.numeric(y)
+		y[1] + y[2]/60 + y[3]/3600
+	})
+	return(x)
+}
+
+#### Read data
+os = Sys.info()[['sysname']]
+mnt_point = "/mnt/local_share/"
+if (!dir.exists(mnt_point))
+	stop(paste0("The mounting point <", mnt_point, "> does not exist"))
+path_data = paste0(mnt_point, "data/")
+if (!dir.exists(path_data))
+	stop(paste0("Folder <", path_data, "> does not exist! Check mounting point and mounted folder"))
+
+forest_dt = readRDS(paste0(path_data, "nfi-inra_dt_full.rds"))
+ind_species = readRDS(paste0(path_data, "ind_species_nfi-inra_full.rds"))
+swiss_dt = readRDS(paste0(path_data, "switzerland.rds"))
+
+coords_nfi = vect(paste0(path_data, "coords_nfi_full"))
+coords_inra = vect(paste0(path_data, "coords_inra_full"))
+coords_swiss = vect(paste0(path_data, "coords_switzerland"))
+```
+
+Le jeu de données est constitués principalement de *Quercus*, *Pinus*, et *Fagus* (voir @fig-data) et les parcelles sont couvrent la majeur partie du territoire français pour l'IFN tandis que les données du protocole Oudin sont beaucoup moins bien réparties sur le territoire (voir @fig-map).
+
+```{r}
+#| label: fig-data
+#| fig-cap: Nombre d'individus par genre, avec les conifères en bleu et les feuillus en. Attention, échelle en $\\log_{10}$
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 9
+species_nb = unique(ind_species[["ind_species"]][, .(n_indiv = sum(n_indiv), colour), by = genus])[order(n_indiv)]
+
+par(mar = c(5, 12, 2, 2))
+# Use barplot f or horizontal bars
+barplot(
+	species_nb[, n_indiv],
+	names.arg = species_nb[, genus],
+	horiz = TRUE, # Horizontal bars
+	xlab = "Number of individuals",
+	ylab = "",
+	main = "",
+	las = 1,
+	log = "x",
+	col = species_nb[, colour]
+)
+```
+
+```{r}
+#| label: fig-map
+#| fig-cap: "Location of the plots, with NFI for the Naional Forest Invetory of France, and EFM the Experimental Forest Monitoring of Switzerland [@Didion2024]"
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 9
+
+#### Coordinates
+## Read shapefiles
+switzerland = project(vect(paste0(path_data, "shapefiles/switzerland/CHE_adm0.shp")), coords_inra)
+france = project(vect(paste0(path_data, "shapefiles/france/FRA_adm0.shp")), coords_inra)
+belgium = project(vect(paste0(path_data, "shapefiles/belgium/gadm41_BEL_0.shp")), coords_inra)
+italy = project(vect(paste0(path_data, "shapefiles/italy/gadm41_ITA_0.shp")), coords_inra)
+luxembourg = project(vect(paste0(path_data, "shapefiles/luxembourg/gadm41_LUX_0.shp")), coords_inra)
+germany = project(vect(paste0(path_data, "shapefiles/germany/gadm41_DEU_0.shp")), coords_inra)
+
+fr_ch = project(rbind(france, switzerland), coords_inra)
+
+## Projections
+colours = met.brewer(name = "Lakota", n = 3)
+names(colours) = c("nfi", "swiss", "inra")
+
+## Plot
+plot(fr_ch, lwd = 2, axes = FALSE)
+points(coords_nfi, col = colours["nfi"], pch = 20, cex = 0.35)
+points(coords_inra, col = colours["inra"], pch = 20, cex = 1.15)
+points(project(coords_swiss, coords_inra), col = colours["swiss"], pch = 20, cex = 0.55)
+plot(fr_ch, lwd = 2, add = TRUE, bg = "transparent")
+plot(luxembourg, lwd = 2, add = TRUE)
+plot(germany, lwd = 2, add = TRUE)
+plot(belgium, lwd = 2, add = TRUE)
+plot(italy, lwd = 2, add = TRUE)
+
+legend(x = "bottomleft", legend = c("Emerge", "NFI", "EFM"), fill = colours[c("inra", "nfi", "swiss")], bty = "n", inset = c(0, 0.1))
+```
