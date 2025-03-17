@@ -6,15 +6,44 @@ date-format: iso
 filters:
   - fontawesome
   - siunitx-quarto
-  - imagify
-imagify:
-  header-includes: |
-    \usepackage{pgfplots}
-    \pgfplotsset{compat=1.18}
-    \usepgfplotslibrary{fillbetween}
-    \usetikzlibrary{positioning}
-    \usetikzlibrary{calc}
-  pdf-engine: lualatex
+  - diagram
+diagram:
+  engine:
+    tikz:
+      execpath: lualatex
+      header-includes:
+        \usepackage{pgfplots}
+        \pgfplotsset{compat=1.18}
+        \usepgfplotslibrary{fillbetween}
+        \usetikzlibrary{arrows.meta}
+        \usetikzlibrary{positioning}
+        \usetikzlibrary{calc}
+        \definecolor{trunkCol}{HTML}{FFAF37}
+        \makeatletter
+          \tikzset{
+          database/.style={
+          path picture={
+          \draw[fill = trunkCol] (0, 1.5*\database@segmentheight) circle [x radius=\database@radius,
+          y radius=\database@aspectratio*\database@radius];
+          \draw (-\database@radius, 0.5*\database@segmentheight) arc [start angle=180,end angle=360,x radius=\database@radius,
+          y radius=\database@aspectratio*\database@radius];
+          \draw (-\database@radius,-0.5*\database@segmentheight) arc [start angle=180,end angle=360,x radius=\database@radius,
+          y radius=\database@aspectratio*\database@radius];
+          \draw (-\database@radius,1.5*\database@segmentheight) -- ++(0,-3*\database@segmentheight) arc [start angle=180,end angle=360,
+          x radius=\database@radius, y radius=\database@aspectratio*\database@radius] -- ++(0,3*\database@segmentheight);
+          },
+          minimum width=2*\database@radius + \pgflinewidth,
+          minimum height=3*\database@segmentheight + 2*\database@aspectratio*\database@radius + \pgflinewidth,
+          },
+          database segment height/.store in=\database@segmentheight,
+          database radius/.store in=\database@radius,
+          database aspect ratio/.store in=\database@aspectratio,
+          database segment height=0.1cm,
+          database radius=0.25cm,
+          database aspect ratio=0.35,
+          }
+        \makeatother
+        \tikzset{arrow/.style = {> = {Latex[length = 1.2mm]}}}
 pdf-engine: lualatex
 keep-tex: true
 execute:
@@ -50,7 +79,134 @@ format:
           \usepackage{unicode-math}
 ---
 
+<!-- Shortcut for text -->
+\newcommand{\ie}{*i.e.,*}
+
+<!-- Shortcut for math -->
+\newcommand{\Fbft}{F_{\text{BFT}}}
+\newcommand{\fmax}{f_{\text{max}}}
+\newcommand{\hdec}{h_{\text{dec}}}
+\newcommand{\Vbft}{V_{\text{BFT}}}
+\newcommand{\Vtot}{V_{\text{tot}}}
+
+<!-- Math operators -->
+<!-- \DeclareMathOperator{\diag}{diag} -->
+<!-- \DeclareMathOperator{\logit}{logit} -->
+<!-- \DeclareMathOperator{\mvn}{MVN} -->
+<!-- \DeclareMathOperator{\N}{\mathcal{N}} -->
+
 ## Info réunion:
 21.03.2025 à 10h00: [{{< fa solid at title="Réunion teams" >}} Lien Teams](https://teams.microsoft.com/l/meetup-join/19%3ameeting_MzNiZDA3ZmMtMDNjNy00NzE5LWFjNzMtNjcxZjcxZjBkNjhh%40thread.v2/0?context=%7b%22Tid%22%3a%223876b373-7e2c-4857-b024-53326b5b4bb2%22%2c%22Oid%22%3a%228ea3b1a4-f284-4393-957d-b97b8cc75dc7%22%7d)
 
 ## Contexte
+
+Le projet Alamod, financé par le pepr FairCarboN, a pour objectif de faire une nouvelle estimation du volume aérien total, $\Vtot$, des arbres sur les placettes IFN et de croiser ces données avec les estimations de densité (projet XyloDensMap, XDM) afin d'en déduire la biomasse puis le stockage de carbone des forêts françaises. Dans un même temps, l'IGN a proposé de revoir ses tarifs de volume bois-fort tige, $\Vbft$, afin de s'assurer que $\Vbft \leqslant \Vtot$. Autrement dit, il est proposé de revoir la chaîne de calcul volume, biomasse, carbone:
+
+```tikz
+\begin{tikzpicture}
+	\node (vol) at (0, 0) {Volume};
+	\node[below = of vol.mid east, anchor = mid east] (dens) {Densité};
+
+	\path (vol.mid east) -- (dens.mid east) node[midway, right = 0.8cm, anchor = mid west] (bio) {Biomasse};
+	\draw[->, arrow, out = 0, in = 180] (vol.mid east) to (bio.mid west);
+	\draw[->, arrow, out = 0, in = 180] (dens.mid east) to (bio.mid west);
+
+	\node[right = 0.8cm of bio.mid east, anchor = mid west] (C) {Carbone};
+	\draw[->, arrow] (bio.mid east) to (C.mid west);
+
+	\node[database, above left = 0.3cm of vol, label = above:Emerge, database radius = 0.3cm,
+		database segment height = 0.15cm] (emerge) {};
+
+	\node[database, below left = 0.3cm of dens, label = below:XyloDensMap, database radius = 0.3cm,
+		database segment height = 0.15cm] (xdm) {};
+
+	\draw[->, arrow, dashed, out = -90, in = 180] (emerge.south) to (vol.mid west);
+	\draw[->, arrow, dashed, out = 90, in = 180] (xdm.north) to (dens.mid west);
+\end{tikzpicture}
+```
+
+Dans ce document, je présente les données (@sec-data) et les tarifs existants, puis les pistes explorées/à explorer pour le volume total et bois-fort tige.
+
+## Données {#sec-data}
+Afin de comprendre les données, je définis d'abords ce qu'est un arbre dans la @sec-treePart puis je montre les distributions des données dans la @sec-dataDistrib
+
+### Définition d'un arbre IGN {#sec-treePart}
+
+Les arbres sont partitionnés en éléments hiérarchique par les inventaires forestiers nationaux (\eg @fig-partition). les Définitions des éléments peuvent varier entre inventaires, et ne contaignent pas forcément les mêmes données. Dans notre cas, les données proviennent de différents instituts et différentes périodes:
+
+1.  Protocole Oudin, données préservées par l'INRA, entre 1930 and 1980 (<span class="egypt_red"></span> sur la @fig-map).
+
+2.  Inventaire forestier (<span class="egypt_blue"></span> on the @fig-map), entre 1988 to 2007.
+
+3.  L'Office National des Forêts (ONF), avec un protocole de 1972 et de 1983. Données non-utilisées pour l'instant car coordonées absentes et j'aimerais peut-être inclure des prédicteurs climatiques.
+
+4.  Institut Technologique Forêt, Cellulose, Bois-construction, Ameublement (FCBA), pas explorées pour l'instant.
+
+5.  L'Institut pour le développement forestier (IDF), R&D du Centre National de la Propriété Forestière et de l'Institut national de recherche en sciences et technologies pour l'environnement et l'agriculture (IRSTEA, maintenant INRAE), pas explorées pour l'instant.
+
+```{mermaid}
+%%| label: fig-partition
+%%| fig-cap: Partition d'un arbre (inspiré de @Gschwantner2009)
+flowchart LR
+subgraph SUB0 [Level 0]
+	W(Arbre complet)
+end
+
+subgraph SUB1 [Level 1]
+	W --> A(Aérien)
+	W --> B(Souterain)
+end
+
+subgraph SUB2 [Level 2]
+	A --> M(Tronc)
+	A --> L(Latéral)
+	A --> F(Feuilles)
+
+	B --> E(...)
+end
+
+subgraph SUB3 [Level 3]
+	M --> S(Top tronc)
+	M --> MB(Grume)
+	M --> MS(Souche)
+	L --> LB(Grosse branches)
+	L --> SB(Petites branches)
+end
+
+style SUB0 fill: #CCCCCC, color: #112233
+style SUB1 fill: #CCCCCC, color: #112233
+style SUB2 fill: #CCCCCC, color: #112233
+style SUB3 fill: #CCCCCC, color: #112233
+
+style W fill: #99DDFF, color: #030303
+
+style A fill: #99DDFF, color: #030303
+style B fill: #99DDFF, color: #030303
+
+style M fill: #99DDFF, color: #030303
+style L fill: #99DDFF, color: #030303
+style F fill: #99DDFF, color: #030303
+style E fill: #99DDFF, color: #030303
+
+style S fill: #99DDFF, color: #030303
+style MB fill: #99DDFF, color: #030303
+style MS fill: #99DDFF, color: #030303
+style LB fill: #99DDFF, color: #030303
+style SB fill: #99DDFF, color: #030303
+
+```
+
+
+J'utilise les définitions (inspirées de @Gschwantner2009, voir @fig-partition et @fig-treeDef) pour les différentes parties d'un arbre:
+
+- Tronc: Tige principale avec dominance apicale
+	- Top tronc: La partie du tronc au dessus du diamètre de découpe \qty{7}{\centi\metre}
+	- Grume: Partie du tronc entre la souche et la top
+	- Souche: Partie qui resterait après une coupe suivant des pratiques normales d'abattage.
+- Latéral:
+	- Grosses branches: Portions latérales avec diamètre supérieur ou égal à \qty{7}{\centi\metre}
+	- Petites branches: Portions latérales avec diamètre inférieur à \qty{7}{\centi\metre}
+
+![Tree partition, with Bole (<span class="egypt_green"></span>), stem top (<span class="egypt_yellow"></span>), large branches (<span class="egypt_blue"></span>), and small branches (<span class="egypt_red"></span>)](img/tree_ign.png){#fig-treeDef}
+
+### Distribution des données {#sec-dataDistrib}
