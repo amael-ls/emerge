@@ -77,10 +77,13 @@ format:
     include-in-header:
       - text: |
           \usepackage{unicode-math}
+          \usepackage{siunitx}
+    number-sections: true
 ---
 
 <!-- Shortcut for text -->
-\newcommand{\ie}{*i.e.,*}
+\newcommand{\ie}{\textit{i.e.},}
+\newcommand{\eg}{\textit{e.g.},}
 
 <!-- Shortcut for math -->
 \newcommand{\Fbft}{F_{\text{BFT}}}
@@ -125,7 +128,7 @@ Le projet Alamod, financé par le pepr FairCarboN, a pour objectif de faire une 
 \end{tikzpicture}
 ```
 
-Dans ce document, je présente les données (@sec-data) et les tarifs existants, puis les pistes explorées/à explorer pour le volume total et bois-fort tige.
+Dans ce document, je présente les données (@sec-data) et les tarifs existants (@sec-hist), puis les pistes explorées/explorables pour le volume total et bois-fort tige (@sec-sec-pistes).
 
 ## Données {#sec-data}
 Afin de comprendre les données, je définis d'abords ce qu'est un arbre dans la @sec-treePart puis je montre les distributions des données dans la @sec-dataDistrib
@@ -147,6 +150,7 @@ Les arbres sont partitionnés en éléments hiérarchique par les inventaires fo
 ```{mermaid}
 %%| label: fig-partition
 %%| fig-cap: Partition d'un arbre (inspiré de @Gschwantner2009)
+%%| fig-width: 7
 flowchart LR
 subgraph SUB0 [Level 0]
 	W(Arbre complet)
@@ -313,3 +317,246 @@ plot(italy, lwd = 2, add = TRUE)
 
 legend(x = "bottomleft", legend = c("Emerge", "NFI", "EFM"), fill = colours[c("inra", "nfi", "swiss")], bty = "n", inset = c(0, 0.1))
 ```
+
+Il y a aussi un biais dans la sélection des arbres en sus du biais géographique, comme le montre les figures de distribution des diamètres, des hauteurs, et des volumes (voir @fig-responses et @fig-responses2). Enfin, les données Emerge (C. Deleuze, *discussion*), comme les données suisse (Anne Herold-Bonardi, *discussion*), sont aussi biaisées sur la structure des arbres (principalement prélevé en futaies et taillis sous futaies) et ne sont pas représentatives des différents formes d'arbre sur le territoire.
+
+```{r}
+#| echo: false
+#| label: fig-distrib_circumferences
+#| fig-cap: Distribution of circumferences
+#| layout-nrow: 3
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 9
+#| dev: tikz
+
+# --- Circumferences
+dd_fr = density(forest_dt[origin_data == "nfi", circumference_m]) # French NFI
+dd_in = density(forest_dt[origin_data == "inra", circumference_m]) # Inra/Emerge data
+dd_ch = density(swiss_dt[, circumference_m]) # swiss data
+
+plot(dd_fr, col = colours["nfi"], axes = FALSE, lwd = 3, xlab = "Circumference (m)", main = "",
+	ylim = c(0, max(dd_fr$y, dd_in$y, dd_ch$y)))
+polygon(dd_fr, col = paste0(colours["nfi"], 44))
+
+lines(dd_in, col = colours["inra"], lwd = 3)
+polygon(dd_in, col = paste0(colours["inra"], 44))
+
+lines(dd_ch, col = colours["swiss"], lwd = 3)
+polygon(dd_ch, col = paste0(colours["swiss"], 44))
+
+axis(1)
+axis(2, las = 1)
+legend(x = "topright", legend = c("Emerge", "NFI", "EFM"), fill = colours[c("inra", "nfi", "swiss")], bty = "n")
+```
+
+```{r}
+#| echo: false
+#| label: fig-distrib_heights
+#| fig-cap: Distribution of heights
+#| layout-nrow: 3
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 9
+#| dev: tikz
+
+# --- Heights
+dd_fr = density(forest_dt[origin_data == "nfi", height]) # French NFI
+dd_in = density(forest_dt[origin_data == "inra", height]) # Inra/Emerge data
+dd_ch = density(swiss_dt[, height]) # swiss data
+
+plot(dd_fr, col = colours["nfi"], axes = FALSE, lwd = 3, xlab = "Height (m)", main = "",
+	ylim = c(0, max(dd_fr$y, dd_in$y, dd_ch$y)))
+polygon(dd_fr, col = paste0(colours["nfi"], 44))
+
+lines(dd_in, col = colours["inra"], lwd = 3)
+polygon(dd_in, col = paste0(colours["inra"], 44))
+
+lines(dd_ch, col = colours["swiss"], lwd = 3)
+polygon(dd_ch, col = paste0(colours["swiss"], 44))
+
+axis(1)
+axis(2, las = 1)
+legend(x = "topright", legend = c("Emerge", "NFI", "EFM"), fill = colours[c("inra", "nfi", "swiss")], bty = "n")
+```
+
+```{r}
+#| echo: false
+#| label: fig-distrib_mySlenderness
+#| fig-cap: "Distribution of slenderness ($h/\\sqrt{x}$)"
+#| layout-nrow: 3
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 9
+#| dev: tikz
+
+# --- Slenderness
+dd_fr = density(forest_dt[origin_data == "nfi", height/sqrt(circumference_m)]) # French NFI
+dd_in = density(forest_dt[origin_data == "inra", height/sqrt(circumference_m)]) # Inra/Emerge data
+dd_ch = density(swiss_dt[, height/sqrt(circumference_m)]) # swiss data
+
+plot(dd_fr, col = colours["nfi"], axes = FALSE, lwd = 3, xlab = "Slenderness ($h/\\sqrt{x}$)", main = "",
+	ylim = c(0, max(dd_fr$y, dd_in$y, dd_ch$y)))
+polygon(dd_fr, col = paste0(colours["nfi"], 44))
+
+lines(dd_in, col = colours["inra"], lwd = 3)
+polygon(dd_in, col = paste0(colours["inra"], 44))
+
+lines(dd_ch, col = colours["swiss"], lwd = 3)
+polygon(dd_ch, col = paste0(colours["swiss"], 44))
+
+axis(1)
+axis(2, las = 1)
+legend(x = "topright", legend = c("Emerge", "NFI", "EFM"), fill = colours[c("inra", "nfi", "swiss")], bty = "n")
+```
+
+### Relation volume bois-fort tige *v.s.* circonférence
+```{r}
+#### Binding both forest_dt and swiss_dt
+## Temporary data
+temp = rbind(forest_dt[, .(plot_id, tree_id, genus, circumference_m,
+		bole_volume_m3 = bole_volume_reconstruct_m3, crown_volume_m3, origin_data)],
+	swiss_dt[, .(plot_id, tree_id, genus, circumference_m,
+		bole_volume_m3 = bole_volume_cyl_m3, crown_volume_m3)], fill = TRUE)
+
+## Origin data and colours
+temp[is.na(origin_data), origin_data := "swiss"]
+temp[, colour := colours[origin_data], by = origin_data]
+
+## Remove genus that 
+select_genus = temp[, .N, by = .(genus, origin_data)][, .N, by = genus][N > 1, genus]
+
+## List genus and set keys
+temp = temp[genus %in% select_genus]
+
+setkey(temp, genus, origin_data)
+ls_genus = unique(temp[, genus]) # Insured that it is sorter by alphabetical order
+```
+
+```{r}
+#| label: fig-responses
+#| fig-cap: "Relation volume *v.s.* circonférence pour les 17 genres présent dans au moins deux jeux de données parmis l'IFN, Emerge, et EFM (Experimental Forest Management, @Didion2024)"
+#| fig-subcap:
+#|   - "Abies"
+#|   - "Acer"
+#|   - "Betula"
+#|   - "Carpinus"
+#|   - "Castanea"
+#|   - "Cedrus"
+#|   - "Fagus"
+#|   - "Fraxinus"
+#|   - "Juglans"
+#| 
+#|   - "Larix"
+#|   - "Picea"
+#|   - "Pinus"      
+#|   - "Populus"
+#|   - "Prunus"
+#|   - "Pseudotsuga"
+#|   - "Quercus"
+#|   - "Ulmus" 
+#| layout-nrow: 3
+#| layout-col: 3
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 9
+
+for (current_gen in ls_genus[1:9])
+{
+	pres_inra = FALSE
+	pres_swiss = FALSE
+
+	plot(temp[.(current_gen, "nfi"), circumference_m], temp[.(current_gen, "nfi"), bole_volume_m3], cex = 0.45,
+		xlab = "Circumference (m)", ylab = "Bole volume (m³)", main = "", axes = FALSE, pch = 19, lwd = 0,
+		col = colours["nfi"], xlim = c(0, max(temp[.(current_gen), circumference_m])))
+	
+	if (temp[.(current_gen, "inra"), .N, nomatch = NULL] > 0)
+	{
+		points(temp[.(current_gen, "inra"), circumference_m], temp[.(current_gen, "inra"), bole_volume_m3],
+			cex = 0.55, col = colours["inra"], pch = 19, lwd = 0)
+		pres_inra = TRUE
+	}
+		
+	if (temp[.(current_gen, "swiss"), .N, nomatch = NULL] > 0)
+	{
+		points(temp[.(current_gen, "swiss"), circumference_m], temp[.(current_gen, "swiss"), bole_volume_m3],
+			cex = 0.55, col = paste0(colours["swiss"], ifelse(pres_inra, "66", "FF")), pch = 19, lwd = 0)
+		pres_swiss = TRUE
+	}
+
+	axis(1)
+	axis(2, las = 1)
+
+	if (pres_inra && pres_swiss)
+		legend(x = "topleft", legend = c("Emerge", "NFI", "EFM"), fill = colours[c("inra", "nfi", "swiss")], bty = "n")
+	if (pres_inra && !pres_swiss)
+		legend(x = "topleft", legend = c("Emerge", "NFI"), fill = colours[c("inra", "nfi")], bty = "n")
+	if (!pres_inra && pres_swiss)
+		legend(x = "topleft", legend = c("NFI", "EFM"), fill = colours[c("nfi", "swiss")], bty = "n")
+}
+```
+
+
+```{r}
+#| label: fig-responses2
+#| fig-cap: "Relation volume *v.s.* circonférence pour les 17 genres présent dans au moins deux jeux de données parmis l'IFN, Emerge, et EFM (Experimental Forest Management, @Didion2024)"
+#| fig-subcap:
+#|   - "Larix"
+#|   - "Picea"
+#|   - "Pinus"      
+#|   - "Populus"
+#|   - "Prunus"
+#|   - "Pseudotsuga"
+#|   - "Quercus"
+#|   - "Ulmus" 
+#| layout-nrow: 3
+#| layout-col: 3
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 9
+
+for (current_gen in ls_genus[10:17])
+{
+	pres_inra = FALSE
+	pres_swiss = FALSE
+
+	plot(temp[.(current_gen, "nfi"), circumference_m], temp[.(current_gen, "nfi"), bole_volume_m3], cex = 0.45,
+		xlab = "Circumference (m)", ylab = "Bole volume (m³)", main = "", axes = FALSE, pch = 19, lwd = 0,
+		col = colours["nfi"], xlim = c(0, max(temp[.(current_gen), circumference_m])), cex.lab = 1.25)
+	
+	if (temp[.(current_gen, "inra"), .N, nomatch = NULL] > 0)
+	{
+		points(temp[.(current_gen, "inra"), circumference_m], temp[.(current_gen, "inra"), bole_volume_m3],
+			cex = 0.55, col = colours["inra"], pch = 19, lwd = 0)
+		pres_inra = TRUE
+	}
+		
+	if (temp[.(current_gen, "swiss"), .N, nomatch = NULL] > 0)
+	{
+		points(temp[.(current_gen, "swiss"), circumference_m], temp[.(current_gen, "swiss"), bole_volume_m3],
+			cex = 0.55, col = paste0(colours["swiss"], ifelse(pres_inra, "66", "FF")), pch = 19, lwd = 0)
+		pres_swiss = TRUE
+	}
+
+	axis(1, cex.axis = 1.25)
+	axis(2, las = 1, cex.axis = 1.25)
+
+	if (pres_inra && pres_swiss)
+		legend(x = "topleft", legend = c("Emerge", "NFI", "EFM"), fill = colours[c("inra", "nfi", "swiss")], bty = "n",
+		cex = 1.25)
+	if (pres_inra && !pres_swiss)
+		legend(x = "topleft", legend = c("Emerge", "NFI"), fill = colours[c("inra", "nfi")], bty = "n", cex = 1.25)
+	if (!pres_inra && pres_swiss)
+		legend(x = "topleft", legend = c("NFI", "EFM"), fill = colours[c("nfi", "swiss")], bty = "n", cex = 1.25)
+}
+```
+
+## Historique des tarifs {#sec-hist}
+
+## Pistes explorables {#sec-pistes}
+
+
+## References
+
+::: {#refs}
+:::
