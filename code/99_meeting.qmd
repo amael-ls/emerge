@@ -49,6 +49,7 @@ keep-tex: true
 execute:
   error: true
   echo: false
+  cache: true
 bibliography: references.bib
 lightbox:
   match: auto
@@ -87,8 +88,10 @@ format:
 
 <!-- Shortcut for math -->
 \newcommand{\Fbft}{F_{\text{BFT}}}
+\newcommand{\ff}{F_\text{form}}
 \newcommand{\fmax}{f_{\text{max}}}
 \newcommand{\hdec}{h_{\text{dec}}}
+\newcommand{\hdn}{{\text{hdn}}}
 \newcommand{\Vbft}{V_{\text{BFT}}}
 \newcommand{\Vtot}{V_{\text{tot}}}
 
@@ -128,7 +131,7 @@ Le projet Alamod, financé par le pepr FairCarboN, a pour objectif de faire une 
 \end{tikzpicture}
 ```
 
-Dans ce document, je présente les données (@sec-data) et les tarifs existants (@sec-hist), puis les pistes explorées/explorables pour le volume total et bois-fort tige (@sec-sec-pistes).
+Dans ce document, je présente les données (@sec-data) et les tarifs existants (@sec-hist), puis les pistes explorées/explorables pour le volume total et bois-fort tige (@sec-pistes).
 
 ## Données {#sec-data}
 Afin de comprendre les données, je définis d'abords ce qu'est un arbre dans la @sec-treePart puis je montre les distributions des données dans la @sec-dataDistrib
@@ -226,6 +229,7 @@ library(MetBrewer)
 library(inventR)
 library(stringi)
 library(terra)
+library(mgcv)
 library(gt)
 
 #### Tool function
@@ -321,7 +325,6 @@ legend(x = "bottomleft", legend = c("Emerge", "NFI", "EFM"), fill = colours[c("i
 Il y a aussi un biais dans la sélection des arbres en sus du biais géographique, comme le montre les figures de distribution des diamètres, des hauteurs, et des volumes (voir @fig-responses et @fig-responses2). Enfin, les données Emerge (C. Deleuze, *discussion*), comme les données suisse (Anne Herold-Bonardi, *discussion*), sont aussi biaisées sur la structure des arbres (principalement prélevé en futaies et taillis sous futaies) et ne sont pas représentatives des différents formes d'arbre sur le territoire.
 
 ```{r}
-#| echo: false
 #| label: fig-distrib_circumferences
 #| fig-cap: Distribution of circumferences
 #| layout-nrow: 3
@@ -351,7 +354,6 @@ legend(x = "topright", legend = c("Emerge", "NFI", "EFM"), fill = colours[c("inr
 ```
 
 ```{r}
-#| echo: false
 #| label: fig-distrib_heights
 #| fig-cap: Distribution of heights
 #| layout-nrow: 3
@@ -381,7 +383,6 @@ legend(x = "topright", legend = c("Emerge", "NFI", "EFM"), fill = colours[c("inr
 ```
 
 ```{r}
-#| echo: false
 #| label: fig-distrib_mySlenderness
 #| fig-cap: "Distribution of slenderness ($h/\\sqrt{x}$)"
 #| layout-nrow: 3
@@ -468,7 +469,7 @@ for (current_gen in ls_genus[1:9])
 
 	plot(temp[.(current_gen, "nfi"), circumference_m], temp[.(current_gen, "nfi"), bole_volume_m3], cex = 0.45,
 		xlab = "Circumference (m)", ylab = "Bole volume (m³)", main = "", axes = FALSE, pch = 19, lwd = 0,
-		col = colours["nfi"], xlim = c(0, max(temp[.(current_gen), circumference_m])))
+		col = colours["nfi"], xlim = c(0, max(temp[.(current_gen), circumference_m])), cex.lab = 2)
 	
 	if (temp[.(current_gen, "inra"), .N, nomatch = NULL] > 0)
 	{
@@ -484,15 +485,16 @@ for (current_gen in ls_genus[1:9])
 		pres_swiss = TRUE
 	}
 
-	axis(1)
-	axis(2, las = 1)
+	axis(1, cex.axis = 2)
+	axis(2, las = 1, cex.axis = 2)
 
 	if (pres_inra && pres_swiss)
-		legend(x = "topleft", legend = c("Emerge", "NFI", "EFM"), fill = colours[c("inra", "nfi", "swiss")], bty = "n")
+		legend(x = "topleft", legend = c("Emerge", "NFI", "EFM"), fill = colours[c("inra", "nfi", "swiss")], bty = "n",
+		cex = 2)
 	if (pres_inra && !pres_swiss)
-		legend(x = "topleft", legend = c("Emerge", "NFI"), fill = colours[c("inra", "nfi")], bty = "n")
+		legend(x = "topleft", legend = c("Emerge", "NFI"), fill = colours[c("inra", "nfi")], bty = "n", cex = 2)
 	if (!pres_inra && pres_swiss)
-		legend(x = "topleft", legend = c("NFI", "EFM"), fill = colours[c("nfi", "swiss")], bty = "n")
+		legend(x = "topleft", legend = c("NFI", "EFM"), fill = colours[c("nfi", "swiss")], bty = "n", cex = 2)
 }
 ```
 
@@ -522,7 +524,7 @@ for (current_gen in ls_genus[10:17])
 
 	plot(temp[.(current_gen, "nfi"), circumference_m], temp[.(current_gen, "nfi"), bole_volume_m3], cex = 0.45,
 		xlab = "Circumference (m)", ylab = "Bole volume (m³)", main = "", axes = FALSE, pch = 19, lwd = 0,
-		col = colours["nfi"], xlim = c(0, max(temp[.(current_gen), circumference_m])), cex.lab = 1.25)
+		col = colours["nfi"], xlim = c(0, max(temp[.(current_gen), circumference_m])), cex.lab = 2)
 	
 	if (temp[.(current_gen, "inra"), .N, nomatch = NULL] > 0)
 	{
@@ -538,20 +540,328 @@ for (current_gen in ls_genus[10:17])
 		pres_swiss = TRUE
 	}
 
-	axis(1, cex.axis = 1.25)
-	axis(2, las = 1, cex.axis = 1.25)
+	axis(1, cex.axis = 2)
+	axis(2, las = 1, cex.axis = 2)
 
 	if (pres_inra && pres_swiss)
 		legend(x = "topleft", legend = c("Emerge", "NFI", "EFM"), fill = colours[c("inra", "nfi", "swiss")], bty = "n",
 		cex = 1.25)
 	if (pres_inra && !pres_swiss)
-		legend(x = "topleft", legend = c("Emerge", "NFI"), fill = colours[c("inra", "nfi")], bty = "n", cex = 1.25)
+		legend(x = "topleft", legend = c("Emerge", "NFI"), fill = colours[c("inra", "nfi")], bty = "n", cex = 2)
 	if (!pres_inra && pres_swiss)
-		legend(x = "topleft", legend = c("NFI", "EFM"), fill = colours[c("nfi", "swiss")], bty = "n", cex = 1.25)
+		legend(x = "topleft", legend = c("NFI", "EFM"), fill = colours[c("nfi", "swiss")], bty = "n", cex = 2)
 }
 ```
 
 ## Historique des tarifs {#sec-hist}
+
+### Facteur de forme et robustesse
+
+Le facteur de forme, $\ff$, a été introduit par @Vallet2006, puis a été modifié lors du projet Emerge (@Deleuze2013_b) afin de corriger les problèmes survenant pour les petits arbres (explosion du facteur de forme pour compenser un dbh proche de 0). Ce nouveau facteur de forme est défini par:
+$$
+\ff = \frac{4\pi \Vbft}{c^2h} \left( 1 - \frac{1.3}{h} \right)^2
+$$ {#eq-ff}
+Il est notamment utilisé afin de limiter l'hétéroscédasticité du volume bois-fort tige, $\Vbft$, en fonction de la robustesse, $\hdn = \frac{\sqrt{c}}{h}$ (voir @sec-hdn). Il correspond à un taux de remplissage d'un cylindre de hauteur $h$ et de circonférence $c$ par l'arbre en question.
+
+::: {.callout-note}
+
+Dans @Vallet2006, le facteur de forme ne possède pas la correction $\left( 1 - \frac{1.3}{h} \right)^2$. Son facteur de forme est aussi défini pour le volume total, et pas pour le volume bois-for tige (BFT). Cependant, avec @Deleuze2013_b, la formulation du facteur de forme est la même, si on remplace le volume BFT par le volume total.
+
+:::
+
+Dans cet section, je regarde si le facteur de forme est vraiment plus adapté et plus facile à manipuler que le volume direct. Dans la @sec-hdn, je reviens sur la définition de la robustesse, puis dans la @sec-ff j'étudie le facteur de forme. J'utilise les données du protocole Oudin [@Deleuze2013], mais ne garde que les 7 espèces présentes dans @Vallet2006. Le graphique ci-dessous tente de reproduire la figure 3 de @Vallet2006, mais il semble que les données ne soient pas tout à fait les mêmes. D'après [@Deleuze2013_b, les données de @Vallet2006 sont un sous-échantillon des données que nous avons à disposition, je suppose donc que ses deux jeux de données se ressembles suffisament pour pouvoir discuter de la robustesse et du facteur de forme.
+
+```{r}
+#| label: fig-fagSyl
+#| fig-cap: Facteur de forme en fonction de la circonférence pour *Fagus sylvatica*. Les données sont sensées être similaire à celle utilisées dans @Vallet2006
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 8.142857
+
+## New variables
+forest_dt[, hdn := sqrt(circumference_m)/height]
+forest_dt[, slenderness := pi*height/circumference_m] # height/diameter
+forest_dt[, formBFT := 4*pi*bole_volume_m3/(height*circumference_m^2)*(1 - 1.3/height)^2]
+forest_dt[, formBFT_reconstruct := 4*pi*bole_volume_reconstruct_m3/(height*circumference_m^2)*(1 - 1.3/height)^2]
+forest_dt[, formTot_vallet := 4*pi*total_volume_m3/(height*circumference_m^2)]
+forest_dt[, formBFT_vallet_reconstruct := 4*pi*bole_volume_reconstruct_m3/(height*circumference_m^2)]
+
+## Copy of the whole dataset before subset
+forest_dt_full = copy(forest_dt)
+
+## Subset
+forest_dt = forest_dt[origin_data == "inra"]
+species_vallet = c("Abies alba", "Fagus sylvatica", "Picea abies", "Pinus pinaster", "Pinus sylvestris",
+	"Pseudotsuga menziesii", "Quercus petraea")
+forest_dt = forest_dt[speciesName_sci %in% species_vallet]
+
+## Set keys
+setkey(forest_dt, speciesName_sci)
+n_sp = length(forest_dt[, unique(speciesName_sci)])
+
+## Fit a simple GAM for Fagus sylvatica
+fam_fagSyl = gam(formula = formTot_vallet ~ 1 + s(circumference_cm),
+	data = list(formTot_vallet = forest_dt[.("Fagus sylvatica"), formTot_vallet],
+	circumference_cm = 100*forest_dt[.("Fagus sylvatica"), circumference_m]), method = "REML")
+
+pred = predict(fam_fagSyl, newdata = list(circumference_cm = sort(100*forest_dt[.("Fagus sylvatica"), circumference_m])))
+
+## Plot
+plot(100*forest_dt[.("Fagus sylvatica"), circumference_m], forest_dt[.("Fagus sylvatica"), formTot_vallet],
+	xlab = "Circonférence en cm", ylab = "Facteur de forme tot Vallet", axes = FALSE, pch = 3, cex = 0.5)
+abline(h = c(0.4, 0.6, 0.8, 1), lty = "dotted", col = "#2233FFAA")
+axis(1)
+axis(2, las = 1)
+lines(x = sort(100*forest_dt[.("Fagus sylvatica"), circumference_m]), y = pred, lwd = 3, col = "#CD212A")
+```
+
+## Discussion sur la robustesse, hdn {#sec-hdn}
+
+La robustesse est définie dans @Vallet2006 par:
+$$
+\hdn = \frac{\sqrt{c}}{h},
+$$
+avec $c$ la circonférence à \qty{1.3}{\metre} et $h$ la hauteur. Mais d'où vient cette formule? Pour ça, il faut aller voir l'équation 4 de @Vallet2006 (une régression linéaire de $h$ en fonction de $c$):
+$$
+\log(h) = a + b \log(c).
+$$
+Il a trouvé que $b = 0.5$ pour la plupart des espèces, et donc:
+\begin{align*}
+	h &= \exp[a + 0.5 \log(c)] \\
+		&= \exp[a] \exp[0.5 \log(c)] \\
+		&= \exp[a] \sqrt{c} \\
+\end{align*}
+d'où le ratio $\frac{\sqrt{c}}{h} = \exp[-a]$. Plus $a$ est petit, et plus le ratio est grand (arbre trapu). Vérifions maintenant que j'ai bien $b \approx 0.5$ pour la plupart des espèces, et que les hypothèses d'une régression linéaire sont bien satisfaites.
+
+### Régression linéaire
+```{r}
+## Run species-specific linear regressions
+reg_lin = vector(mode = "list", length = n_sp)
+names(reg_lin) = species_vallet
+coeff_dt = data.table(speciesName_sci = species_vallet, a = -Inf, b = -Inf, corr_ch = -Inf, corr_chdn = -Inf, corr_cs = -Inf)
+setkey(coeff_dt,speciesName_sci)
+
+for (sp in species_vallet)
+{
+	reg_lin[[sp]] = lm(log(height) ~ 1 + log(circumference_m), forest_dt[sp])
+	coeff_dt[sp, c("a", "b") := as.list(round(unname(coef(reg_lin[[sp]])), 3))]
+	coeff_dt[sp, c("corr_ch", "corr_chdn", "corr_cs") := .(
+		round(cor(forest_dt[sp, circumference_m], forest_dt[sp, height]), 2),
+		round(cor(forest_dt[sp, circumference_m], forest_dt[sp, hdn]), 2),
+		round(cor(forest_dt[sp, circumference_m], forest_dt[sp, slenderness]), 2)
+	)]
+}
+
+forest_dt[, pred := predict(reg_lin[[speciesName_sci]], data.frame(circumference_m = circumference_m)),
+	by = speciesName_sci]
+forest_dt[, pred_05 := reg_lin[[speciesName_sci]]$coefficients["(Intercept)"] + 0.5*log(circumference_m),
+	by = speciesName_sci]
+```
+Les régressions linéaires sont satisfaisantes et les hypothèses des modèles linéaires satisfaites (me croire sur parole, mais je peux montrer les résidus). En revanche, contrairement à ce qui est annoncé dans @Vallet2006, les valeurs de $b$ ne sont pas forcément proche 0.5 (voir @tbl-regLin)!
+
+```{r}
+#| label: tbl-regLin
+#| tbl-cap: "Coefficients des régressions linéaires par espèce et corrélations de Pearsons $c$ *vs.* $h$, $c$ *vs.* hdn, et $c$ *v.s.* slenderness"
+
+coeff_dt |>
+	gt() |>
+	cols_label(
+		speciesName_sci = "Species",
+		corr_ch = "Corr. c, h",
+		corr_chdn = "Corr. c, hdn",
+		corr_cs = "Corr. c, slend"
+	) |>
+	tab_style(
+		style = cell_borders(sides = "all", style = NULL),
+		locations = cells_body()
+	) |>
+	tab_style(
+		style = list(cell_fill(color = "#FFFFFF"), cell_text(weight = "bold", align = "right")),
+		locations = list(cells_column_labels(), cells_column_spanners())
+	) |>
+	tab_style(
+		style = list(cell_fill(color = "#FFFFFF"), cell_text(align = "right")),
+		locations = cells_body(columns = speciesName_sci)
+	)
+```
+
+Comme on peut le voir, utiliser la robustesse permet en partie de briser la relation linéaire entre $c$ et $h$ (on pouvait s'y attendre au vu de la formule!). Cependant, ce ratio ne semble pas être utilisé dans la littérature sur les volumes, de plus son nom anglais *hardiness coefficient* porte a confusion avec *frost hardiness*, *tree hardiness*, et *cold hardiness* qui réfèrent tous aux *hardiness zones*, à savoir la température minimale acceptée par une espèce. Dans ce cas, il vaut mieux travailler avec un autre nom, tel que *robustness*. A noter que l'élancement, *slenderness*, déjà utilisée dans Emerge (un peu à tort car combiné avec hdn... donc corrélations!) reste très corrélé à la circonférence. L'élancement correspond à remplacer le coefficient de regression par 1. A titre indicatif, je montre l'influence de remplacer la valeur du coefficient par $0.5$ dans la @fig-regLin_comp.
+
+```{r}
+#| label: fig-regLin_comp
+#| fig-cap: "Influence du remplacement du coefficient de regression par 0.5"
+#| fig-subcap: 
+#|   - "*Abies alba*"
+#|   - "*Fagus sylvatica*"
+#|   - "*Picea abies*"
+#|   - "*Pinus pinaster*"
+#|   - "*Pinus sylvestris*"
+#|   - "*Pseudotsuga menziesii*"
+#|   - "*Quercus petraea*"
+#| lightbox: 
+#|   group: linear_reg_comp
+#| layout-ncol: 2
+
+for (sp in species_vallet)
+{
+	plot(forest_dt[sp, circumference_m], forest_dt[sp, height], pch = 19, cex = 0.25,
+		axes = FALSE, xlab = "Circonférence (m)", ylab = "Hauteur (m)", cex.lab = 1.5)
+	curve(exp(coeff_dt[sp, a] + coeff_dt[sp, b]*log(x)), col = "#CD212A", lwd = 3, add = TRUE)
+	curve(exp(coeff_dt[sp, a] + 0.5*log(x)), col = "#3355AA", lwd = 3, add = TRUE)
+	curve(exp(coeff_dt[sp, a] + log(x)), col = "#33AA55", lwd = 3, add = TRUE)
+	axis(1, cex.axis = 1.5)
+	axis(2, las = 1, cex.axis = 1.5)
+	legend(x = "topleft", legend = c(round(coeff_dt[sp, b], 2), "0.5", "1"), col = c("#CD212A", "#3355AA", "#33AA55"),
+		lwd = 2, lty = 1, bty = "n", cex = 1.5)
+}
+```
+
+## Discussion sur le facteur de forme {#sec-ff}
+Le facteur de forme semble lui aussi peu utilisé dans la littérature sur les volumes (mais lire @Zhou2021). A titre d'exemple, les suisses (@Fischer2019, chap. 12) et les américains (@Westfall2023) utilisent directement le diamètre et la hauteur. L'avantage est que c'est simple, mais comme ces deux variables sont probablement corrélées, cela pose problème sur l'interprétation du modèle (les prédictions du modèle ne sont pas affectées en revanche). D'après la @fig-hdn, la robustesse semble une variable explicative prometteuse à utiliser en sus de la circonférence.
+
+```{r}
+#| label: fig-hdn
+#| fig-cap: "Facteur de forme *vs.* robustesse"
+#| fig-subcap: 
+#|   - "*Abies alba*"
+#|   - "*Fagus sylvatica*"
+#|   - "*Picea abies*"
+#|   - "*Pinus pinaster*"
+#|   - "*Pinus sylvestris*"
+#|   - "*Pseudotsuga menziesii*"
+#|   - "*Quercus petraea*"
+#| lightbox: 
+#|   group: linear_reg_comp
+#| layout-ncol: 2
+
+## Fagus sylvatica
+for (sp in species_vallet)
+{
+	plot(forest_dt[sp, hdn], forest_dt[sp, formTot_vallet], pch = 19, cex = 0.25,
+		axes = FALSE, xlab = "hdn", ylab = "Form factor")
+	axis(1)
+	axis(2, las = 1)
+}
+```
+
+D'après François Morneau, un second avantage du facteur de forme est qu'il permet d'enlever l'hétéroscédasticité (@Morneau2016). Il est certain que l'hétéroscédasticité diminue (voir @fig-heterosced), cependant elle est suffisament présente pour faire échouer une méthode linéaire flexible telle qu'un GAM (Generalised Additive Model), comme le montre les résidus pour *Quercus robur* (voir @fig-heterosced_res). J'ai choisi cette espèce car elle est aussi dans @Morneau2010 et @Morneau2016. Les résidus ont été calculé via le package `DHARMa` qui fonctionne comme suit:
+
+1. Simule $n$ nouvelles réponses du modèle pour chaque observation (par défaut $n = 250$)
+2. Pour chaque observation, calcule la fonction de répartition (*cumulative density function, CDF*) des simulations correspondantes
+3. Les résidus de l'observation $\text{obs}_i$ égalent la fonction de répartition évaluée à cette observation: $\text{res}(\text{obs}_i) = CDF(\text{obs}_i)$. Si tout va bien, ça vaut 0.5, autrement dit $\text{obs}_i$ est la médiane des simulations correspondantes. Si 0, alors les simulations surestiment toujours $\text{obs}_i$ et si 1, alors les simulation sous-estiment à 100% $\text{obs}_i$.
+
+```{r}
+#### Quercus robur data (because it is the species Francois Morneau used as an example)
+## Subset data
+setkey(forest_dt_full, speciesName_sci)
+set.seed(1969 - 08 - 18)
+quercus_rob = forest_dt_full[.("Quercus robur")][sample(x = 1:.N, size = 5000, replace = FALSE)]
+
+## GAM
+fam_queRob = gam(formula = formBFT_reconstruct ~ 1 + s(circumference_m),
+	data = list(formBFT_reconstruct = forest_dt_full[.("Quercus robur"), formBFT_reconstruct],
+	circumference_m = forest_dt_full[.("Quercus robur"), circumference_m]), method = "REML")
+
+pred = predict(fam_queRob, newdata = list(circumference_m = sort(forest_dt_full[.("Quercus robur"), circumference_m])))
+
+## Residuals
+sim = DHARMa::simulateResiduals(fam_queRob, quantreg = TRUE)
+```
+
+```{r}
+#| dev: tikz
+#| label: fig-heterosced
+#| fig-cap: "Figures pour *Quercus robur* avec \\num{5000} sélectionnés"
+#| fig-subcap: 
+#|   - "Volume BFT *v.s.* circonférence"
+#|   - "Coefficient de forme (équation @eq-ff) *v.s.* circonférence"
+#| layout-ncol: 2
+#| output: false
+
+## Volume vs c
+plot(quercus_rob[, circumference_m], quercus_rob[, bole_volume_reconstruct_m3], pch = ".",
+	xlab = "$c$", ylab = "$\\Vbft$", axes = FALSE)
+
+axis(1)
+axis(2, las = 1)
+
+## Form factor vs c
+plot(quercus_rob[, circumference_m], quercus_rob[, formBFT_reconstruct], pch = ".", xlab = "$c$",
+	ylab = "$\\ff$", axes = FALSE)
+lines(x = sort(forest_dt_full[.("Quercus robur"), circumference_m]), y = pred, lwd = 3, col = "#CD212A")
+
+axis(1)
+axis(2, las = 1)
+```
+
+```{r}
+#| label: fig-heterosced_res
+#| fig-cap: "Résidus calculés avec `DHARMa`. Les régressions quantiles devraient suivrent les lignes horizontales"
+#| output: false
+DHARMa::plotResiduals(sim, quantreg = TRUE)
+```
+### Tarifs IFN et Emerge
+
+Les volumes sont calculés avec des formules à trois entrées pour les arbres à mesures complètes, et à une entrée pour les arbres qui n'ont que la circonférence de mesurée. Ensuite, au sein de chaque groupe, il y a différentes formules. L'unique moyen de savoir quelle formule utiliser est de regarder quels coefficients ne sont pas `NA` et quelle fonction est utilisée (voir plus bas pour plus de détails).
+
+| Variable | Définition | Unité |
+|--:|:------|:--|
+| $c$ | Circonférence à hauteur de poitrine (\qty{1.3}{\metre}) | \unit{m} |
+| $\hdec$ | Hauteur de décrochement | \unit{m} |
+| $h$ | Hauteur totale | \unit{m} |
+| PDS | poids statistique de l'arbre par repli de placette | - |
+| $S$ | Surface terrière à hauteur de poitrine | \unit{m^2} |
+| $v$ | Volume bois-fort tige | \unit{m^3} |
+| $\vtot$ | Volume aérien total (tarif Vallet) | \unit{m^3} |
+| W | Coefficient de pondération | - |
+: Unités des variables impliquées dans le calcul des volumes {#tbl-units}{.borderless}
+
+#### Equations
+Je réécris ci-dessous les équations des facteurs de formes avec l'abus de notation suivant:
+$$
+c = \min(c, 3).
+$$ {#eq-c}
+Autrement dit, dans les équations (@eq-vol3_v1) -- (@eq-vol3_v5), la circonférence maximale est de \qty{3}{\metre}. La seule exception est pour les conifères exotiques (ESS = 68), où cette limite supérieure ne s'applique pas. Les variables, $c$, $h$, et $\hdec$ sont définies dans @tbl-units.
+
+::: {.callout-warning}
+
+## Limitation de la circonférence
+
+Cette limite me parait un peu arbitraire et petite (un diamètre de \qty{95}{cm} maximum!). Voici l'e-mail du 25 Novembre 2024 de Laurent Haugomat à propos de l'arbre `npp = "18-2B-360-1-226T"` et `a = 7`:
+
+> Bonjour Amaël,
+> ce sont nos facteurs de forme qui divergent, dans ton calcul tu utilises le c13, qui vaut 8.696, nous on le ramène à 3 car , dixit Cédric : 
+> > « pour les très gros arbres, comme le facteur de forme décroit avec l'augmentation de circonférence, on arrivait à une sous-estimation du volume, ce qui avait poussé François à limiter ce phénomène par un C13 max... »
+> Ce qui explique nos différences de volumes.
+
+**A noter que cette limite n'est utilisé que dans le calcul du facteur de forme! Elle n'est pas utilisée dans le calcul du volume du cylindre**
+
+:::
+
+#### Version 1
+$$
+\fBFT = \left[ \alpha + \beta c + \gamma \frac{\sqrt{c}}{h} + \fmax \frac{\hdec}{\hdec + k} + \frac{\delta}{c^{\epsilon}} \right] \left[ 1 - \left(\frac{0.07 \pi}{c}\right)^3 \left(1 - \frac{1.3}{h}\right)^3 \right]
+$$ {#eq-vol3_v1}
+
+#### Version 2
+$$
+\fBFT = \alpha + \beta c + \gamma \frac{\sqrt{c}}{h} + \fmax \left( \frac{\hdec}{\hdec + k} \right)^{1 + \rho} + \frac{\delta}{c^{\epsilon}}
+$$ {#eq-vol3_v2}
+
+#### Version 3
+$$
+\fBFT = \alpha + \beta c + \eta \hdec + \frac{\delta}{c^{\epsilon}}
+$$ {#eq-vol3_v3}
+
+#### Version 4
+$$
+\fBFT = \alpha + \beta c + \gamma \frac{\sqrt{c}}{h} + \eta \ln \left(\frac{\hdec}{h} \right) + \frac{\delta}{c^{\epsilon}}
+$$ {#eq-vol3_v4}
+
+#### Version 5
+$$
+\fBFT = \alpha + \beta c + \gamma \frac{\sqrt{c}}{h} + \eta \ln(\hdec) + \frac{\delta}{c^{\epsilon}}
+$$ {#eq-vol3_v5}
 
 ## Pistes explorables {#sec-pistes}
 
