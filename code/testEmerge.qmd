@@ -172,9 +172,6 @@ path_data = paste0(mnt_point, "/data_orig/")
 if (!dir.exists(path_data))
 	stop(paste0("Folder <", path_data, "> does not exist! Are you sure you mounted the good remote folder?"))
 
-if (list.files(path = path_data) != "EMERGE.RData")
-	stop("There should be only the file <EMERGE.RData> in the data_orig folder")
-
 load(paste0(path_data, "EMERGE.RData"))
 setDT(inra_arbres)
 setDT(codesforets)
@@ -619,6 +616,9 @@ data {
 	vector [N_new] hdn_new;
 	vector [N_new] slenderness_new;
 	vector [N_new] corrected_cyl_vol_new;
+
+	// Observations
+	vector [N_new] volume_m3_new;
 }
 
 parameters {
@@ -641,6 +641,8 @@ generated quantities {
 	vector[N_new] avg = (beta0[species_id] + b1[fct_type]*hdn_new + beta2[species_id]*slenderness_new) .*
 		corrected_cyl_vol_new;
 	array[N_new] real volume_new = normal_rng(avg, sigma);
+
+	real log_lik = normal_lpdf(volume_m3_new | avg, sigma);
 }
 ```
 
@@ -658,7 +660,8 @@ stanData_new = list(
 	fct_type = fct_type,
 	hdn_new = data_check[selected_sp, hdn],
 	slenderness_new = data_check[selected_sp, slenderness],
-	corrected_cyl_vol_new = data_check[selected_sp, corrected_cyl_vol]
+	corrected_cyl_vol_new = data_check[selected_sp, corrected_cyl_vol],
+	volume_m3_new = data_check[selected_sp, volume_m3]
 )
 
 posteriorVol = genQ$generate_quantities(fitted_params = fit$draws(inc_warmup = FALSE), data = stanData_new)
@@ -838,4 +841,30 @@ simulationOutput = simulateResiduals(fittedModel = test_lme4, plot = F, use.u = 
 # plotResiduals(simulationOutput, form = inra_arbres[, speciesName_sci])
 plotResiduals(simulationOutput)
 plotQQunif(simulationOutput)
+```
+
+## Heatmap
+
+```{r}
+library(interp)
+
+log_lik = posteriorVol$draws("log_lik")
+
+aa = data.table(log_lik = as.numeric(log_lik), b1 = as.numeric(fit$draws("b1[1]")),
+	beta2 = as.numeric(fit$draws("beta2[11]")))
+
+aa = aa[sample(x = seq_len(.N), size = 500, replace = FALSE)]
+
+si = interp(x = aa[, b1], y = aa[, beta2], z = aa[, log_lik],
+	method = "linear", duplicate = "mean")
+
+pdf("./heatmap.pdf")
+filled.contour(si,
+	plot.axes = {
+		axis(1)
+		axis(2, las = 1)
+		contour(si, add = TRUE, lwd = 2, axes = NULL)
+	}, xlab = "b", ylab = "d"
+)
+dev.off()
 ```
