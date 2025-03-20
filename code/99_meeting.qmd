@@ -79,29 +79,11 @@ format:
       - text: |
           \usepackage{unicode-math}
           \usepackage{siunitx}
+      - macros.tex
     number-sections: true
     link-citations: true
+    fig-pos: "H"
 ---
-
-<!-- Shortcut for text -->
-\newcommand{\ie}{\textit{i.e.},}
-\newcommand{\eg}{\textit{e.g.},}
-
-<!-- Shortcut for math -->
-\newcommand{\Fbft}{F_{\text{BFT}}}
-\newcommand{\Ftot}{F_{\text{tot}}}
-\newcommand{\fmax}{f_{\text{max}}}
-\newcommand{\hdec}{h_{\text{dec}}}
-\newcommand{\hpdec}{h'_{\text{dec}}}
-\newcommand{\hdn}{{\text{hdn}}}
-\newcommand{\Vbft}{V_{\text{BFT}}}
-\newcommand{\Vtot}{V_{\text{tot}}}
-
-<!-- Math operators -->
-<!-- \DeclareMathOperator{\diag}{diag} -->
-<!-- \DeclareMathOperator{\logit}{logit} -->
-<!-- \DeclareMathOperator{\mvn}{MVN} -->
-<!-- \DeclareMathOperator{\N}{\mathcal{N}} -->
 
 ## Info réunion:
 21.03.2025 à 10h00: [{{< fa solid at title="Réunion teams" >}} Lien Teams](https://teams.microsoft.com/l/meetup-join/19%3ameeting_MzNiZDA3ZmMtMDNjNy00NzE5LWFjNzMtNjcxZjcxZjBkNjhh%40thread.v2/0?context=%7b%22Tid%22%3a%223876b373-7e2c-4857-b024-53326b5b4bb2%22%2c%22Oid%22%3a%228ea3b1a4-f284-4393-957d-b97b8cc75dc7%22%7d)
@@ -136,11 +118,11 @@ Le projet Alamod, financé par le pepr FairCarboN, a pour objectif de faire une 
 Dans ce document, je présente les données (@sec-data) et les tarifs existants (@sec-hist), puis les pistes explorées/explorables pour le volume total et bois-fort tige (@sec-pistes).
 
 ## Données {#sec-data}
-Afin de comprendre les données, je définis d'abords ce qu'est un arbre dans la @sec-treePart puis je montre les distributions des données dans la @sec-dataDistrib
+Afin de comprendre les données, je définis d'abords ce qu'est un arbre dans la @sec-treePart puis je montre les distributions des données dans la @sec-dataDistrib.
 
 ### Définition d'un arbre IGN {#sec-treePart}
 
-Les arbres sont partitionnés en éléments hiérarchique par les inventaires forestiers nationaux (\eg @fig-partition). les Définitions des éléments peuvent varier entre inventaires, et ne contaignent pas forcément les mêmes données. Dans notre cas, les données proviennent de différents instituts et différentes périodes:
+Les arbres sont partitionnés en éléments hiérarchiques par les inventaires forestiers nationaux (\eg @fig-partition). Les définitions des éléments peuvent varier entre inventaires, et ne contaignent pas forcément les mêmes données. Dans notre cas, les données proviennent de différents instituts et différentes périodes:
 
 1.  Protocole Oudin, données préservées par l'INRA, entre 1930 and 1980 (<span class="egypt_red"></span> sur la @fig-map).
 
@@ -148,9 +130,9 @@ Les arbres sont partitionnés en éléments hiérarchique par les inventaires fo
 
 3.  L'Office National des Forêts (ONF), avec un protocole de 1972 et de 1983. Données non-utilisées pour l'instant car coordonées absentes et j'aimerais peut-être inclure des prédicteurs climatiques.
 
-4.  Institut Technologique Forêt, Cellulose, Bois-construction, Ameublement (FCBA), pas explorées pour l'instant.
+4.  Institut Technologique Forêt, Cellulose, Bois-construction, Ameublement (FCBA), non explorées pour l'instant.
 
-5.  L'Institut pour le développement forestier (IDF), R&D du Centre National de la Propriété Forestière et de l'Institut national de recherche en sciences et technologies pour l'environnement et l'agriculture (IRSTEA, maintenant INRAE), pas explorées pour l'instant.
+5.  L'Institut pour le développement forestier (IDF), R&D du Centre National de la Propriété Forestière et de l'Institut national de recherche en sciences et technologies pour l'environnement et l'agriculture (IRSTEA, maintenant INRAE), non explorées pour l'instant.
 
 ```{mermaid}
 %%| label: fig-partition
@@ -209,13 +191,13 @@ J'utilise les définitions (inspirées de @Gschwantner2009, voir @fig-partition 
 
 - Tronc: Tige principale avec dominance apicale
 	- Top tronc: La partie du tronc au dessus du diamètre de découpe \qty{7}{\centi\metre}
-	- Grume: Partie du tronc entre la souche et la top
+	- Grume: Partie du tronc entre la souche et le top
 	- Souche: Partie qui resterait après une coupe suivant des pratiques normales d'abattage.
 - Latéral:
 	- Grosses branches: Portions latérales avec diamètre supérieur ou égal à \qty{7}{\centi\metre}
 	- Petites branches: Portions latérales avec diamètre inférieur à \qty{7}{\centi\metre}
 
-![Partitionnement, avec le tronc (<span class="egypt_green"></span>), le top (<span class="egypt_yellow"></span>), grosses branches (<span class="egypt_blue"></span>), et petites branches (<span class="egypt_red"></span>)](img/tree_ign.png){#fig-treeDef}
+![Partitionnement, avec le tronc (vert), le top (jaune), grosses branches (bleues), et petites branches (rouges)](img/tree_ign.png){#fig-treeDef}
 
 ### Distribution des données {#sec-dataDistrib}
 ```{r}
@@ -228,6 +210,8 @@ options(max.print = 500)
 
 library(data.table)
 library(MetBrewer)
+library(cmdstanr)
+	register_knitr_engine(override = TRUE)
 library(inventR)
 library(stringi)
 library(terra)
@@ -263,7 +247,7 @@ coords_inra = vect(paste0(path_data, "coords_inra_full"))
 coords_swiss = vect(paste0(path_data, "coords_switzerland"))
 ```
 
-Le jeu de données est constitués principalement de *Quercus*, *Pinus*, et *Fagus* (voir @fig-data) et les parcelles couvrent la majeur partie du territoire français pour l'IFN tandis que les données du protocole Oudin sont beaucoup moins bien réparties sur le territoire (voir @fig-map).
+Le jeu de données est constitué principalement de *Quercus*, *Pinus*, et *Fagus* (voir @fig-data) et les parcelles couvrent la majeur partie du territoire français pour l'IFN tandis que les données du protocole Oudin sont beaucoup moins bien réparties (voir @fig-map).
 
 ```{r}
 #| label: fig-data
@@ -324,7 +308,7 @@ plot(italy, lwd = 2, add = TRUE)
 legend(x = "bottomleft", legend = c("Emerge", "NFI", "EFM"), fill = colours[c("inra", "nfi", "swiss")], bty = "n", inset = c(0, 0.1))
 ```
 
-Il y a aussi un biais dans la sélection des arbres en sus du biais géographique, comme le montre les figures de distribution des diamètres, des hauteurs, et des volumes (voir @fig-responses et @fig-responses2). Enfin, les données Emerge (C. Deleuze, *discussion*), comme les données suisse (Anne Herold-Bonardi, *discussion*), sont aussi biaisées sur la structure des arbres (principalement prélevé en futaies et taillis sous futaies) et ne sont pas représentatives des différents formes d'arbre sur le territoire. Les figures @fig-responses et @fig-responses2 montrent aussi clairement l'hétéroscédasticité (variance augmente avec la circonférence).
+Il y a aussi un biais dans la sélection des arbres en sus du biais géographique, comme le montre les figures de distribution des diamètres, des hauteurs, et des volumes (voir @fig-responses et @fig-responses2). Enfin, les données Emerge (C. Deleuze, *discussion*), comme les données suisse (Anne Herold-Bonardi, *discussion*), sont aussi biaisées sur la structure des arbres (principalement prélevés en futaies et taillis sous futaies) et ne sont pas représentatives des différents formes d'arbre sur le territoire. Les @fig-responses et @fig-responses2 montrent aussi clairement l'hétéroscédasticité (variance augmente avec la circonférence).
 
 ```{r}
 #| label: fig-distrib_circumferences
@@ -558,7 +542,7 @@ for (current_gen in ls_genus[10:17])
 
 ### Facteur de forme et robustesse
 
-Le facteur de forme, $\Ftot$, a été introduit par @Vallet2006 pour le volume aérien total, puis a été modifié lors du projet Emerge (@Deleuze2013_b) afin de corriger les problèmes survenant pour les petits arbres (explosion du facteur de forme pour compenser un dbh proche de 0). Ce nouveau facteur de forme, est défini ici pour le volume bois-fort (voir @nte-bft_tot) par:
+Le facteur de forme, $\Ftot$, a été introduit par @Vallet2006 pour le volume aérien total, puis a été modifié lors du projet Emerge [@Deleuze2013_b] afin de corriger les problèmes survenant pour les petits arbres (explosion du facteur de forme pour compenser un dbh proche de 0). Ce nouveau facteur de forme, est défini ici pour le volume bois-fort (voir @nte-bft_tot) par:
 $$
 \Fbft = \frac{4\pi \Vbft}{c^2h} \left( 1 - \frac{1.3}{h} \right)^2
 $$ {#eq-Fbft}
@@ -572,7 +556,7 @@ Dans @Vallet2006, le facteur de forme ne possède pas la correction $\left( 1 - 
 
 :::
 
-Dans cet section, je regarde si le facteur de forme est vraiment plus adapté et plus facile à manipuler que le volume direct. Dans la @sec-hdn, je reviens sur la définition de la robustesse, puis dans la @sec-ff j'étudie le facteur de forme. J'utilise les données du protocole Oudin [@Deleuze2013], mais ne garde que les 7 espèces présentes dans @Vallet2006. Le graphique ci-dessous tente de reproduire la figure 3 de @Vallet2006, mais il semble que les données ne soient pas tout à fait les mêmes. D'après [@Deleuze2013_b, les données de @Vallet2006 sont un sous-échantillon des données que nous avons à disposition, je suppose donc que ses deux jeux de données se ressembles suffisament pour pouvoir discuter de la robustesse et du facteur de forme.
+Dans cet section, je regarde si le facteur de forme est vraiment plus adapté et plus facile à manipuler que le volume direct. Dans la @sec-hdn, je reviens sur la définition de la robustesse, puis dans la @sec-ff j'étudie le facteur de forme. J'utilise les données du protocole Oudin [@Deleuze2013], mais ne garde que les 7 espèces présentes dans @Vallet2006. La @fig-fagSyl tente de reproduire la figure 3 de @Vallet2006, mais il semble que les données ne soient pas tout à fait les mêmes. D'après [@Deleuze2013_b], les données de @Vallet2006 sont un sous-échantillon des données que nous avons à disposition, je suppose donc que ses deux jeux de données se ressemblent suffisament pour pouvoir discuter de la robustesse et du facteur de forme.
 
 ```{r}
 #| label: fig-fagSyl
@@ -627,7 +611,7 @@ $$
 avec $c$ la circonférence à \qty{1.3}{\metre} et $h$ la hauteur. Mais d'où vient cette formule? Pour ça, il faut aller voir l'équation 4 de @Vallet2006 (une régression linéaire de $h$ en fonction de $c$):
 $$
 \log(h) = a + b \log(c).
-$$
+$$ {#eq-hdnRegLin}
 Il a trouvé que $b = 0.5$ pour la plupart des espèces, et donc:
 \begin{align*}
 	h &= \exp[a + 0.5 \log(c)] \\
@@ -660,7 +644,7 @@ forest_dt[, pred := predict(reg_lin[[speciesName_sci]], data.frame(circumference
 forest_dt[, pred_05 := reg_lin[[speciesName_sci]]$coefficients["(Intercept)"] + 0.5*log(circumference_m),
 	by = speciesName_sci]
 ```
-Les régressions linéaires sont satisfaisantes et les hypothèses des modèles linéaires satisfaites (me croire sur parole, mais je peux montrer les résidus). En revanche, contrairement à ce qui est annoncé dans @Vallet2006, les valeurs de $b$ ne sont pas forcément proche 0.5 (voir @tbl-regLin)!
+Les régressions linéaires sont satisfaisantes et les hypothèses des modèles linéaires satisfaites (me croire sur parole, mais je peux montrer les résidus). En revanche, contrairement à ce qui est annoncé dans @Vallet2006, les valeurs de $b$ ne sont pas forcément proche 0.5 (voir @tbl-regLin), bien que ce soit une approximation acceptable (voir @fig-regLin_comp).
 
 ```{r}
 #| label: tbl-regLin
@@ -688,7 +672,7 @@ coeff_dt |>
 	)
 ```
 
-Comme on peut le voir, utiliser la robustesse permet en partie de briser la relation linéaire entre $c$ et $h$ (on pouvait s'y attendre au vu de la formule!). Cependant, ce ratio ne semble pas être utilisé dans la littérature sur les volumes, de plus son nom anglais *hardiness coefficient* porte a confusion avec *frost hardiness*, *tree hardiness*, et *cold hardiness* qui réfèrent tous aux *hardiness zones*, à savoir la température minimale acceptée par une espèce. Dans ce cas, il vaut mieux travailler avec un autre nom, tel que *robustness*. A noter que l'élancement, *slenderness*, déjà utilisée dans Emerge (un peu à tort car combiné avec hdn... donc corrélations!) reste très corrélé à la circonférence. L'élancement correspond à remplacer le coefficient de regression par 1. A titre indicatif, je montre l'influence de remplacer la valeur du coefficient par $0.5$ dans la @fig-regLin_comp.
+Utiliser la robustesse au lieu de la hauteur, $h$ permet en partie de briser la relation linéaire avec la circonférence, $c$. Cependant, ce ratio ne semble pas être utilisé dans la littérature sur les volumes, de plus son nom anglais *hardiness coefficient* porte a confusion avec *frost hardiness*, *tree hardiness*, et *cold hardiness* qui réfèrent tous aux *hardiness zones*, à savoir la température minimale acceptée par une espèce. Dans ce cas, il vaut mieux travailler avec un autre nom, tel que *robustness*. A noter que l'élancement, *slenderness*, déjà utilisée dans Emerge (un peu à tort car combiné avec hdn... donc corrélations! Voir @sec-emerge) reste très corrélé à la circonférence. L'élancement correspond à remplacer le coefficient de regression par 1. A titre indicatif, je montre l'influence de remplacer la valeur du coefficient de régression $b$ (@eq-hdnRegLin) par $0.5$ dans la @fig-regLin_comp.
 
 ```{r}
 #| label: fig-regLin_comp
@@ -720,7 +704,7 @@ for (sp in species_vallet)
 ```
 
 ### Discussion sur le facteur de forme {#sec-ff}
-Le facteur de forme semble lui aussi peu utilisé dans la littérature sur les volumes (mais lire @Zhou2021). A titre d'exemple, les suisses (@Fischer2019, chap. 12) et les américains (@Westfall2023) utilisent directement le diamètre et la hauteur. L'avantage est que c'est simple, mais comme ces deux variables sont probablement corrélées, cela pose problème sur l'interprétation du modèle (les prédictions du modèle ne sont pas affectées en revanche). D'après la @fig-hdn, la robustesse semble une variable explicative prometteuse à utiliser en sus de la circonférence.
+Le facteur de forme semble lui aussi peu utilisé dans la littérature sur les volumes (mais lire @Zhou2021). A titre d'exemple, les suisses [@Fischer2019, chap. 12] et les américains [@Westfall2023] utilisent directement le diamètre et la hauteur. L'avantage est que c'est simple, mais comme ces deux variables sont probablement corrélées, cela pose problème sur l'interprétation du modèle (les prédictions du modèle ne sont pas affectées en revanche). D'après la @fig-hdn, la robustesse semble une variable explicative prometteuse à utiliser en sus de la circonférence.
 
 ```{r}
 #| label: fig-hdn
@@ -747,7 +731,7 @@ for (sp in species_vallet)
 }
 ```
 
-D'après François Morneau, un second avantage du facteur de forme est qu'il permet d'enlever l'hétéroscédasticité (@Morneau2016). Il est certain que l'hétéroscédasticité diminue (voir @fig-heterosced_1 et @fig-heterosced_2), cependant elle est suffisament présente pour faire échouer une méthode linéaire flexible telle qu'un GAM (Generalised Additive Model), comme le montre les résidus pour *Quercus robur* (voir @fig-heterosced_res). J'ai choisi cette espèce car elle est aussi dans @Morneau2010 et @Morneau2016. Les résidus ont été calculé via le package `DHARMa` qui fonctionne comme suit:
+D'après François Morneau, un second avantage du facteur de forme est qu'il permet d'enlever l'hétéroscédasticité [@Morneau2016]. Il est certain que l'hétéroscédasticité diminue (voir @fig-heterosced_1 et @fig-heterosced_2), cependant elle est suffisament présente pour faire échouer une méthode linéaire flexible telle qu'un GAM (Generalised Additive Model), comme le montre les résidus pour *Quercus robur* (voir @fig-heterosced_res). J'ai choisi cette espèce car elle est aussi dans @Morneau2010 et @Morneau2016. Les résidus ont été calculé via le package `DHARMa` qui fonctionne comme suit:
 
 1. Simule $n$ nouvelles réponses du modèle pour chaque observation (par défaut $n = 250$)
 2. Pour chaque observation, calcule la fonction de répartition (*cumulative density function, CDF*) des simulations correspondantes
@@ -801,13 +785,12 @@ axis(2, las = 1)
 ```{r}
 #| label: fig-heterosced_res
 #| fig-cap: "Résidus calculés avec `DHARMa`. Les régressions quantiles devraient suivrent les lignes horizontales"
-#| output: false
 DHARMa::plotResiduals(sim, quantreg = TRUE)
 ```
 
 ### Tarifs IFN et Emerge {#sec-tarifs_ifn}
 
-Les volumes BFT sont calculés avec des formules à trois entrées pour les arbres à mesures complètes avec différentes formules (équations (@eq-vol3_v1) -- (@eq-vol3_v5)) selon l'espèce cible, et à une entrée pour les arbres qui n'ont que la circonférence de mesurée.
+Les volumes BFT sont calculés avec des formules à trois entrées pour les arbres à mesures complètes (circonférence, hauteur, et hauteur de découpe relevés, voir @tbl-units) avec différentes formules ([@eq-vol3_v1] -- [@eq-vol3_v5]) selon l'espèce cible, et à une entrée pour les arbres qui n'ont que la circonférence de mesurée.
 
 | Variable | Définition | Unité |
 |--:|:------|:--|
@@ -826,7 +809,7 @@ Je réécris ci-dessous les équations des facteurs de formes à trois entrées 
 $$
 c = \min(c, 3).
 $$ {#eq-c}
-Autrement dit, dans les équations (@eq-vol3_v1) -- (@eq-vol3_v5), la circonférence maximale est de \qty{3}{\metre}. La seule exception est pour les conifères exotiques (ESS = 68), où cette limite supérieure ne s'applique pas. Les variables, $c$, $h$, et $\hdec$ sont définies dans @tbl-units.
+Autrement dit, dans les [@eq-vol3_v1] -- [@eq-vol3_v5], la circonférence maximale est de \qty{3}{\metre}. La seule exception est pour les conifères exotiques (ESS = 68), où cette limite supérieure ne s'applique pas. Les variables, $c$, $h$, et $\hdec$ sont définies dans @tbl-units.
 
 ::: {#wrn-lim_c .callout-warning}
 
@@ -864,7 +847,7 @@ $$
 \Fbft = \alpha + \beta c + \gamma \frac{\sqrt{c}}{h} + \eta \ln(\hdec) + \frac{\delta}{c^{\epsilon}}
 $$ {#eq-vol3_v5}
 
-Comme indiqué dans @wrn-lim_c, il a fallu borner ces équations. Ce n'est pas une solution satisfaisante et il vaut mieux contraindre lors de l'estimation des paramètres plutôt qu'à posteriori. C'est aussi un signe qu'il est instable de prédire un volume en dehors de l'intervalle de circonférences utilisées pour paramétrer le modèle.
+Comme indiqué dans @wrn-lim_c, il a fallu borner ces équations. Ce n'est pas une solution satisfaisante et il vaut mieux contraindre lors de l'estimation des paramètres plutôt qu'*a posteriori*. C'est aussi un signe qu'il est instable de prédire un volume en dehors de l'intervalle de circonférences utilisées pour paramétrer le modèle.
 
 #### Equations (une entrée)
 
@@ -892,17 +875,35 @@ Les formules sont différentes pour les peupleuraies et invoque l'âge du peuple
 
 ### Tarifs développés par Florence Gohon 'Renouveau des tarifs de cubage de l’Inventaire -- Ajustements 2023'
 
-Florence a reformulé les tarifs comme suit (@Gohon2023):
+Florence a reformulé les tarifs comme suit [@Gohon2023]:
 $$
-\Fbft = \alpha_i + \beta_i c + \gamma_i \frac{\sqrt{c}}{\hpdec} + \frac{\sqrt{\hpdec}}{c^2h} +
+\Fbft = \alpha_i + \beta_i c + \gamma_i \frac{\sqrt{c}}{\hpdec} + \delta_i \frac{\sqrt{\hpdec}}{c^2h} +
 	\eta_i \left( 1 - \frac{\hpdec}{h} \right),
 $$
-où $i$ est l'indice de l'espèce, et $\hpdec = \hdec$ s'il y a une découpe et $\htot$ sinon.
+où $i$ est l'indice de l'espèce, et $\hpdec = \hdec$ s'il y a une découpe et $h$ sinon.
 
-Ces nouveaux tarifs produisent des volumes bois-fort tige très similaires aux tarifs utilisés actuellement, avec en général une diminution de 0 à 3% pour les espèces les plus communes (@Gohon2023, Fig. 15) et ont l'avantage de n'utiliser qu'une formule pour toutes les espèces (contrairement aux cinq formules de la @sec-tarifs_ifn). Ces tarifs sont applicables tant que $\hdec$ est disponible.
+Ces nouveaux tarifs produisent des volumes bois-fort tige très similaires aux tarifs utilisés actuellement, avec en général une diminution de 0 à 3% pour les espèces les plus communes [@Gohon2023, Fig. 15] et ont l'avantage de n'utiliser qu'une formule pour toutes les espèces (contrairement aux cinq formules de la @sec-tarifs_ifn). Ces tarifs sont applicables tant que $\hdec$ est disponible (\ie depuis 2014).
 
 ## Pistes explorables {#sec-pistes}
 
+### Modèle d'Emerge {#sec-emerge}
+
+Je reprend ici le modèle d'Emerge [@Deleuze2014]:
+\begin{equation} \label{eq::deleuze}
+\begin{aligned}
+	\Ftot &\sim \N(\mu, \sigma) \\
+	\mu_{i, j} &= a_{i, j} + b_i \frac{\sqrt{c}}{h} + d_{i, j} \frac{h}{c} \\
+	a_{i, j} &\sim \N(\alpha_i, \sigma_{\alpha}) \\
+	d_{i, j} &\sim \N(\delta_i, \sigma_{\delta}),
+\end{aligned}
+\end{equation}
+où $\alpha_i$ et $\delta_i$ sont les 'interceptes de groupes' (une valeur pour les conifères et une valeur feuillus). Je tente de reproduire leur modèle en version Bayésienne en utilisant le langage Stan qui communique avec R via le package `cmdstanr`.
+
+La version bayésienne fonctionne bien, et est capable de prédire de nouvelles données (\eg prédiction sur des *Quercus robur/petraea*, @fig-bayesEmerge). En revanche, je trouve des valeurs de paramètres complètement différentes de @Deleuze2014 qui utilise le package `nlme`. Dans les 2 cas, les prédictions sur de nouvelles données sont bonnes, ce qui montre qu'il n'y a pas unicité du jeu de paramètre qui fonctionne. Cette intuition de corrélation entre paramètres est confirmée avec la heatmap du log likelihood posterieur dans l'espace de paramètre $b$ et $d$ (réponse à la robustesse et élancement, respectivement).
+
+![Prédictions sur des *Quercus robur/petraea* cubés en 2010 lors du projet Emerge](./testEmerge_files/figure-pdf/fig-posteriorPred-1.png){#fig-bayesEmerge width=80%}
+
+![Heatmap du log likelihood dans l'espace des paramètres suspectés d'être corrélés](./heatmap.pdf){#fig-heatmap}
 
 ## References
 
