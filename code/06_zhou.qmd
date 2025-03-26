@@ -20,7 +20,7 @@ keep-tex: true
 execute:
   error: true
   echo: false
-bibliography: "~/work/library/bib_file/references.bib"
+bibliography: ~/work/library/bib_file/references.bib
 lightbox:
   match: auto
 css: style.css
@@ -154,6 +154,44 @@ $$
 Y = Y_0 M^b,
 $$
 où $Y_0$ est une constante, et $b$ le *scaling exponent* ou *allometric exponent*. En physique, on parle de *scaling equation*, tandis que la bio utilise *allometric* [@daSilva2006].
+
+Partons maintenant de l'équation suivante qui est *mutatis mutandis* celle d'avant:
+$$
+y = a x^{\psi}
+$$ {#eq-allometric}
+
+Le but est de retrouver l'équation 6 de @Zhou2021. Pour ça, il suffit de log-dériver @eq-allometric:
+
+\begin{align*}
+	\log(y) &= \log(a) + \psi \log(x) \\
+	\frac{d\log(y)}{dx} &= \frac{\psi}{x} \\
+	\frac{1}{y}\frac{dy}{dx} &= \frac{\psi}{x} \\
+	\psi &= \frac{dy/y}{dx/x}
+\end{align*}
+
+The relative change in $y$, $dy/y$ is proportional to the relative change in $x$, $dx/x$, with a factor $\psi$. Then, maybe there is a finite difference method approx, to replace $dy$ by $\Delta y$, or maybe it is just a notation difference... I suspect that the authors kept it analytic and $\Delta$ is just a notation.
+
+Then, they assume that:
+$$
+\psi = 1 - \frac{kx}{p(\exp[kx] - 1)}
+$$
+
+I checked all the other equations, see notebook 2, 25.03.2025, p. 39--47. If I understood well, I should process as follow:
+
+1. Define $x$ as $\Vbft$
+2. Define $y$ as $\Vtot - \Vbft$, which is the crown volume
+3. Define $m = \max(x/y)$
+4. Define $d = \max(x/y) - \min(x/y)$
+5. Check a graph of $\frac{\Delta y/y}{\Delta x/x}$, where I need to sort by $x$ the data table I think... What does it do?
+
+### Crash test zone
+
+
+
+
+
+
+
 
 ### Data
 I have about \num{10000} felled trees, on which the bole volume, $V_b$, and crown volume, $V_c$, have been measured. The two volumes have a correlation of `{r} round(cor(forest_dt["broadleaf"][origin_data == "inra", bole_volume_m3], forest_dt["broadleaf"][origin_data == "inra", crown_volume_m3]), 3)` for broadleaves and of `{r} round(cor(forest_dt["conifer"][origin_data == "inra", bole_volume_m3], forest_dt["conifer"][origin_data == "inra", crown_volume_m3]), 3)` for conifers(see @fig-correl):
@@ -538,4 +576,17 @@ filled.contour(si,
 		contour(si, add = TRUE, lwd = 2, axes = NULL)
 	}
 )
+```
+
+
+
+```{r}
+#### Zhou equation 7
+eq_7_zhou = function(x, k, p)
+	return (1 - k*x/(p*exp(k*x) - 1))
+
+k = 0.23
+p = 1.2
+
+curve(eq_7_zhou(x, k, p), from = 0, to = 30, lwd = 2, col = "#CD212A")
 ```
