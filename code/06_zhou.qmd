@@ -76,10 +76,8 @@ library(MetBrewer)
 library(cmdstanr)
 	register_knitr_engine(override = TRUE)
 library(stringi)
-library(DHARMa)
-library(terra)
-library(MASS)
-library(gt)
+# library(pracma)
+# library(mgcv)
 
 source("./toolFunctions.R")
 ```
@@ -179,19 +177,201 @@ $$
 I checked all the other equations, see notebook 2, 25.03.2025, p. 39--47. If I understood well, I should process as follow:
 
 1. Define $x$ as $\Vbft$
-2. Define $y$ as $\Vtot - \Vbft$, which is the crown volume
+2. Define $y$ as $\Vtot - \Vbft$, which is the crown volume, or define $y$ as $\Vtot$ directly?
 3. Define $m = \max(x/y)$
 4. Define $d = \max(x/y) - \min(x/y)$
 5. Check a graph of $\frac{\Delta y/y}{\Delta x/x}$, where I need to sort by $x$ the data table I think... What does it do?
 
 ### Crash test zone
+```{r}
+## Subset data
+forest_dt = forest_dt[origin_data == "inra"]
+forest_dt[, nb_indiv := .N, by = speciesName_sci]
+forest_dt = forest_dt[nb_indiv > 50]
+
+setkey(forest_dt, speciesName_sci)
+ls_species = forest_dt[, unique(speciesName_sci)]
+```
 
 
+```{r}
+#### Test of the temp.stan model on the forest data
+## Compute ratio
+forest_dt[, total_ratio := bole_volume_m3/total_volume_m3]
+
+## Run model
+# Common variables
+n_chains = 4
+
+stanData = list(
+	N = forest_dt[, .N],
+	G = forest_dt[, length(unique(speciesName_sci))],
+	start = forest_dt[, .(start = .I[1]), by = speciesName_sci][, start],
+	end = forest_dt[, .(end = .I[.N]), by = speciesName_sci][, end],
+
+	# Predictors
+	SB = forest_dt[, bole_volume_m3], # Same as reconstruct one
+
+	# Data
+	AGB = forest_dt[, total_volume_m3]
+)
+
+# Compile model
+model = cmdstan_model("./temp.stan")
+
+# ff = function(x, s)
+# 	return (x*(1 - x)/s^2 - 1)
+
+# curve(ff(x), from = 0, to = 1, lwd = 2)
+# abline(h = 0.14, lwd = 2, col = "#CD212A")
 
 
+# Run
+if (!file.exists("./fit_zhou_beta.rds"))
+{
+	fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4))
+
+	# Save results
+	fit$save_output_files(dir = "./", basename = paste0("fit_zhou_beta"), random = FALSE)
+	saveRDS(fit, "./fit_zhou_beta.rds")
+} else {
+	fit = readRDS("./fit_zhou_beta.rds")
+}
+```
+
+```{r}
+# Plot output
+r_zhou = function(x, k, lambda)
+	return (x^k*exp(-x/lambda))
+
+# r_zhou = function(x, alpha, beta_, b, gamma)
+# 	return (alpha*exp(-beta_*x) * (x - b/alpha) + gamma*x + b)
+
+# r_zhou_max = function(alpha, beta_, b, gamma)
+# {
+# 	x_star = b/alpha + 1/beta_*(1 - pracma::lambertWp(-gamma/alpha * exp(beta_*b/alpha + 1)))
+# 	return (list(x_star = x_star, value = r_zhou(x_star, alpha, beta_, b, gamma)))
+# }
+
+## On test
+# curve(r_zhou(x, 0.35, 3.48, 0.79, -0.05), from = 0, to = 12, lwd = 2, col = "#CD212A")
+
+# test = r_zhou_max(0.35, 3.48, 0.79, -0.05)
+
+# abline(v = test[["x_star"]], lwd = 0.8, lty = 2, col = "#798789")
+# abline(h = test[["value"]], lwd = 0.8, lty = 2, col = "#798789")
+
+# ## Second test
+# curve(r_zhou(x, 0.969, 1.683, 0.129, -0.00388), from = 0, to = 12, lwd = 2, col = "#CD212A")
+
+# test = r_zhou_max(0.969, 1.683, 0.129, -0.00388)
+
+# abline(v = test[["x_star"]], lwd = 0.8, lty = 2, col = "#798789")
+# abline(h = test[["value"]], lwd = 0.8, lty = 2, col = "#798789")
+
+count = 0
+
+## --------------------------- START TEST
+plot_sp = function(fit, sp, count, stanData, forest = forest_dt[.(sp)], pred = FALSE, n_subsample = 10)
+{
+	# Get parameters
+	# selected_params = c(paste0("alpha[", count, "]"), paste0("beta_[", count, "]"),
+	# 	paste0("b[", count, "]"), paste0("gamma[", count, "]"))
+
+	# params = apply(X = fit$draws(c("alpha", "beta_", "b", "gamma"))[, , selected_params], MARGIN = 3, FUN = mean)
+
+	selected_params = c(paste0("k[", count, "]"), paste0("lambda[", count, "]"))
+
+	# params = apply(X = fit$draws(c("alpha", "beta_", "b", "gamma"))[, , selected_params], MARGIN = 3, FUN = mean)
+	params = apply(X = fit$draws(c("k", "lambda"))[, , selected_params], MARGIN = 3, FUN = mean)
+
+	start = stanData[["start"]][count]
+	end = stanData[["end"]][count]
+	n_sampling = fit$metadata()$iter_sampling
+
+	png(paste0("./fig/", sp, ".png"))
+	plot(forest[, bole_volume_m3], forest[, total_ratio], pch = 20, col = "#3355AA33", axes = FALSE,
+		xlab = "Bole volume", ylab = "Ratio bole/tot volumes", main = sp)
+	axis(1)
+	axis(2, las = 1)
+
+	curve(r_zhou(x, params[1], params[2]), col = "#CD212A", lwd = 2, add = TRUE, n = 501)
+	# curve(r_zhou(x, params[1], params[2], params[3], params[4]), col = "#CD212A", lwd = 2, add = TRUE, n = 501)
+
+	if (pred)
+	{
+		sim = fit$draws("r_gen")[sample(x = 1:n_sampling, size = n_subsample, replace = FALSE), , start:end]
+		for (i in 1:forest[, .N])
+			points(rep(forest[i, bole_volume_m3], n_chains*n_subsample),
+				as.numeric(sim[, , i]), col = "#335577AA", pch = ".")
+	}
+	dev.off()
+}
+
+## ---------------------------- END TEST
+
+for (sp in forest_dt[, unique(speciesName_sci)])
+{
+	count = count + 1
+	sp = ls_species[count]
+	forest_sub = forest_dt[.(sp)]
+
+	plot_sp(fit, sp, count, stanData, forest = forest_dt[.(sp)], pred = FALSE, n_subsample = 10)
+}
+```
+
+```{r}
+## Running a GAM model
+
+# fag_syl = gam(total_ratio ~ s(bole_volume_reconstruct_m3, bs = "cs"), nethod = "REML", data = forest_dt["Fagus sylvatica"])
+# x_seq = seq(min(tt$bole_volume_m3), max(tt$bole_volume_m3), length.out = 200)
+# y_pred = predict(fag_syl, newdata = data.frame(bole_volume_reconstruct_m3 = x_seq))
+
+# plot(tt[, bole_volume_m3], tt[, total_ratio], pch = 20, col = "#3355AA33", axes = FALSE,
+# 		xlab = "Bole volume", ylab = "Ratio bole/tot volumes", main = sp)
+# axis(1)
+# axis(2, las = 1)
+
+# lines(x_seq, y_pred, lwd = 2, col = "#CD212A")
+
+```
 
 
+## HEATMAP
+```{r}
+library(interp)
 
+# Function alpha + beta params from BETA distrib:
+f_apb = function(m, v) # mean and variance
+	return(m*(1 - m)/v - 1)
+
+N = 2000
+aa = data.table(m = runif(n = N, 0, 1), v = runif(n = N, 0, 0.25),
+	m2 = seq(0.01, 0.99, length.out = N), v2 = seq(0.01, 0.25, length.out = N))
+aa[, f := f_apb(m, v)]
+aa[, f2 := f_apb(m2, v2)]
+
+si = interp(x = aa[, m], y = aa[, v], z = aa[, f],
+	method = "linear", duplicate = "mean")
+
+si2 = interp(x = aa[, m2], y = aa[, v2], z = aa[, f2],
+	method = "linear", duplicate = "mean")
+
+filled.contour(si,
+	plot.axes = {
+		axis(1)
+		axis(2, las = 1)
+		contour(si, add = TRUE, lwd = 2, axes = NULL)
+	}, xlab = "m", ylab = "v"
+)
+```
+
+
+## COMPUTE Y/(1- Y) FROM GEISSINGER ADN PLOT IT
+
+```{r}
+plot(forest_dt[, bole_volume_m3], forest_dt[, crown_volume_m3], pch = 20, col = "#87898588")
+```
 
 ### Data
 I have about \num{10000} felled trees, on which the bole volume, $V_b$, and crown volume, $V_c$, have been measured. The two volumes have a correlation of `{r} round(cor(forest_dt["broadleaf"][origin_data == "inra", bole_volume_m3], forest_dt["broadleaf"][origin_data == "inra", crown_volume_m3]), 3)` for broadleaves and of `{r} round(cor(forest_dt["conifer"][origin_data == "inra", bole_volume_m3], forest_dt["conifer"][origin_data == "inra", crown_volume_m3]), 3)` for conifers(see @fig-correl):
@@ -548,11 +728,11 @@ plot(aa[, circumference_m^2*height/(4*pi)], aa[, total_volume_m3], pch = 19, cex
 
 library(interp)
 
-aa <- aa[!duplicated(cbind(aa$circumference_m, aa$height))]
+aa = aa[!duplicated(cbind(aa$circumference_m, aa$height))]
 aa = aa[sample(x = seq_len(.N), size = 500, replace = FALSE)]
 
 
-si <- interp(x = aa[, circumference_m], y = aa[, height], z = aa[, bole_volume_m3],
+si = interp(x = aa[, circumference_m], y = aa[, height], z = aa[, bole_volume_m3],
 	method = "linear", duplicate = "mean")
 
 filled.contour(si,
@@ -566,7 +746,7 @@ filled.contour(si,
 
 
 
-si <- interp(x = aa[, circumference_m], y = aa[, height], z = aa[, bole_volume_m3],
+si = interp(x = aa[, circumference_m], y = aa[, height], z = aa[, bole_volume_m3],
 	method = "linear", duplicate = "mean")
 
 filled.contour(si,
@@ -590,3 +770,53 @@ p = 1.2
 
 curve(eq_7_zhou(x, k, p), from = 0, to = 30, lwd = 2, col = "#CD212A")
 ```
+
+## EXAMPLE BETA REG
+```{r}
+library(betareg)
+
+n = 5e2
+set.seed(1969 - 08 - 18)
+dt = data.table(x1 = rnorm(n = n, mean = 0, sd = 1), x2 = rgamma(n = n, shape = 1^2/2.54, rate = 1/2.54))
+
+# Coeff lin reg
+b0 = 0.139
+b1 = 0.358
+b2 = -0.07
+
+# Precision
+phi = 4
+
+# Simulate data
+dt[, m := 1/(1 + exp(-(b0 + b1*x1 + b2*x2)))] # Logistic function
+
+dt[, y := rbeta(n = n, shape1 = phi*m, shape2 = phi*(1 - m))]
+
+range(dt$y)
+hist(dt$y)
+hist(dt$m)
+
+test = betareg(y ~ 1 + x1 + x2, data = dt, link = "logit")
+
+momo = cmdstan_model("betareg.stan")
+
+stanData = list(
+	N = dt[, .N],
+	x1 = dt[, x1],
+	x2 = dt[, x2],
+	Y = dt[, y]
+)
+
+tt = momo$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4))
+
+lazyPosterior(tt$draws("b0"), fun = dnorm, mean = 0, sd = 1)
+lazyPosterior(tt$draws("b1"), fun = dnorm, mean = 0, sd = 1)
+lazyPosterior(tt$draws("b2"), fun = dnorm, mean = 0, sd = 1)
+```
+
+## Study of the mean function 4th trial
+
+$$
+f(x; k, \lambda) = x^k \exp[-x/\lambda]
+$$
+
