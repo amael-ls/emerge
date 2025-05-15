@@ -1,0 +1,528 @@
+---
+title: "Reading @Zhou2021"
+date: today
+author: Amaël Le Squin
+date-format: iso
+filters:
+  - fontawesome
+  - siunitx-quarto
+  - imagify
+imagify:
+  header-includes: |
+    \usepackage{pgfplots}
+    \pgfplotsset{compat=1.18}
+    \usepgfplotslibrary{fillbetween}
+    \usetikzlibrary{positioning}
+    \usetikzlibrary{calc}
+  pdf-engine: lualatex
+pdf-engine: lualatex
+keep-tex: true
+execute:
+  error: false
+  echo: false
+bibliography:	
+  - "/home/ALe-Squin/work/library/bib_file/references.bib"
+lightbox:
+  match: auto
+css: style.css
+knitr:
+  opts_chunk: 
+    dev: ragg_png
+    crop: null
+    out.width: "70%"
+    fig.width: 6
+    fig.asp: 0.618
+    fig.align: "center"
+format:
+  html:
+    toc: true
+    include-in-header: mathjax.html
+    code-fold: true
+    df-print: paged
+    number-sections: true
+    theme:
+      light: cerulean
+      dark: darkly
+    margin: 5% 0;
+---
+
+\newcommand{\Vbft}{V_{\text{BFT}}}
+\newcommand{\Fbft}{F_{\text{BFT}}}
+\newcommand{\hdec}{h_{\text{dec}}}
+\newcommand{\fmax}{f_{\text{max}}}
+
+<!-- Math operators -->
+<!-- \DeclareMathOperator{\ln}{ln} -->
+
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+<!-- ---------------------------   LOADING DATA, R CODE   --------------------------- -->
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+
+```{r}
+#| output: false
+
+#### Clear space and load packages
+rm(list = ls())
+graphics.off()
+
+options(max.print = 500)
+
+library(data.table)
+library(MetBrewer)
+library(cmdstanr)
+	register_knitr_engine(override = TRUE)
+library(pdftools)
+library(stringi)
+library(DHARMa)
+
+source("./toolFunctions.R")
+```
+
+```{r}
+#### Load appendix pdf file
+pdf_file = pdf_text("~/work/library/suppInf/Zhou2021/app_1.pdf")
+
+#### Read the field data for modelling allometric relationship
+n_l = 294
+
+lanceolata_dt = data.table(plot_id = integer(n_l), lon = numeric(n_l), lat = numeric(n_l),
+	temp = numeric(n_l), precip = integer(n_l), sb = numeric(n_l), agb = numeric(n_l))
+
+counter = 0
+
+for (p in 2:7) # Pages of lanceolata data
+{
+	current_page = stri_split(str = pdf_file[p], regex = "\n")
+	start = 1
+	end = length(current_page[[1]])
+	if (p == 2)
+	{
+		while(start < length(current_page[[1]]) && !stri_detect(str = current_page[[1]][start], regex = "Plot No."))
+			start = start + 1
+		start = start + 1 # To get rid of "Plot No."
+	}
+
+	if (p == 7)
+	{
+		end = start
+		while(end < length(current_page[[1]]) &&
+			!stri_detect(str = current_page[[1]][end], regex = "2. Field data for model test"))
+			end = end + 1
+		end = end - 1 # To remove the line "2. Field data for model test"
+	}
+
+	current_page = current_page[[1]][start:end]
+	for (r in seq_along(current_page)) # r is the row
+	{
+		current_line = stri_split(str = current_page[r], regex = " ", simplify = TRUE)
+		current_line = stri_split(str = current_line, regex = "\t", simplify = FALSE)
+		current_line = unlist(current_line[current_line != ""])
+		current_line = current_line[current_line != ""]
+
+		if (length(current_line) == 7)
+		{
+			counter = counter + 1
+			values = as.numeric(current_line)
+			lanceolata_dt[counter, colnames(lanceolata_dt) := as.list(values)]
+		}
+	}
+}
+
+#### Read the Field data for model test
+n = 307
+
+forest_dt = data.table(plot_id = integer(n), dom_sp = character(n), dbh_cm = numeric(n), height_m = numeric(n),
+	tree_dens = numeric(n), volume = numeric(n), sb = numeric(n), agb = numeric(n))
+
+counter = 0
+
+for (p in 7:14) # Pages of lanceolata data
+{
+	current_page = stri_split(str = pdf_file[p], regex = "\n")
+	start = 1
+	end = length(current_page[[1]])
+	if (p == 7)
+	{
+		while(start < length(current_page[[1]]) && !stri_detect(str = current_page[[1]][start], regex = "Plot No."))
+			start = start + 1
+		start = start + 1 # To get rid of "Plot No."
+	}
+
+	current_page = current_page[[1]][start:end]
+	for (r in seq_along(current_page)) # r is the row
+	{
+		current_line = stri_split(str = current_page[r], regex = " ", simplify = TRUE)
+		current_line = stri_split(str = current_line, regex = "\t", simplify = FALSE)
+		current_line = unlist(current_line[current_line != ""])
+		current_line = current_line[current_line != ""]
+
+		if (length(current_line) == 9)
+		{
+			counter = counter + 1
+			values_num = suppressWarnings(as.numeric(current_line)) # NAs introduced by coercion
+			sp = paste(current_line[2:3], collapse = " ")
+
+			forest_dt[counter, colnames(forest_dt) := c(list(values_num[1]), list(sp), as.list(values_num[4:9]))]
+		}
+	}
+}
+
+# Get genus (and group the rare ones)
+forest_dt[, genus := stri_split(str = dom_sp, regex = " ", simplify = TRUE)[, 1]]
+forest_dt[!(genus %in% c("Abies", "Cunninghamia", "Picea", "Quercus", "Robinia")), genus := "Evergreen"]
+
+forest_dt[genus %in% c("Abies", "Picea"), genus := "Abies and Picea"]
+forest_dt[genus %in% c("Quercus", "Robinia"), genus := "Quercus and Robinia"]
+
+setkey(forest_dt, genus)
+
+# Assin colours and pch
+ls_colours = met.brewer("Egypt")[1:4]
+names(ls_colours) = c("Abies and Picea", "Evergreen", "Cunninghamia", "Quercus and Robinia")
+
+ls_pch = c(0, 20, 3, 0)
+names(ls_pch) = c("Abies and Picea", "Evergreen", "Cunninghamia", "Quercus and Robinia")
+
+forest_dt[, colour := ls_colours[genus], by = genus]
+forest_dt[, pch := ls_pch[genus], by = genus]
+```
+
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+<!-- ---------------------------   MAIN CONTENT, R CODE   --------------------------- -->
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+
+## Introduction
+
+The aim of this small note is to sum-up the study of @Zhou2021 and to reproduce part of it. The data can be found in the first appendix of @Zhou2021, in a pdf format. They have been loaded using the `pdftools` package.
+
+## Reproducing the first figure of @Zhou2021
+
+For the Fig. 1 (a), reproduced below (@fig-1a), they use the following linear model (intercept is 0):
+$$
+	\text{AGB} = \beta_1 \text{SB} + \beta_2 \text{SB}^2 + \beta_3 \text{SB}^3 + \beta_4 \text{SB}^4.
+$$
+The coefficients' values are identical to what was found in @Zhou2021.
+
+```{r}
+## Linear model
+agb_mod = lm(agb ~ -1 + sb + I(sb^2) + I(sb^3) + I(sb^4), data = lanceolata_dt)
+f_pred = function(x, coeff = coef(agb_mod))
+	return (coeff %*% outer(1:4, x, function(p, x) x^p))
+```
+
+```{r}
+#| label: fig-1a
+## Plot
+plot(lanceolata_dt[, sb], lanceolata_dt[, agb], axes = FALSE, pch = 20, col = "#FFAF37", xlab = "SB", ylab = "AGB")
+axis(1)
+axis(2, las = 1)
+curve(f_pred, lwd = 2, col = "#CD212A", add = TRUE)
+```
+
+I do not know how Fig. 1 (b) was made... I used $k = 0.035$ and $p = 2$...
+
+```{r}
+## Fig. 1 (b)
+psi = function(x, k, p)
+{
+	if (p < 1)
+		stop("p must be larger than 1")
+	
+	if ((k < 0) || (k > 1))
+		stop("k must be between 0 and 1")
+	return (1 - k*x/(p*exp(k*x) - 1))
+}
+
+p = 2
+k = 0.035
+
+curve(psi(x, k, p), to = 200, xlab = "SB", ylab = "Allometric coeff", axes = FALSE, lwd = 2, col = "#FFAF37")
+axis(1)
+axis(2, las = 1)
+abline(h = 1, lty = 2, col = "#212121")
+```
+
+For the Fig. 1 (d), it is noteworthy to say that they removed an extrem value of 1200 for the stand biomass (`plot_id = 267`, *Picea likiangensis*).
+```{r}
+## Fig. 1 (d)
+x_max = forest_dt[sb < 800, max(sb)]
+
+r_zhou = function(x, m, d, k)
+	return (m - d*exp(-k*x))
+
+plot(forest_dt[sb < 800, sb], forest_dt[sb < 800, sb/agb], xlab = "SB", lwd = 2,
+	ylab = "Ratio SB to AGB (r)", axes = FALSE, col = forest_dt[, colour], pch = forest_dt[, pch])
+axis(1)
+axis(2, las = 1)
+abline(h = 0.9, lty = 2, col = "#212121")
+abline(h = 0.95, lty = 2, col = "#212121")
+polygon(x = c(0, 0, x_max, x_max), y = c(0.9, 0.95, 0.95, 0.9), col = "#A2A2A244")
+legend(x = "bottomright", legend = names(ls_colours), col = ls_colours, pch = ls_pch, bty = "n")
+
+curve(r_zhou(x, 0.893, 0.378, 0.0076), col = ls_colours["Abies and Picea"], lwd = 2, add = TRUE)
+curve(r_zhou(x, 0.905, 0.453, 0.0212), col = ls_colours["Cunninghamia"], lwd = 2, add = TRUE)
+curve(r_zhou(x, 0.890, 0.420, 0.0166), col = ls_colours["Evergreen"], lwd = 2, add = TRUE)
+curve(r_zhou(x, 0.917, 0.237, 0.0053), col = ls_colours["Quercus and Robinia"], lwd = 2, add = TRUE)
+
+# Extract the min, max, and diff of the ratio (m, n, and d params on Fig 1.c)
+bounds_dt = forest_dt[, .(m = min(sb/agb), M = max(sb/agb)), by = genus]
+bounds_dt[, d := M - m]
+
+bounds_dt[, c("M_print", "d_print") := lapply(X = .SD, FUN = round, digit = 3), by = genus, .SD = c("M", "d")]
+```
+
+## Estimating the parameters
+The equation 2 in @Zhou2021 represents the AGB in function of SB:
+$$
+	\text{AGB} = \frac{\text{SB}}{m - d \exp[-k\text{SB}]},
+$$
+where $m$ is the maximum of the ratio SB over AGB, and $d$ is the ratio span (\ie max - min). The parameter $k$ is to be estimated, while $m$ and $d$ are obtained from the data. However, I am unable to repoduce their values (see @tbl-table_1).
+
+To remove the effect of autocorrelation between SB and AGB (after all, SB is included in AGB), they define a new variable, $y = \text{AGB} - \text{SB}$. Watch out, $y$ denotes both this new variable and the old AGB in the article! I did not do anything like that here, and it still works...
+
+I am now going to estimate the parameters $m$, $k$, and $d$, using a Bayesian model. It is noteworthy that I failed to estimate the three parameters the first time: constraints and informative priors are necessary. I sent an e-mail to the corresponding authors of @Zhou2021; I will come back to the data problem later.
+
+```{stan output.var = "model", cache = TRUE}
+data {
+	// Dimensions
+	int <lower = 1> N; // Number of trees
+	int <lower = 1, upper = N> G; // Number of genus
+	array[G] int <lower = 1, upper = N> start; // Genus index start
+	array[G] int <lower = 1, upper = N> end; // Genus index end
+
+	// Predictors
+	vector[N] SB;
+
+	// Data
+	vector[N] AGB;
+}
+
+transformed data {
+	vector[N] ratio = SB ./ AGB;
+}
+
+parameters {
+	// Parameters k of Zhou2021 (Dynamic allometric scaling of tree biomass and size)
+	array[G] real <lower = 0, upper = 0.3> k;
+	array[G] real <lower = 0.7, upper = 1> m;
+	array[G] real <lower = 0.05, upper = m> d;
+
+	// Precision
+	real <lower = 0> phi;
+}
+
+transformed parameters {
+	vector [N] shape1;
+	vector [N] shape2;
+
+	for (i in 1:G)
+	{
+		shape1[start[i]:end[i]] = phi * (m[i] - d[i]*exp(-k[i]*SB[start[i]:end[i]]));
+		shape2[start[i]:end[i]] = phi*(1 - (m[i] - d[i]*exp(-k[i]*SB[start[i]:end[i]])));
+	}
+}
+
+model{
+	// Prior linear regression
+	target += normal_lpdf(k | 0, 0.1);
+	target += normal_lpdf(m | 0.85, 0.05);
+	target += normal_lpdf(d | 0.5, 0.15);
+	target += gamma_lpdf(phi | 0.01, 0.01); // 0.25^2/0.03, 0.25/0.03
+
+	// Likelihood
+	target += beta_lpdf(ratio | shape1, shape2);
+}
+
+generated quantities {
+	array[N] real r_gen = beta_rng(shape1, shape2);
+}
+```
+
+```{r}
+#| output: false
+
+# Values from Zhou 2021
+m_zhou = c("Abies and Picea" = 0.893, "Cunninghamia" = 0.905, "Evergreen" = 0.890, "Quercus and Robinia" = 0.917)
+d_zhou = c("Abies and Picea" = 0.378, "Cunninghamia" = 0.453, "Evergreen" = 0.420, "Quercus and Robinia" = 0.237)
+
+## Run model
+# Common variables
+n_chains = 4
+
+stanData = list(
+	N = forest_dt[, .N],
+	G = length(ls_colours),
+	start = forest_dt[, .(start = .I[1]), by = genus][, start],
+	end = forest_dt[, .(end = .I[.N]), by = genus][, end],
+
+	# Parameters from data
+	m = bounds_dt[, M], # m_zhou, bounds_dt[, M]
+	d = bounds_dt[, d], # d_zhou, bounds_dt[, d]
+
+	# Predictors
+	SB = forest_dt[, sb],
+
+	# Data
+	AGB = forest_dt[, agb]
+)
+
+# Run
+fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4))
+
+# Get k params
+k_vec = apply(X = fit$draws("k"), MARGIN = 3, FUN = mean)
+names(k_vec) = forest_dt[, unique(genus)] # Using this is safe, genus is a key
+
+k_vec_print = signif(k_vec, digit = 3)
+
+# Get m params
+m_vec = apply(X = fit$draws("m"), MARGIN = 3, FUN = mean)
+names(m_vec) = forest_dt[, unique(genus)] # Using this is safe, genus is a key
+
+m_vec_print = signif(m_vec, digit = 3)
+
+# Get d params
+d_vec = apply(X = fit$draws("d"), MARGIN = 3, FUN = mean)
+names(d_vec) = forest_dt[, unique(genus)] # Using this is safe, genus is a key
+
+d_vec_print = signif(d_vec, digit = 3)
+```
+
+### Posteriors for the parameter $m$
+```{r}
+#| label: fig-posterior_m
+#| fig-cap: Posterior of $m$ for the four groups
+#| fig-subcap:
+#|   - "Posterior of $m$ for Abies and Picea"
+#|   - "Posterior of $m$ for Cunninghamia"
+#|   - "Posterior of $m$ for Evergreen"
+#|   - "Posterior of $m$ for Quercus and Robinia"
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 4
+#| output: false
+
+lazyPosterior(draws = fit$draws("m[1]"), fun = dnorm, mean = 0.85, sd = 0.05)
+lazyPosterior(draws = fit$draws("m[2]"), fun = dnorm, mean = 0.85, sd = 0.05)
+lazyPosterior(draws = fit$draws("m[3]"), fun = dnorm, mean = 0.85, sd = 0.05)
+lazyPosterior(draws = fit$draws("m[4]"), fun = dnorm, mean = 0.85, sd = 0.05)
+```
+
+### Posteriors for the parameter $d$
+```{r}
+#| label: fig-posterior_d
+#| fig-cap: Posterior of $d$ for the four groups
+#| fig-subcap:
+#|   - "Posterior of $d$ for Abies and Picea"
+#|   - "Posterior of $d$ for Cunninghamia"
+#|   - "Posterior of $d$ for Evergreen"
+#|   - "Posterior of $d$ for Quercus and Robinia"
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 4
+#| output: false
+
+lazyPosterior(draws = fit$draws("d[1]"), fun = dnorm, mean = 0.5, sd = 0.15)
+lazyPosterior(draws = fit$draws("d[2]"), fun = dnorm, mean = 0.5, sd = 0.15)
+lazyPosterior(draws = fit$draws("d[3]"), fun = dnorm, mean = 0.5, sd = 0.15)
+lazyPosterior(draws = fit$draws("d[4]"), fun = dnorm, mean = 0.5, sd = 0.15)
+```
+
+### Posteriors for the parameter $k$
+```{r}
+#| label: fig-posterior_k
+#| fig-cap: Posterior of $k$ for the four groups
+#| fig-subcap:
+#|   - "Posterior of $k$ for Abies and Picea"
+#|   - "Posterior of $k$ for Cunninghamia"
+#|   - "Posterior of $k$ for Evergreen"
+#|   - "Posterior of $k$ for Quercus and Robinia"
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 4
+#| output: false
+
+lazyPosterior(draws = fit$draws("k[1]"), fun = dnorm, mean = 0, sd = 0.1)
+lazyPosterior(draws = fit$draws("k[2]"), fun = dnorm, mean = 0, sd = 0.1)
+lazyPosterior(draws = fit$draws("k[3]"), fun = dnorm, mean = 0, sd = 0.1)
+lazyPosterior(draws = fit$draws("k[4]"), fun = dnorm, mean = 0, sd = 0.1)
+```
+
+::: {#tbl-table_1 .borderless .hover}
+
+| species type        | m     | m (mine) | d     | d (mine) | k    | k (mine) |
+|--------------------:|:------|:---------|:------|:---------|:-----|----------|
+| Cunninghamia        | 0.905 | `{r} bounds_dt["Cunninghamia", M_print]` | 0.453 | `{r} bounds_dt["Cunninghamia", d_print]` | -0.0212 | `{r} k_vec_print["Cunninghamia"]` |
+| Abies and Picea     | 0.893 | `{r} bounds_dt["Abies and Picea", M_print]` | 0.378 | `{r} bounds_dt["Abies and Picea", d_print]` | -0.0076 | `{r} k_vec_print["Abies and Picea"]` |
+| Quercus and Robinia | 0.917 | `{r} bounds_dt["Quercus and Robinia", M_print]` | 0.237 | `{r} bounds_dt["Quercus and Robinia", d_print]` | -0.0053 | `{r} k_vec_print["Quercus and Robinia"]` |
+| Evergreen     | 0.890 | `{r} bounds_dt["Evergreen", M_print]` | 0.420 | `{r} bounds_dt["Evergreen", d_print]` | -0.0166 | `{r} k_vec_print["Evergreen"]` |
+
+Values from @Zhou2021 *vs* mine
+
+:::
+
+## Residuals (gross and computed with DHARMa)
+
+```{r}
+#| label: fig-residuals
+#| fig-cap: Gross residuals
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 4
+
+## Residuals
+r_gen = fit$draws("r_gen")
+
+r_gen_mean = apply(X = r_gen, FUN = mean, MARGIN = 3)
+
+plot(forest_dt[, sb], r_gen_mean - forest_dt[, sb/agb], pch = 19, axes = FALSE, col = forest_dt[, colour],
+	xlab = "SB", ylab = "Residuals", xlim = c(0, max(forest_dt[sb < 800, sb])))
+axis(1)
+axis(2)
+abline(h = 0, lwd = 1.5, col = "#383838AA", lty = 2)
+```
+
+```{r}
+#| label: fig-dharma
+#| fig-cap: Residuals computed with DHARMa
+#| fig-subcap:
+#|   - "Abies and Picea"
+#|   - "Abies and Picea (with respect to SB)"
+#|   - "Cunninghamia"
+#|   - "Cunninghamia (with respect to SB)"
+#|   - "Evergreen"
+#|   - "Evergreen (with respect to SB)"
+#|   - "Quercus and Robinia"
+#|   - "Quercus and Robinia (with respect to SB)"
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 8
+
+n_sampling = fit$metadata()$iter_sampling
+
+simResp = fit$draws("r_gen")
+dim(simResp)
+
+# Reshape simResp as a matrix nobs x n_repetition
+simResp_matrix = matrix(data = 0, nrow = forest_dt[, .N], ncol = n_sampling*n_chains)
+for (obs in seq_len(forest_dt[, .N]))
+	for (chain in 1:n_chains)
+		simResp_matrix[obs, ] = simResp[, chain, obs] # One line of n_sampling*n_chains simulations per observation
+
+## Simulated residuals
+for (i in seq_along(stanData[["start"]]))
+{
+	start = stanData[["start"]][i]
+	end = stanData[["end"]][i]
+	sim_dharma = createDHARMa(simulatedResponse = simResp_matrix[start:end, ],
+		observedResponse = forest_dt[start:end, sb/agb],
+		fittedPredictedResponse = apply(simResp[, , start:end], MARGIN = 3, median),
+		integerResponse = FALSE)
+
+	# testDispersion(sim_dharma)
+
+	plot(sim_dharma, quantreg = TRUE)
+	plotResiduals(sim_dharma, forest_dt[start:end, sb], quantreg = TRUE, xlab = "Stand biomass")
+}
+```
+
