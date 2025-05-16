@@ -81,29 +81,28 @@ library(MetBrewer)
 library(cmdstanr)
 	register_knitr_engine(override = TRUE)
 library(stringi)
+library(DHARMa)
 
 ## Tool function
 source("./toolFunctions.R")
 
-plot_sp = function(fit, sp, count, stanData, forest = forest_dt[.(sp)], pred = FALSE, n_subsample = 10)
+plot_sp = function(fit, sp, count, stanData, fun, args, forest = forest_dt[.(sp)],
+	pred = FALSE, n_subsample = 10, folder = NULL)
 {
 	# Get parameters
-	selected_params = c(paste0("k[", count, "]"), paste0("lambda[", count, "]"))
-	params = apply(X = fit$draws(c("k", "lambda"))[, , selected_params], MARGIN = 3, FUN = mean)
-
 	start = stanData[["start"]][count]
 	end = stanData[["end"]][count]
 	n_sampling = fit$metadata()$iter_sampling
 
 	# Plot figure
-	# png(paste0("./fig/", sp, ".png"))
+	if (!is.null(folder))
+		png(paste0("./", folder, "/", sp, ".png"))
 	plot(forest[, bole_volume_m3], forest[, total_ratio], pch = 20, col = "#3355AA33", axes = FALSE,
 		xlab = "Bole volume", ylab = "Ratio bole/tot volumes", main = sp)
 	axis(1)
 	axis(2, las = 1)
 
-	curve(r_zhou(x, params[1], params[2]), col = "#CD212A", lwd = 2, add = TRUE, n = 501)
-
+	# Plot prediction
 	if (pred)
 	{
 		sim = fit$draws("r_gen")[sample(x = 1:n_sampling, size = n_subsample, replace = FALSE), , start:end]
@@ -111,7 +110,35 @@ plot_sp = function(fit, sp, count, stanData, forest = forest_dt[.(sp)], pred = F
 			points(rep(forest[i, bole_volume_m3], n_chains*n_subsample),
 				as.numeric(sim[, , i]), col = "#335577AA", pch = ".")
 	}
-	# dev.off()
+
+	# Plot fitted curve
+	if (length(args) == 2 && all(c("k", "lambda") == args))
+	{
+		selected_params = c(paste0("k[", count, "]"), paste0("lambda[", count, "]"))
+		params = apply(X = fit$draws(args)[, , selected_params], MARGIN = 3, FUN = mean)
+
+		curve(fun(x, params[1], params[2]), col = "#CD212A", lwd = 2, add = TRUE, n = 501)
+	}
+	
+	if (length(args) == 3 && all(c("beta_", "gamma", "b") == args))
+	{
+		selected_params = c(paste0("beta_[", count, "]"),
+			paste0("gamma[", count, "]"), paste0("b[", count, "]"))
+		params = apply(X = fit$draws(args)[, , selected_params], MARGIN = 3, FUN = mean)
+
+		curve(fun(x, 1, params[1], params[2], params[3]), col = "#CD212A", lwd = 2, n = 501, add = TRUE)
+	}
+
+	if (length(args) == 4 && all(c("alpha", "beta_", "gamma", "b") == args))
+	{
+		selected_params = c(paste0("alpha[", count, "]"), paste0("beta_[", count, "]"),
+			paste0("gamma[", count, "]"), paste0("b[", count, "]"))
+		params = apply(X = fit$draws(args)[, , selected_params], MARGIN = 3, FUN = mean)
+
+		curve(fun(x, params[1], params[2], params[3], params[4]), col = "#CD212A", lwd = 2, add = TRUE, n = 501)
+	}
+	if (!is.null(folder))
+		dev.off()
 }
 ```
 
@@ -307,8 +334,6 @@ generated quantities {
 	array[N] real r_gen = beta_rng(shape1, shape2);
 }
 
-
-
 ```
 
 ```{r}
@@ -348,6 +373,31 @@ if (!file.exists("./fit_zhou_beta.rds"))
 
 ### Results
 ```{r}
+#| label: fig-results_simple
+#| fig-cap: Correlation between the bole volume and the total volume
+#| fig-subcap:
+#|   - "Abies alba"
+#|   - "Carpinus betulus"     
+#|   - "Cedrus atlantica"
+#|   - "Fagus sylvatica"      
+#|   - "Fraxinus excelsior"
+#|   - "Larix decidua"        
+#|   - "Picea abies"
+#|   - "Pinus halepensis"     
+#|   - "Pinus laricio"
+#|   - "Pinus nigra"          
+#|   - "Pinus pinaster"
+#|   - "Pinus sylvestris"     
+#|   - "Pinus uncinata"
+#|   - "Pseudotsuga menziesii"
+#|   - "Quercus petraea"
+#|   - "Quercus rubra"        
+#|   - "Quercus sp."
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 4
+#| layout-ncol: 2
+
 # Plot output
 r_zhou = function(x, k, lambda)
 	return (x^k*exp(-x/lambda))
@@ -358,9 +408,252 @@ for (sp in forest_dt[, unique(speciesName_sci)])
 {
 	count = count + 1
 	sp = ls_species[count]
-	forest_sub = forest_dt[.(sp)]
 
-	plot_sp(fit, sp, count, stanData, forest = forest_dt[.(sp)], pred = FALSE, n_subsample = 10)
+	plot_sp(fit, sp, count, stanData, fun = r_zhou, args = c("k", "lambda"), pred = TRUE, n_subsample = 1)
 }
 ```
 
+It seems that this function is not flexible enough (see results in @fig-results_simple)... I switch to a more flexible function (see @fig-flexible_fct) with four parameters:
+$$
+\mu(x; \alpha, \beta, \gamma, b) = \alpha \exp[-\beta x] (x - b/\alpha) + \gamma x + b.
+$$
+However, 4 parameters seems to be impossible to fit (too many degrees of freedom I think) and so I fix $\alpha = 1$. Indeed, this parameter is involved in the maximum height of the $\mu$, reached for:
+$$
+x^{*} = \frac{b}{\alpha} + \frac{1}{\beta} \left( 1 - W_p \left[ -\frac{\gamma}{\alpha} e^{\beta b/\alpha + 1} \right] \right),
+$$
+where $W_p$ is the positive branch of the Lambert function.
+
+::: {.callout-note }
+
+This value of $x^{*}$ assumes $\gamma < 0$ which is the case (I set that constraint in the model). The condition to use $W_p$ is also always satisfied: $-\gamma/\alpha e^{\beta b/\alpha + 1} > -e^{-1}$ as $\gamma < 0$ and $\alpha > 0$. For the constraitns and the calculus, see notebook 2, p. 64 (entry 2025.05.12).
+
+:::
+
+```{r}
+#| label: fig-flexible_fct
+#| fig-cap: Different shape of the flexible function $\mu$ for 7 values of $\alpha$ while the other parameters kept fixed
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 8.142857
+
+#### Should I keep alpha in the following ff function?
+ff = function(x, alpha, beta = 0.8, gamma = -0.04, b = 0.8)
+	return (alpha*exp(-beta*x) * (x - b/alpha) + gamma*x + b)
+
+curve(ff(x, 0.1), from = 0, to = 11, lwd = 3, col = met.brewer("Homer1")[1], ylim = c(0, 1), axes = FALSE, xlab = "x", ylab = "f")
+for (i in 2:7)
+	curve(ff(x, i/10), from = 0, to = 11, lwd = 3, col = met.brewer("Homer1")[i], add = TRUE)
+axis(1)
+axis(2, las = 1)
+legend(x = "topright", fill = met.brewer("Homer1"), legend = (1:7)/10, bty = "n")
+
+## ANSWER: I DO NOT KNOW, BUT I FOUND SOME CONSTRAINTS THAT COULD HELP THE MODEL
+```
+
+### Results with a more flexible function
+
+```{stan output.var = "betareg_flexible", cache = TRUE}
+functions {
+	vector r_zhou(vector x, real beta_, real gamma, real b)
+	{
+		return exp(-beta_*x) .* (x - b) + gamma*x + b; // Third version, linear trend, intercept = 0
+	}
+}
+
+data {
+	// Dimensions
+	int <lower = 1> N; // Number of trees
+	int <lower = 1, upper = N> G; // Number of genus
+	array[G] int <lower = 1, upper = N> start; // Genus index start
+	array[G] int <lower = 1, upper = N> end; // Genus index end
+
+	// Predictors
+	vector[N] SB;
+
+	// Data
+	vector[N] AGB;
+}
+
+transformed data {
+	vector[N] ratio = SB ./ AGB;
+
+	vector[G] SB_max;
+	for (i in 1:G)
+		SB_max[i] = max(SB[start[i]:end[i]]);
+}
+
+parameters {
+	// Parameters of the 'bumpy' function r_zhou
+	vector <lower = 0> [G] beta_;
+	vector <lower = 0, upper = 1> [G]  b;
+	vector <lower = -b ./ SB_max, upper = 0> [G] gamma; // I expect d to be negative
+
+	real <lower = 0> phi; // Precision (well kind of...)
+}
+
+transformed parameters {
+	vector [N] shape1;
+	vector [N] shape2;
+
+	for (i in 1:G)
+	{
+		shape1[start[i]:end[i]] = phi*r_zhou(SB[start[i]:end[i]], beta_[i], gamma[i], b[i]);
+		shape2[start[i]:end[i]] = phi*(1 - r_zhou(SB[start[i]:end[i]], beta_[i], gamma[i], b[i]));
+	}
+}
+
+model{
+	// Prior linear regression
+	target += normal_lpdf(beta_ | 0, 10);
+	target += normal_lpdf(b | 0.5, 0.15);
+	target += normal_lpdf(gamma | 0, 10);
+	
+	// Likelihood
+	target += beta_lpdf(ratio | shape1, shape2);
+}
+
+generated quantities {
+	array[N] real r_gen = beta_rng(shape1, shape2);
+}
+
+```
+
+```{r}
+## Run model
+# Common variables
+n_chains = 4
+
+stanData = list(
+	N = forest_dt[, .N],
+	G = forest_dt[, length(unique(speciesName_sci))],
+	start = forest_dt[, .(start = .I[1]), by = speciesName_sci][, start],
+	end = forest_dt[, .(end = .I[.N]), by = speciesName_sci][, end],
+
+	# Predictors
+	SB = forest_dt[, bole_volume_m3], # Same as reconstruct one
+
+	# Data
+	AGB = forest_dt[, total_volume_m3]
+)
+
+if (!file.exists("./fit_zhou_beta_flexible.rds"))
+{
+	fit = betareg_flexible$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4))
+
+	# Save results
+	fit$save_output_files(dir = "./", basename = paste0("fit_zhou_beta_flexible"), random = FALSE)
+	saveRDS(fit, "./fit_zhou_beta_flexible.rds")
+} else {
+	fit = readRDS("./fit_zhou_beta_flexible.rds")
+}
+```
+
+```{r}
+#| label: fig-results_flexible
+#| fig-cap: Results with the flexible function
+#| fig-subcap:
+#|   - "Abies alba"
+#|   - "Carpinus betulus"     
+#|   - "Cedrus atlantica"
+#|   - "Fagus sylvatica"      
+#|   - "Fraxinus excelsior"
+#|   - "Larix decidua"        
+#|   - "Picea abies"
+#|   - "Pinus halepensis"     
+#|   - "Pinus laricio"
+#|   - "Pinus nigra"          
+#|   - "Pinus pinaster"
+#|   - "Pinus sylvestris"     
+#|   - "Pinus uncinata"
+#|   - "Pseudotsuga menziesii"
+#|   - "Quercus petraea"
+#|   - "Quercus rubra"        
+#|   - "Quercus sp."
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 4
+#| layout-ncol: 2
+
+count = 0
+
+for (sp in forest_dt[, unique(speciesName_sci)])
+{
+	count = count + 1
+	sp = ls_species[count]
+
+	plot_sp(fit, sp, count, stanData, fun = ff, args = c("beta_", "gamma","b"), pred = TRUE, n_subsample = 1)
+}
+```
+
+### Residuals flexible model
+
+```{r}
+#| label: fig-residuals_flexible
+#| fig-cap: Residuals
+#| fig-subcap:
+#|   - "Abies alba"
+#|   - "Abies alba"
+#|   - "Carpinus betulus"
+#|   - "Carpinus betulus"
+#|   - "Cedrus atlantica"
+#|   - "Cedrus atlantica"
+#|   - "Fagus sylvatica" 
+#|   - "Fagus sylvatica" 
+#|   - "Fraxinus excelsior"
+#|   - "Fraxinus excelsior"
+#|   - "Larix decidua"
+#|   - "Larix decidua"
+#|   - "Picea abies"
+#|   - "Picea abies"
+#|   - "Pinus halepensis"
+#|   - "Pinus halepensis"
+#|   - "Pinus laricio"
+#|   - "Pinus laricio"
+#|   - "Pinus nigra"
+#|   - "Pinus nigra"
+#|   - "Pinus pinaster"
+#|   - "Pinus pinaster"
+#|   - "Pinus sylvestris"
+#|   - "Pinus sylvestris"
+#|   - "Pinus uncinata"
+#|   - "Pinus uncinata"
+#|   - "Pseudotsuga menziesii"
+#|   - "Pseudotsuga menziesii"
+#|   - "Quercus petraea"
+#|   - "Quercus petraea"
+#|   - "Quercus rubra"
+#|   - "Quercus rubra"
+#|   - "Quercus sp."
+#|   - "Quercus sp."
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 8
+#| layout-ncol: 1
+
+n_sampling = fit$metadata()$iter_sampling
+
+simResp = fit$draws("r_gen")
+dim(simResp)
+
+# Reshape simResp as a matrix nobs x n_repetition
+simResp_matrix = matrix(data = 0, nrow = forest_dt[, .N], ncol = n_sampling*n_chains)
+for (obs in seq_len(forest_dt[, .N]))
+	for (chain in 1:n_chains)
+		simResp_matrix[obs, ] = simResp[, chain, obs] # One line of n_sampling*n_chains simulations per observation
+
+## Simulated residuals
+for (i in seq_along(stanData[["start"]]))
+{
+	start = stanData[["start"]][i]
+	end = stanData[["end"]][i]
+	sim_dharma = createDHARMa(simulatedResponse = simResp_matrix[start:end, ],
+		observedResponse = forest_dt[start:end, total_ratio],
+		fittedPredictedResponse = apply(simResp[, , start:end], MARGIN = 3, median),
+		integerResponse = FALSE)
+
+	testDispersion(sim_dharma)
+
+	plot(sim_dharma, quantreg = TRUE)
+	plotResiduals(sim_dharma, forest_dt[start:end, bole_volume_m3], quantreg = TRUE)
+}
+```
