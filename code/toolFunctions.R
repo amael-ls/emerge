@@ -193,10 +193,11 @@ lazyPosterior = function(draws, fun = NULL, expand_bounds = FALSE, filename = NU
 
 	if (!is.null(fun))
 	{
-		if (!isTRUE(all.equal(fun, dnorm)) &&
+		if (!isTRUE(all.equal(fun, dunif)) && # Decreasing alphabetical order
+			!isTRUE(all.equal(fun, dnorm)) &&
 			!isTRUE(all.equal(fun, dlnorm)) &&
-			!isTRUE(all.equal(fun, dexp)) &&
 			!isTRUE(all.equal(fun, dgamma)) &&
+			!isTRUE(all.equal(fun, dexp)) &&
 			!isTRUE(all.equal(fun, dbeta))) # isFALSE will not work here, hence !isTRUE
 		{
 			stop("This function only accepts dnorm, dlnorm, dexp, dgamma, or dbeta as priors")
@@ -238,13 +239,20 @@ lazyPosterior = function(draws, fun = NULL, expand_bounds = FALSE, filename = NU
 	if (any(scaling_ind)) scaling = providedArgs[["scaling"]] else scaling = 1
 
 	# Get parameters for prior
-	if (isTRUE(all.equal(fun, dexp)))
+	if (isTRUE(all.equal(fun, dunif)))
 	{
-		if (!("rate" %in% names(providedArgs) && !("arg1" %in% names(providedArgs))))
-			stop("You must provide mean and sd for dnorm")
+		if ((!all(c("min", "max") %in% names(providedArgs))) && (!all(c("arg1", "arg2") %in% names(providedArgs))))
+			stop("You must provide min and max for dunif")
 
-		arg1 = ifelse("rate" %in% names(providedArgs), providedArgs[["rate"]], providedArgs[["arg1"]])
-		arg2 = NULL
+		if (all(c("min", "max") %in% names(providedArgs)))
+		{
+			arg1 = providedArgs[["min"]]
+			arg2 = scaling*providedArgs[["max"]]
+		} else {
+			print("args 1 and 2 provided; it is assumed that they are min and max, respectively")
+			arg1 = providedArgs[["arg1"]]
+			arg2 = scaling*providedArgs[["arg2"]]
+		}
 	}
 
 	if (isTRUE(all.equal(fun, dnorm)))
@@ -257,6 +265,7 @@ lazyPosterior = function(draws, fun = NULL, expand_bounds = FALSE, filename = NU
 			arg1 = providedArgs[["mean"]]
 			arg2 = scaling*providedArgs[["sd"]]
 		} else {
+			print("args 1 and 2 provided; it is assumed that they are mean and sd, respectively")
 			arg1 = providedArgs[["arg1"]]
 			arg2 = scaling*providedArgs[["arg2"]]
 		}
@@ -279,7 +288,7 @@ lazyPosterior = function(draws, fun = NULL, expand_bounds = FALSE, filename = NU
 			arg1 = providedArgs[["meanlog"]] + log(scaling)
 			arg2 = providedArgs[["sdlog"]]
 		} else {
-			print("args 1 and 2 provided; it is assumed they are meanlog and sdlog")
+			print("args 1 and 2 provided; it is assumed that they are meanlog and sdlog, respectively")
 			arg1 = providedArgs[["arg1"]] + log(scaling)
 			arg2 = providedArgs[["arg2"]]
 		}
@@ -308,10 +317,21 @@ lazyPosterior = function(draws, fun = NULL, expand_bounds = FALSE, filename = NU
 
 		if (all(c("arg1", "arg2") %in% names(providedArgs)))
 		{
-			print("args 1 and 2 provided; it is assumed they are shape and rate")
+			print("args 1 and 2 provided; it is assumed that they are shape and rate, respectively")
 			arg1 = providedArgs[["arg1"]]
 			arg2 = providedArgs[["arg2"]]/scaling
 		}
+	}
+
+	if (isTRUE(all.equal(fun, dexp)))
+	{
+		if (!("rate" %in% names(providedArgs) && !("arg1" %in% names(providedArgs))))
+			stop("You must provide rate for dunif")
+
+		arg1 = ifelse("rate" %in% names(providedArgs), providedArgs[["rate"]], providedArgs[["arg1"]])
+		if (arg1 %in% names(providedArgs))
+			print("arg 1 provided; it is assumed that it is the rate")
+		arg2 = NULL
 	}
 
 	if (isTRUE(all.equal(fun, dbeta)))
@@ -340,9 +360,9 @@ lazyPosterior = function(draws, fun = NULL, expand_bounds = FALSE, filename = NU
 
 		if (all(c("arg1", "arg2") %in% names(providedArgs)))
 		{
-			print("args 1 and 2 provided; it is assumed they are shape1 and shape2")
-			arg1 = providedArgs[["shape1"]]
-			arg2 = providedArgs[["shape2"]]
+			print("args 1 and 2 provided; it is assumed that they are shape1 and shape2, respectively")
+			arg1 = providedArgs[["arg1"]]
+			arg2 = providedArgs[["arg2"]]
 		}
 
 		max_y_prior = optimise(f = fun, interval = c(0, 1), maximum = TRUE, shape1 = arg1, shape2 = arg2)[["objective"]]
@@ -382,31 +402,8 @@ lazyPosterior = function(draws, fun = NULL, expand_bounds = FALSE, filename = NU
 	min_x = ifelse(min_x < 0, 1.1*min_x, 0.9*min_x) # To extend 10% from min_x
 	max_x = ifelse(max_x < 0, 0.9*max_x, 1.1*max_x) # To extend 10% from max_x
 
-	if (isTRUE(all.equal(fun, dexp)))
-	{
-		max_y_prior = optimise(f = fun, interval = c(min_x, max_x), maximum = TRUE, rate = arg1)[["objective"]]
-		if (expand_bounds)
-		{
-			check_min_bound = integrate(fun, lower = ifelse(min_x < 0, 10*min_x, -10*min_x), upper = min_x, rate = arg1,
-				subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
-			while (check_min_bound$value > 0.1)
-			{
-				min_x = ifelse(min_x < 0, 1.1*min_x, 0.9*min_x) # To extend 10% from min_x
-				check_min_bound = integrate(fun, lower = ifelse(min_x < 0, 10*min_x, -10*min_x), upper = min_x, rate = arg1,
-					subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
-			}
-
-			check_max_bound = integrate(fun, lower = max_x, upper = ifelse(max_x < 0, -10*max_x, 10*max_x), rate = arg1,
-				subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
-			while (check_max_bound$value > 0.1)
-			{
-				max_x = ifelse(max_x < 0, 0.9*max_x, 1.1*max_x) # To extend 10% from max_x
-				check_max_bound = integrate(fun, lower = max_x, upper = ifelse(max_x < 0, -10*max_x, 10*max_x), rate = arg1,
-					subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
-			}
-		}
-	}
-
+	if (isTRUE(all.equal(fun, dunif)))
+		max_y_prior = arg2 # Can be computed analytically  this one...
 
 	if (isTRUE(all.equal(fun, dnorm)))
 	{
@@ -483,6 +480,58 @@ lazyPosterior = function(draws, fun = NULL, expand_bounds = FALSE, filename = NU
 			}
 		}
 	}
+
+	if (isTRUE(all.equal(fun, dexp)))
+	{
+		max_y_prior = optimise(f = fun, interval = c(min_x, max_x), maximum = TRUE, rate = arg1)[["objective"]]
+		if (expand_bounds)
+		{
+			check_min_bound = integrate(fun, lower = ifelse(min_x < 0, 10*min_x, -10*min_x), upper = min_x, rate = arg1,
+				subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
+			while (check_min_bound$value > 0.1)
+			{
+				min_x = ifelse(min_x < 0, 1.1*min_x, 0.9*min_x) # To extend 10% from min_x
+				check_min_bound = integrate(fun, lower = ifelse(min_x < 0, 10*min_x, -10*min_x), upper = min_x, rate = arg1,
+					subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
+			}
+
+			check_max_bound = integrate(fun, lower = max_x, upper = ifelse(max_x < 0, -10*max_x, 10*max_x), rate = arg1,
+				subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
+			while (check_max_bound$value > 0.1)
+			{
+				max_x = ifelse(max_x < 0, 0.9*max_x, 1.1*max_x) # To extend 10% from max_x
+				check_max_bound = integrate(fun, lower = max_x, upper = ifelse(max_x < 0, -10*max_x, 10*max_x), rate = arg1,
+					subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
+			}
+		}
+	}
+
+	if (isTRUE(all.equal(fun, dbeta)))
+	{
+		max_y_prior = optimise(f = fun, interval = c(min_x, max_x), maximum = TRUE,
+			shape1 = arg1, shape2 = arg2)[["objective"]]
+		if (expand_bounds)
+		{
+			check_min_bound = integrate(fun, lower = ifelse(min_x < 0, 10*min_x, -10*min_x), upper = min_x, rate = arg1,
+				subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
+			while (check_min_bound$value > 0.1)
+			{
+				min_x = ifelse(min_x < 0, 1.1*min_x, 0.9*min_x) # To extend 10% from min_x
+				check_min_bound = integrate(fun, lower = ifelse(min_x < 0, 10*min_x, -10*min_x), upper = min_x, rate = arg1,
+					subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
+			}
+
+			check_max_bound = integrate(fun, lower = max_x, upper = ifelse(max_x < 0, -10*max_x, 10*max_x), rate = arg1,
+				subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
+			while (check_max_bound$value > 0.1)
+			{
+				max_x = ifelse(max_x < 0, 0.9*max_x, 1.1*max_x) # To extend 10% from max_x
+				check_max_bound = integrate(fun, lower = max_x, upper = ifelse(max_x < 0, -10*max_x, 10*max_x), rate = arg1,
+					subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
+			}
+		}
+	}
+	
 	if (!is.null(fun))
 		max_y = max(max_y, max_y_prior)
 	max_y = ifelse(max_y < 0, 0.9*max_y, 1.1*max_y) # To extend 10% from max_y
