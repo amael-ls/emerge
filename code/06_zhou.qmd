@@ -57,6 +57,7 @@ format:
 \newcommand{\Vbft}{V_{\text{BFT}}}
 \newcommand{\Fbft}{F_{\text{BFT}}}
 \newcommand{\Vtot}{V_{\text{tot}}}
+\newcommand{\Vzh}{V_{\text{Zhou}}}
 \newcommand{\hdec}{h_{\text{dec}}}
 \newcommand{\fmax}{f_{\text{max}}}
 
@@ -200,55 +201,17 @@ Pour l'instant, les tarifs utilisés par l'inventaire sont (facteurs de forme):
 - $\Fbft = \alpha + \beta c + \gamma \frac{\sqrt{c}}{h} + \eta \ln \left(\frac{\hdec}{h} \right) + \frac{\delta}{c^{\epsilon}}$
 - $\Fbft = \alpha + \beta c + \gamma \frac{\sqrt{c}}{h} + \eta \ln(\hdec) + \frac{\delta}{c^{\epsilon}}$
 
-Cependant, ces modèles sont peu interprétables physiquement et ressemble plus à un 'fit polynomial'. Dans les prochaines sections, je vais explorer des modèles plus simples plus compréhensibles physiquement en me basant sur la littérature. A voir si ça marche...
+Cependant, ces modèles sont peu interprétables physiquement et ressemble plus à un 'fit polynomial'. Ils ont aussi pour défaut de faire des prédictions peu fiable dès lors que la circonférence, $c$, se rapproche des bornes de l'intervalle de calibration. Il y a donc des rustines dans les scripts SQL. Cependant, je conserve ces tarifs de bois-fort tige pour l'instant, car il est très difficile de les modifier (problème complexe avec grande variabilité, inertie de l'historique des tarifs, rupture de série) et je n'ai aucune idée de modèle pour $\Vbft$!
 
-## Modèle 1: @Zhou2021
+Dans les prochaines sections, je vais explorer des modèles simples et compréhensibles physiquement pour le volume total en me basant sur la littérature. Le volume bois-fort tige sera la variable d'entrée, donc il faudra qu'elle soit fiable... Les modèles explorés (en cours d'exploration...) sont les suivants:
 
-### Quelques notes explicatives
+1. Ratio $\Vbft$ sur $\Vtot$ [@Zhou2021, @Longuetaud2013]
+2. Relation bizzare avec le volume $\Vzh$ (voir @sec-vzh)
+3. Un modèle conjoint (genre loi multi-lognormal??)
 
-L'idée de base de l'allométrie est qu'une variable biologique $Y$ est reliée à la masse $M$ d'un organisme par une power-law:
+## First model: ratio of $\Vbft$ over $\Vtot$
 
-$$
-Y = Y_0 M^b,
-$$
-où $Y_0$ est une constante, et $b$ le *scaling exponent* ou *allometric exponent*. En physique, on parle de *scaling equation*, tandis que la bio utilise *allometric* [@daSilva2006].
-
-Partons maintenant de l'équation suivante qui est *mutatis mutandis* celle d'avant:
-$$
-y = a x^{\psi}
-$$ {#eq-allometric}
-
-Le but est de retrouver l'équation 6 de @Zhou2021. Pour ça, il suffit de log-dériver @eq-allometric:
-
-\begin{align*}
-	\log(y) &= \log(a) + \psi \log(x) \\
-	\frac{d\log(y)}{dx} &= \frac{\psi}{x} \\
-	\frac{1}{y}\frac{dy}{dx} &= \frac{\psi}{x} \\
-	\psi &= \frac{dy/y}{dx/x}
-\end{align*}
-
-The relative change in $y$, $dy/y$ is proportional to the relative change in $x$, $dx/x$, with a factor $\psi$. Then, maybe there is a finite difference method approx, to replace $dy$ by $\Delta y$, or maybe it is just a notation difference... I suspect that the authors kept it analytic and $\Delta$ is just a notation.
-
-Then, they assume that:
-$$
-\psi = 1 - \frac{kx}{p(\exp[kx] - 1)}
-$$
-
-I checked all the other equations, see notebook 2, 25.03.2025, p. 39--47. If I understood well, I should process as follow:
-
-1. Define $x$ as $\Vbft$
-2. Define $y$ as $\Vtot - \Vbft$, which is the crown volume, or define $y$ as $\Vtot$ directly?
-3. Define $m = \max(x/y)$
-4. Define $d = \max(x/y) - \min(x/y)$
-5. Check a graph of $\frac{\Delta y/y}{\Delta x/x}$, where I need to sort by $x$ the data table I think... What does it do?
-
-TO FINISH, SUM-UP THE DISCUSSION WITH THE AUTHORS
-
-## Modèle 2: @Longuetaud2013
-
-### Quelques notes explicatives
-
-In this paper, the authors model the Volume Expansion Factor, $\text{VEF} = \Vtot/\Vbft$, in function of the bole volume. By definition, VEF is above 1. For large trees, it is common to see VEF decreasing around 1. They use a Gaussian, which is problematic as it can go below 1 for large trees, which does not make sense physically (total volume smaller than bole volume!). Therefore it must be done differently.
+In @Longuetaud2013, the authors model the Volume Expansion Factor, $\text{VEF} = \Vtot/\Vbft$, in function of the bole volume. By definition, VEF is above 1. For large trees, it is common to see VEF decreasing around 1. They use a Gaussian distribution, which is problematic as it can go below 1 for large trees, which does not make sense physically (total volume smaller than bole volume!). Therefore it must be done differently.
 
 ### A test model
 I model the opposite of the VEF, \ie $r = \Vbft/\Vtot$, which is by construction between 0 and 1. It represents the percentage of volume represented by the bole. A Beta-distribution seems perfect for that, it respects the bounds and accounts for heteroskedasticity. However, its parameters $\text{shape}_1$ and $\text{shape}_2$ are not intuitive. Fortunately, it is possible to reparametrise the Beta-distrib in function of mean and precision, $\phi$:
@@ -417,15 +380,15 @@ It seems that this function is not flexible enough (see results in @fig-results_
 $$
 \mu(x; \alpha, \beta, \gamma, b) = \alpha \exp[-\beta x] (x - b/\alpha) + \gamma x + b.
 $$
-However, 4 parameters seems to be impossible to fit (too many degrees of freedom I think) and so I fix $\alpha = 1$. Indeed, this parameter is involved in the maximum height of the $\mu$, reached for:
+However, 4 parameters seems to be impossible to fit (too many degrees of freedom I think). Indeed, this parameter is involved in the maximum height of the $\mu$, reached for:
 $$
 x^{*} = \frac{b}{\alpha} + \frac{1}{\beta} \left( 1 - W_p \left[ -\frac{\gamma}{\alpha} e^{\beta b/\alpha + 1} \right] \right),
 $$
-where $W_p$ is the positive branch of the Lambert function.
+where $W_p$ is the positive branch of the Lambert function, and is then also involved in the curvature. Thus, I fix $\alpha = 1$.
 
 ::: {.callout-note }
 
-This value of $x^{*}$ assumes $\gamma < 0$ which is the case (I set that constraint in the model). The condition to use $W_p$ is also always satisfied: $-\gamma/\alpha e^{\beta b/\alpha + 1} > -e^{-1}$ as $\gamma < 0$ and $\alpha > 0$. For the constraitns and the calculus, see notebook 2, p. 64 (entry 2025.05.12).
+This value of $x^{*}$ assumes $\gamma < 0$ which is the case (I set that constraint in the model). The condition to use $W_p$ is also always satisfied: $-\gamma/\alpha e^{\beta b/\alpha + 1} > -e^{-1}$ as $\gamma < 0$ and $\alpha > 0$. For the constraints and the calculus, see notebook 2, p. 64 (entry 2025.05.12).
 
 :::
 
@@ -657,3 +620,65 @@ for (i in seq_along(stanData[["start"]]))
 	plotResiduals(sim_dharma, forest_dt[start:end, bole_volume_m3], quantreg = TRUE)
 }
 ```
+
+## Second model: relation between $\Vzh$ and $\Vtot$
+
+This idea is based on the allometric scaling of tree biomass and size [@Zhou2021 ].
+
+::: {.callout-note}
+
+## Allometry 101
+
+The hypothesis of allometry is that a biological variable $Y$ is related to the mass $M$ of an organism by power-law:
+$$
+Y = Y_0 M^b,
+$$
+where $Y_0$ is a constant, and $b$ is the *scaling exponent* or *allometric exponent*. Physics uses *scaling equation*, while biology uses *allometric* [@daSilva2006].
+
+:::
+
+The equation of interest is the 6th from @zhou as everything derives from it. Starts from the following equation which is *mutatis mutandis* the allometric equation:
+$$
+y = a x^{\psi}.
+$$ {#eq-allometric}
+
+If I log-differentiate @eq-allometric, I get:
+\begin{align*}
+	\log(y) &= \log(a) + \psi \log(x) \\
+	\frac{d\log(y)}{dx} &= \frac{\psi}{x} \\
+	\frac{1}{y}\frac{dy}{dx} &= \frac{\psi}{x} \\
+	\psi &= \frac{dy/y}{dx/x},
+\end{align*}
+which is exactly equation 6 from @Zhou2021. In other words, the relative change in $y$, $dy/y$ is proportional to the relative change in $x$, $dx/x$, with a factor $\psi$. Maybe there is a finite difference method approx in @Zhou2021, to replace $dy$ by $\Delta y$, or maybe it is just a notation difference... I suspect that the authors kept it analytic and $\Delta$ is just a notation.
+
+Then, they assume that:
+$$
+\psi = 1 - \frac{kx}{p(\exp[kx] - 1)}.
+$$
+Starting from $\psi = \frac{dy/y}{dx/x}$, we get:
+\begin{align*}
+	\int \frac{dy}{y} &= \int \psi(x) \frac{dx}{x} \\
+	\ln(y) &= \ln(x) - \int \frac{k}{p \exp[kx] - 1} \, dx \\
+	&= \ln(x) - \ln(p - \exp[-kx]) + c,
+\end{align*}
+where $c$ is an integration constant. Now use exponetial to get:
+$$
+y = \omega x^{1 - \ln(p - \exp[-kx])/\ln(x)}
+$$
+which is the equation 1 of @Zhou2021, with $\Omega = \ln(p - \exp[-kx])/\ln(x)$. Then, to get the second equation of @Zhou, just (see his appendices) set $p = m/d$, compute many stuff, and you will reach:
+$$
+y = \frac{x}{m - d\exp[-kx]},
+$$
+\ie $m - d\exp[-kx]$ is the ratio $y/x$ (see notebook 2, 25.03.2025, p. 45--47 for more details).
+
+
+<!-- RESTART FROM HERE -->
+. If I understood well, I should process as follow:
+
+1. Define $x$ as $\Vbft$
+2. Define $y$ as $\Vtot - \Vbft$, which is the crown volume, or define $y$ as $\Vtot$ directly?
+3. Define $m = \max(x/y)$
+4. Define $d = \max(x/y) - \min(x/y)$
+5. Check a graph of $\frac{\Delta y/y}{\Delta x/x}$, where I need to sort by $x$ the data table I think... What does it do?
+
+TO FINISH, SUM-UP THE DISCUSSION WITH THE AUTHORS
