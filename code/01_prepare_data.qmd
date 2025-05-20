@@ -168,7 +168,6 @@ library(data.table)
 library(MetBrewer)
 library(inventR)
 library(stringi)
-library(hexbin)
 library(terra)
 library(gt)
 ```
@@ -356,8 +355,8 @@ I believe that it is important to know how the data are built! Here, `vtot` is t
 1. A first log, from the base level to either \qty{2.60}{\metre} or $h_{\text{dec}}$, measured using the cylinder formula:
 $$
 v_1 = \begin{cases}
-	\frac{2.60 c^2}{4 \pi} & \text{if } h_{\text{dec}} > 2.6 \\
-	\frac{h_{\text{dec}} c_{\text{med}}^2}{4 \pi} & \text{if } h_{\text{dec}} > 2.6
+	\frac{h_{\text{dec}} c_{\text{med}}^2}{4 \pi} & \text{if } h_{\text{dec}} < 2.6
+	\frac{2.60 c^2}{4 \pi} & \text{if } h_{\text{dec}} \geqslant 2.6 \\
 \end{cases}
 $$
 where $c_{\text{med}}$ is the median circumference measured at $h_{\text{dec}}/2$. Note that when $h_{\text{dec}} = 2.6$, the median circumference is not necessarily equal to $c$! The difference, remains however quite small (see @fig-dens_cmed).
@@ -395,13 +394,15 @@ nfi_data[is.na(v3), v3 := 0]
 nfi_data[, bole_volume_reconstruct_m3 := v1 + v2 + v3]
 nfi_data[, verif := (1 - r)*bole_volume_reconstruct_m3 - vtot] # This shows that the cull is removed from both v and vtot
 
+## Distribution of the volume diff and of hdec (taper height) for 'high' differences (> 1e-2)
 hist(nfi_data$verif)
 plot(nfi_data[abs(verif) > 1e-2, density(hdec)], xlab = "hdec", main = "", axes = FALSE, lwd = 3)
 abline(v = 2.6, lwd = 2, col = "#CD212A")
 axis(1)
 axis(2, las = 1)
 
-nfi_data[, c("v1", "v2", "v3", "d26", "dmed", "cmed", "ddec", "hdec", "verif") := NULL]
+## Remove columns of little interest
+nfi_data[, c("v1", "v2", "v3", "d26", "dmed", "cmed", "verif") := NULL]
 
 nfi_data = na.omit(nfi_data)
 
@@ -421,10 +422,24 @@ if (isTRUE(nfi_data[, all.equal(v, vtot, tol = 1e-5)]))
 
 ## Change column names
 setnames(nfi_data, new = c("species_code_nfi", "plot_id", "tree_id", "circumference_m", "height", "bole_volume_m3",
-	"x_lambert", "y_lambert", "year", "bole_volume_reconstruct_m3", "genus", "speciesName_sci", "fct_type"))
+	"taper_diameter", "taper_height", "x_lambert", "y_lambert", "year", "bole_volume_reconstruct_m3", "genus",
+	"speciesName_sci", "fct_type"))
+
+## Densities of circumference and height for taper_height < 2.6
+plot(nfi_data[taper_height <= 2.6, density(height)], xlab = "Height", main = "", axes = FALSE, lwd = 3)
+axis(1)
+axis(2, las = 1)
+
+plot(nfi_data[taper_height <= 2.6, density(circumference_m)], xlab = "Circumference", main = "", axes = FALSE, lwd = 3)
+axis(1)
+axis(2, las = 1)
+
+plot(nfi_data[taper_height <= 2.6, density(height/circumference_m)], xlab = "Slenderness", main = "", axes = FALSE, lwd = 3)
+axis(1)
+axis(2, las = 1)
 ```
 
-For most of the trees I find back the volume. The differences can be explained by some details I did not consider in this quick and dirty check, such as short trees (smaller than \qty{2.60}{\metre} which are computed differently, and some weird trees that are also handled differently).
+For most of the trees I find back the volume. I do not really know why some differences still persist, and I do not have much time to investigate.
 
 ### Coordinates
 
@@ -621,10 +636,13 @@ add_name = "_full"
 saveRDS(stanData, paste0(mnt_point, "data/stanData_nfi-inra", add_name, ".rds"))
 saveRDS(forest_dt, paste0(mnt_point, "data/nfi-inra_dt", add_name, ".rds"))
 saveRDS(ind_species, paste0(mnt_point, "data/ind_species_nfi-inra", add_name, ".rds"))
-writeVector(x = coords_inra, filename = paste0(mnt_point, "data/coords_inra", add_name), filetype = "ESRI Shapefile",
-	overwrite = TRUE)
-writeVector(x = coords_nfi, filename = paste0(mnt_point, "data/coords_nfi", add_name), filetype = "ESRI Shapefile",
-	overwrite = TRUE)
+if (!dir.exists(paste0(mnt_point, "data/coords_inra", add_name)))
+	writeVector(x = coords_inra, filename = paste0(mnt_point, "data/coords_inra", add_name), filetype = "ESRI Shapefile",
+		overwrite = TRUE)
+
+if (!dir.exists(paste0(mnt_point, "data/coords_nfi", add_name)))
+	writeVector(x = coords_nfi, filename = paste0(mnt_point, "data/coords_nfi", add_name), filetype = "ESRI Shapefile",
+		overwrite = TRUE)
 
 ## Random sub dataset
 add_name = ""
@@ -755,7 +773,7 @@ compare = merge.data.table(compare, emerge_2010_arbres[, .(tree, v_br_verif)],
 	by.x = "tree_id", by.y = "tree")
 ```
 
-My reconstruction matches the provided branch volumes except for the trees `{r} compare[abs(vol_tot_branch_m3 - v_br_verif) > 1e-5, tree_id]`. Note that I did like Christine Deleuze and her team: for the incomplete trees I use a density of \qty{1000}{\kilogram\per\cubic\metre} to convert the wet weight into a volume when branch's length or circumference are missing.
+My reconstruction matches the provided branch volumes except for `{r} compare[abs(vol_tot_branch_m3 - v_br_verif) > 1e-5, .N]` trees. Note that I did like Christine Deleuze and her team: for the incomplete trees I use a density of \qty{1000}{\kilogram\per\cubic\metre} to convert the wet weight into a volume when branch's length or circumference are missing.
 
 ### Join my reconstructions together
 
@@ -821,8 +839,7 @@ emerge_2010 = merge.data.table(emerge_2010, emerge_2010_arbres[, .(tree, id_code
 Menus bois?? Je fais comment pour reconstruire ça??? Comment ça a été calculé? Demandé à Christine Deleuze.
 
 ## Felled trees across Switzwerland 
-The data are described in @Didion2024. I reconstruct the volume as follow: TO CONTINUE DESCRIPTION
-
+Data similar to EMERGE has also been collected in Switzerland, spanning from 1888 and 1974 [@Didion2024]. It represents more than \num{40000} felled trees, with diameter measurements every two meters (when possible) up to the taper height of \qty{7}{\centi\metre}. All the trees have a diameter measured at \qty{1}{\metre}, \qty{3}{\metre}, \qty{5}{\metre}, and so on. The original data provided volumes, however the authors of @Didion2024 never succeded to reconstruct them fully (*personal comm.*). Therefore, they decided to let the reconstruction of the volume open. I reconstruct the bole volume using cylinders 
 
 ```{r}
 #### Reshape data
@@ -936,8 +953,9 @@ swiss_dt = merge.data.table(x = swiss_dt,
 
 ```{r}
 saveRDS(swiss_dt, paste0(mnt_point, "data/switzerland.rds"))
-writeVector(x = coords_swiss, filename = paste0(mnt_point, "data/coords_switzerland"), filetype = "ESRI Shapefile",
-	overwrite = TRUE)
+if (!dir.exists(paste0(mnt_point, "data/coords_switzerland")))
+	writeVector(x = coords_swiss, filename = paste0(mnt_point, "data/coords_switzerland"),
+		filetype = "ESRI Shapefile", overwrite = TRUE)
 ```
 
 ## Presentation of the data
@@ -1150,9 +1168,7 @@ select_genus = temp[, .N, by = .(genus, origin_data)][, .N, by = genus][N > 1, g
 temp = temp[genus %in% select_genus]
 
 setkey(temp, genus, origin_data)
-ls_genus = unique(temp[, genus])
-
-print(ls_genus)
+ls_genus = unique(temp[, genus]) # Insured that it is sorter by alphabetical order
 ```
 
 ::: {.callout-note collapse=true}
@@ -1254,3 +1270,42 @@ for (current_gen in ls_genus)
 ```
 
 ### Response plots, crown
+```{r}
+# --- Circumferences
+dd_in = density(forest_dt[origin_data == "inra", crown_volume_m3], n = 512, from = 0, to = 0.3) # Inra/Emerge data
+dd_ch = density(swiss_dt[, crown_volume_m3], n = 512, from = 0, to = 0.3) # swiss data
+
+range(dd_in$x)
+range(dd_ch$x)
+
+range(dd_in$y)
+range(dd_ch$y)
+
+plot(dd_in, col = colours["inra"], axes = FALSE, lwd = 3, xlab = "Crown volume (m)", main = "")
+polygon(c(dd_in$x, rev(dd_in$x)), c(rep(0, length(dd_in$x)), rev(dd_in$y)), col = paste0(colours["inra"], 44))
+
+lines(dd_ch, col = colours["swiss"], lwd = 3)
+polygon(c(dd_ch$x, rev(dd_ch$x)), c(rep(0, length(dd_ch$x)), rev(dd_ch$y)), col = paste0(colours["swiss"], 44))
+
+axis(1)
+axis(2, las = 1)
+legend(x = "topright", legend = c("Emerge", "EFM"), fill = colours[c("inra", "swiss")], bty = "n")
+```
+
+### Relation between crown and (merchantable) bole volume
+```{r}
+
+ch_inra = temp[CJ(unique(genus), c("inra", "swiss")), nomatch = 0]
+
+plot(ch_inra[, bole_volume_m3], ch_inra[, crown_volume_m3], col = ch_inra[, colour], pch = 19, lwd = 0, axes = FALSE,
+	xlab = "Bole volume", ylab = "Crown volume")
+axis(1)
+axis(2, las = 1)
+legend(x = "topright", legend = c("Emerge", "EFM"), fill = colours[c("inra", "swiss")], bty = "n")
+
+cor(ch_inra[.(unique(genus), "inra"), bole_volume_m3, nomatch = 0],
+	ch_inra[.(unique(genus), "inra"), crown_volume_m3, nomatch = 0])
+
+cor(ch_inra[.(unique(genus), "swiss"), bole_volume_m3, nomatch = 0],
+	ch_inra[.(unique(genus), "swiss"), crown_volume_m3, nomatch = 0])
+```
