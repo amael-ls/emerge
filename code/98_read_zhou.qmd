@@ -44,8 +44,14 @@ format:
       light: cerulean
       dark: darkly
     margin: 5% 0;
+  pdf:
+    mathspec: true
+    include-in-header:
+      - text: |
+          \usepackage{unicode-math}
 ---
 
+\newcommand{\ie}{\textit{i.e., }}
 \newcommand{\Vbft}{V_{\text{BFT}}}
 \newcommand{\Fbft}{F_{\text{BFT}}}
 \newcommand{\hdec}{h_{\text{dec}}}
@@ -271,18 +277,24 @@ bounds_dt[, d := M - m]
 bounds_dt[, c("M_print", "d_print") := lapply(X = .SD, FUN = round, digit = 3), by = genus, .SD = c("M", "d")]
 ```
 
-## Estimating the parameters
+## Estimating the parameters {#sec-params}
 The equation 2 in @Zhou2021 represents the AGB in function of SB:
 $$
 	\text{AGB} = \frac{\text{SB}}{m - d \exp[-k\text{SB}]},
-$$
-where $m$ is the maximum of the ratio SB over AGB, and $d$ is the ratio span (\ie max - min). The parameter $k$ is to be estimated, while $m$ and $d$ are obtained from the data. However, I am unable to repoduce their values (see @tbl-table_1).
+$$ {#eq-AGB}
+where $m$ is the maximum of the ratio SB over AGB, and $d$ is the ratio span (\ie max - min). In @Zhou2021, the parameter $k$ has been estimated with a linear regression, while $m$ and $d$ were obtained by optimising a cost function (Zhou Xiaolu, *discussion*). I try here to estimate all the parameters in a single model (see @tbl-table_1). It is noteworthy that estimating all three parameters simultaneously initially failed, highlighting the need for constraints and informative priors, and a relevant likelihood. The Gaussian is not adapted and was probably part of the failure of the first attempt. I now use a Beta distribution parametrised as follow:
+\begin{align*}
+	\text{shape}_1 &= \phi\mu, \\
+	\text{shape}_2 &= \phi(1 - \mu),
+\end{align*}
+where $\mu$ is the mean (defined by @eq-AGB), and $\phi$ is the precision (well, kind of... not exactly the inverse of the variance; but it increases when the variance decreases).
 
-To remove the effect of autocorrelation between SB and AGB (after all, SB is included in AGB), they define a new variable, $y = \text{AGB} - \text{SB}$. Watch out, $y$ denotes both this new variable and the old AGB in the article! I did not do anything like that here, and it still works...
+To remove the effect of autocorrelation between SB and AGB (after all, SB is included in AGB), the authors defined a new variable, $y = \text{AGB} - \text{SB}$. Watch out, $y$ denotes both this new variable and the old AGB in the article! I did not do anything like that here, and it still works...
 
-I am now going to estimate the parameters $m$, $k$, and $d$, using a Bayesian model. It is noteworthy that I failed to estimate the three parameters the first time: constraints and informative priors are necessary. I sent an e-mail to the corresponding authors of @Zhou2021; I will come back to the data problem later.
+I use the following Bayesian model to estimate the parameters $m$, $k$, and $d$:
 
 ```{stan output.var = "model", cache = TRUE}
+#| echo: true
 data {
 	// Dimensions
 	int <lower = 1> N; // Number of trees
@@ -388,7 +400,12 @@ names(d_vec) = forest_dt[, unique(genus)] # Using this is safe, genus is a key
 d_vec_print = signif(d_vec, digit = 3)
 ```
 
+## Results
+
 ### Posteriors for the parameter $m$
+
+An important difference with @Zhou2021 is that I constrained $m$ to be between 0.7 and 1 (see stan model in @sec-params), which is a much larger interval than theirs (restricted to 0.9 to 0.95---Xiaolu Zhou, *discussion*). I did it because I noticed that with a restricted interval, some values of $m$ had a tendency to accumulate towards the lower bound (0.9).
+
 ```{r}
 #| label: fig-posterior_m
 #| fig-cap: Posterior of $m$ for the four groups
@@ -409,6 +426,14 @@ lazyPosterior(draws = fit$draws("m[4]"), fun = dnorm, mean = 0.85, sd = 0.05)
 ```
 
 ### Posteriors for the parameter $d$
+
+The parameter $d$, which governs the span of the data and therefore will influence both steepness and maximum, is the one that shows the most uncertainty. I have not tried, but maybe I could rewrite the mean ratio, $\mu$ (see @eq-AGB) differently:
+
+$$
+	\mu = m - (m - y_0) \exp[-k\text{SB}],
+$$
+where $y_0$ would be the minimum.
+
 ```{r}
 #| label: fig-posterior_d
 #| fig-cap: Posterior of $d$ for the four groups
@@ -429,6 +454,7 @@ lazyPosterior(draws = fit$draws("d[4]"), fun = dnorm, mean = 0.5, sd = 0.15)
 ```
 
 ### Posteriors for the parameter $k$
+
 ```{r}
 #| label: fig-posterior_k
 #| fig-cap: Posterior of $k$ for the four groups
@@ -457,30 +483,13 @@ lazyPosterior(draws = fit$draws("k[4]"), fun = dnorm, mean = 0, sd = 0.1)
 | Quercus and Robinia | 0.917 | `{r} bounds_dt["Quercus and Robinia", M_print]` | 0.237 | `{r} bounds_dt["Quercus and Robinia", d_print]` | -0.0053 | `{r} k_vec_print["Quercus and Robinia"]` |
 | Evergreen     | 0.890 | `{r} bounds_dt["Evergreen", M_print]` | 0.420 | `{r} bounds_dt["Evergreen", d_print]` | -0.0166 | `{r} k_vec_print["Evergreen"]` |
 
-Values from @Zhou2021 *vs* mine
+Values from @Zhou2021 *vs* mine (defined as the mean of the posterior. Note that using the median would provide similar values)
 
 :::
 
-## Residuals (gross and computed with DHARMa)
+## Residuals (computed with DHARMa)
 
-```{r}
-#| label: fig-residuals
-#| fig-cap: Gross residuals
-#| fig-asp: 1
-#| out-width: 95%
-#| fig-width: 4
-
-## Residuals
-r_gen = fit$draws("r_gen")
-
-r_gen_mean = apply(X = r_gen, FUN = mean, MARGIN = 3)
-
-plot(forest_dt[, sb], r_gen_mean - forest_dt[, sb/agb], pch = 19, axes = FALSE, col = forest_dt[, colour],
-	xlab = "SB", ylab = "Residuals", xlim = c(0, max(forest_dt[sb < 800, sb])))
-axis(1)
-axis(2)
-abline(h = 0, lwd = 1.5, col = "#383838AA", lty = 2)
-```
+The residuals are simulated with the package `DHARMa`, and uses the posterior simulations from the stan model (see the block `generated quantities`). They are quite good, including when plotted agains SB.
 
 ```{r}
 #| label: fig-dharma
