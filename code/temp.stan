@@ -1,7 +1,7 @@
 functions {
-	vector r_zhou(vector x, real k, real lambda)
+	vector r_zhou(vector x, real beta_, real gamma, real b)
 	{
-		return x.^k .* exp(-x / lambda);
+		return exp(-beta_*x) .* (x - b) + gamma*x + b; // Third version, linear trend, intercept = 0
 	}
 }
 
@@ -21,12 +21,17 @@ data {
 
 transformed data {
 	vector[N] ratio = SB ./ AGB;
+
+	vector[G] SB_max;
+	for (i in 1:G)
+		SB_max[i] = max(SB[start[i]:end[i]]);
 }
 
 parameters {
-	// Parameters of the 'simple' function r_zhou (simple compared to the flexibility I want)
-	vector <lower = 0> [G] lambda;
-	vector <lower = 0, upper = exp(1) ./ lambda> [G] k;
+	// Parameters of the 'bumpy' function r_zhou
+	vector <lower = 0> [G] beta_;
+	vector <lower = 0, upper = 1> [G]  b;
+	vector <lower = -b ./ SB_max, upper = 0> [G] gamma; // I expect d to be negative
 
 	real <lower = 0> phi; // Precision (well kind of...)
 }
@@ -37,16 +42,16 @@ transformed parameters {
 
 	for (i in 1:G)
 	{
-		shape1[start[i]:end[i]] = phi*r_zhou(SB[start[i]:end[i]], k[i], lambda[i]);
-		shape2[start[i]:end[i]] = phi*(1 - r_zhou(SB[start[i]:end[i]], k[i], lambda[i]));
+		shape1[start[i]:end[i]] = phi*r_zhou(SB[start[i]:end[i]], beta_[i], gamma[i], b[i]);
+		shape2[start[i]:end[i]] = phi*(1 - r_zhou(SB[start[i]:end[i]], beta_[i], gamma[i], b[i]));
 	}
 }
 
 model{
-	// Priors
-	target += normal_lpdf(k | 0, 10);
-	target += normal_lpdf(lambda | 0, 10);
-	target += normal_lpdf(phi | 0, 10);
+	// Prior linear regression
+	target += normal_lpdf(beta_ | 0, 10);
+	target += normal_lpdf(b | 0.5, 0.15);
+	target += normal_lpdf(gamma | 0, 10);
 	
 	// Likelihood
 	target += beta_lpdf(ratio | shape1, shape2);
