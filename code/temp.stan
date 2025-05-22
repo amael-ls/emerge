@@ -1,7 +1,7 @@
 functions {
-	vector r_zhou(vector x, real beta_, real gamma, real b)
+	vector r_zhou(vector x, real m, real k, real d)
 	{
-		return exp(-beta_*x) .* (x - b) + gamma*x + b; // Third version, linear trend, intercept = 0
+		return m - d * exp(-k * x); // Ratio from zhou 2021
 	}
 }
 
@@ -13,27 +13,24 @@ data {
 	array[G] int <lower = 1, upper = N> end; // Genus index end
 
 	// Predictors
-	vector[N] SB;
+	vector[N] Vbft;
 
 	// Data
-	vector[N] AGB;
+	vector[N] Vtot;
 }
 
 transformed data {
-	vector[N] ratio = SB ./ AGB;
-
-	vector[G] SB_max;
-	for (i in 1:G)
-		SB_max[i] = max(SB[start[i]:end[i]]);
+	vector[N] ratio = Vbft ./ Vtot;
 }
 
 parameters {
-	// Parameters of the 'bumpy' function r_zhou
-	vector <lower = 0> [G] beta_;
-	vector <lower = 0, upper = 1> [G]  b;
-	vector <lower = -b ./ SB_max, upper = 0> [G] gamma; // I expect d to be negative
+	// Parameters m, d, and k from Zhou2021 (Dynamic allometric scaling of tree biomass and size)
+	array[G] real <lower = 0.7, upper = 1> m;
+	array[G] real <lower = 0.05, upper = m> d;
+	array[G] real <lower = 0, upper = 0.3> k;
 
-	real <lower = 0> phi; // Precision (well kind of...)
+	// Precision beta-regression Zhou
+	real <lower = 0> phi;
 }
 
 transformed parameters {
@@ -42,20 +39,22 @@ transformed parameters {
 
 	for (i in 1:G)
 	{
-		shape1[start[i]:end[i]] = phi*r_zhou(SB[start[i]:end[i]], beta_[i], gamma[i], b[i]);
-		shape2[start[i]:end[i]] = phi*(1 - r_zhou(SB[start[i]:end[i]], beta_[i], gamma[i], b[i]));
+		shape1[start[i]:end[i]] = phi * r_zhou(Vbft[start[i]:end[i]], m[i], k[i], d[i]);
+		shape2[start[i]:end[i]] = phi * (1 - r_zhou(Vbft[start[i]:end[i]], m[i], k[i], d[i]));
 	}
 }
 
 model{
-	// Prior linear regression
-	target += normal_lpdf(beta_ | 0, 10);
-	target += normal_lpdf(b | 0.5, 0.15);
-	target += normal_lpdf(gamma | 0, 10);
-	
+	// Prior Zhou formula
+	target += normal_lpdf(k | 0, 0.1);
+	target += normal_lpdf(m | 0.85, 0.05);
+	target += normal_lpdf(d | 0.5, 0.15);
+	target += gamma_lpdf(phi | 0.01, 0.01);
+
 	// Likelihood
 	target += beta_lpdf(ratio | shape1, shape2);
 }
+
 
 generated quantities {
 	array[N] real r_gen = beta_rng(shape1, shape2);
