@@ -88,7 +88,7 @@ library(DHARMa)
 source("./toolFunctions.R")
 
 plot_sp = function(fit, sp, count, stanData, fun, args, forest = forest_dt[.(sp)],
-	pred = FALSE, n_subsample = 10, folder = NULL)
+	pred = FALSE, n_subsample = 10, folder = NULL, add = TRUE)
 {
 	# Get parameters
 	start = stanData[["start"]][count]
@@ -118,7 +118,7 @@ plot_sp = function(fit, sp, count, stanData, fun, args, forest = forest_dt[.(sp)
 		selected_params = c(paste0("k[", count, "]"), paste0("lambda[", count, "]"))
 		params = apply(X = fit$draws(args)[, , selected_params], MARGIN = 3, FUN = mean)
 
-		curve(fun(x, params[1], params[2]), col = "#CD212A", lwd = 2, add = TRUE, n = 501)
+		curve(fun(x, params[1], params[2]), col = "#CD212A", lwd = 2, add = add, n = 501)
 	}
 	
 	if (length(args) == 3 && all(c("beta_", "gamma", "b") == args))
@@ -127,7 +127,15 @@ plot_sp = function(fit, sp, count, stanData, fun, args, forest = forest_dt[.(sp)
 			paste0("gamma[", count, "]"), paste0("b[", count, "]"))
 		params = apply(X = fit$draws(args)[, , selected_params], MARGIN = 3, FUN = mean)
 
-		curve(fun(x, 1, params[1], params[2], params[3]), col = "#CD212A", lwd = 2, n = 501, add = TRUE)
+		curve(fun(x, 1, params[1], params[2], params[3]), col = "#CD212A", lwd = 2, n = 501, add = add)
+	}
+
+	if (length(args) == 3 && all(c("m", "k", "d") == args))
+	{
+		selected_params = c(paste0("m[", count, "]"), paste0("k[", count, "]"), paste0("d[", count, "]"))
+		params = apply(X = fit$draws(args)[, , selected_params], MARGIN = 3, FUN = mean)
+
+		curve(fun(x, params[1], params[2], params[3]), col = "#CD212A", lwd = 2, n = 501, add = add)
 	}
 
 	if (length(args) == 4 && all(c("alpha", "beta_", "gamma", "b") == args))
@@ -136,7 +144,7 @@ plot_sp = function(fit, sp, count, stanData, fun, args, forest = forest_dt[.(sp)
 			paste0("gamma[", count, "]"), paste0("b[", count, "]"))
 		params = apply(X = fit$draws(args)[, , selected_params], MARGIN = 3, FUN = mean)
 
-		curve(fun(x, params[1], params[2], params[3], params[4]), col = "#CD212A", lwd = 2, add = TRUE, n = 501)
+		curve(fun(x, params[1], params[2], params[3], params[4]), col = "#CD212A", lwd = 2, add = add, n = 501)
 	}
 	if (!is.null(folder))
 		dev.off()
@@ -379,7 +387,7 @@ for (sp in forest_dt[, unique(speciesName_sci)])
 It seems that this function is not flexible enough (see results in @fig-results_simple)... I switch to a more flexible function (see @fig-flexible_fct) with four parameters:
 $$
 \mu(x; \alpha, \beta, \gamma, b) = \alpha \exp[-\beta x] (x - b/\alpha) + \gamma x + b.
-$$
+$$ {#eq-flexible}
 However, 4 parameters seems to be impossible to fit (too many degrees of freedom I think). Indeed, this parameter is involved in the maximum height of the $\mu$, reached for:
 $$
 x^{*} = \frac{b}{\alpha} + \frac{1}{\beta} \left( 1 - W_p \left[ -\frac{\gamma}{\alpha} e^{\beta b/\alpha + 1} \right] \right),
@@ -413,13 +421,13 @@ legend(x = "topright", fill = met.brewer("Homer1"), legend = (1:7)/10, bty = "n"
 ## ANSWER: I DO NOT KNOW, BUT I FOUND SOME CONSTRAINTS THAT COULD HELP THE MODEL
 ```
 
-### Results with a more flexible function
+### Results with a more flexible function {#sec-flexible}
 
 ```{stan output.var = "betareg_flexible", cache = TRUE}
 functions {
 	vector r_zhou(vector x, real beta_, real gamma, real b)
 	{
-		return exp(-beta_*x) .* (x - b) + gamma*x + b; // Third version, linear trend, intercept = 0
+		return exp(-beta_*x) .* (x - b) + gamma*x + b;
 	}
 }
 
@@ -614,8 +622,6 @@ for (i in seq_along(stanData[["start"]]))
 		fittedPredictedResponse = apply(simResp[, , start:end], MARGIN = 3, median),
 		integerResponse = FALSE)
 
-	testDispersion(sim_dharma)
-
 	plot(sim_dharma, quantreg = TRUE)
 	plotResiduals(sim_dharma, forest_dt[start:end, bole_volume_m3], quantreg = TRUE)
 }
@@ -623,7 +629,7 @@ for (i in seq_along(stanData[["start"]]))
 
 ## Second model: relation between $\Vzh$ and $\Vtot$
 
-This idea is based on the allometric scaling of tree biomass and size [@Zhou2021 ].
+This idea is based on the allometric scaling of tree biomass and size [@Zhou2021].
 
 ::: {.callout-note}
 
@@ -637,7 +643,7 @@ where $Y_0$ is a constant, and $b$ is the *scaling exponent* or *allometric expo
 
 :::
 
-The equation of interest is the 6th from @zhou as everything derives from it. Starts from the following equation which is *mutatis mutandis* the allometric equation:
+The equation of interest is the 6th from @Zhou2021 as everything derives from it. Starts from the following equation which is *mutatis mutandis* the allometric equation:
 $$
 y = a x^{\psi}.
 $$ {#eq-allometric}
@@ -669,16 +675,234 @@ which is the equation 1 of @Zhou2021, with $\Omega = \ln(p - \exp[-kx])/\ln(x)$.
 $$
 y = \frac{x}{m - d\exp[-kx]},
 $$
-\ie $m - d\exp[-kx]$ is the ratio $y/x$ (see notebook 2, 25.03.2025, p. 45--47 for more details).
+that is to say,
+$$
+	m - d\exp[-kx]
+$$ {#eq-zhou_fct}
+is the ratio $y/x$ (see notebook 2, 25.03.2025, p. 45--47 for more details). In `98_read_zhou.qmd`, I succeeded to reparametrise the model of @Zhou2021, using a beta distribution. I found similar parameters to what the authors reported.
 
+### Exploration of the data
 
-<!-- RESTART FROM HERE -->
-. If I understood well, I should process as follow:
+I checked out the data and it worth trying a fit of the ratio of bole volume over total volume by the function of Zhou (see @fig-zhouRatio, although the function @eq-zhou_fct will lack flexibility compared to @eq-flexible). However, a ratio of total volume over a cylindre volume seems difficult to fit (see @fig-ratio_vallet)! Note that this ratio is exactly what was done in @Vallet2006 (see `05_formFactor.qmd`).
 
-1. Define $x$ as $\Vbft$
-2. Define $y$ as $\Vtot - \Vbft$, which is the crown volume, or define $y$ as $\Vtot$ directly?
-3. Define $m = \max(x/y)$
-4. Define $d = \max(x/y) - \min(x/y)$
-5. Check a graph of $\frac{\Delta y/y}{\Delta x/x}$, where I need to sort by $x$ the data table I think... What does it do?
+```{r}
+forest_dt[, cyl_volume := circumference_m^2*height/(4 * pi)]
+forest_dt[, cyl_ratio := bole_volume_m3/cyl_volume]
+forest_dt[, vallet_ratio := total_volume_m3/cyl_volume]
 
-TO FINISH, SUM-UP THE DISCUSSION WITH THE AUTHORS
+# Set species colours within functional type (broadleaf/conifer)
+broad_cols = MetBrewer::met.brewer(name = "Redon", forest_dt[fct_type == "broadleaf", length(unique(speciesName_sci))])
+names(broad_cols) = forest_dt[fct_type == "broadleaf", unique(speciesName_sci)]
+conif_cols = MetBrewer::met.brewer(name = "Redon", forest_dt[fct_type == "conifer", length(unique(speciesName_sci))])
+names(conif_cols) = forest_dt[fct_type == "conifer", unique(speciesName_sci)]
+
+speciesCols = c(broad_cols, conif_cols)
+
+forest_dt[, sp_colour := speciesCols[speciesName_sci], by = speciesName_sci]
+```
+
+```{r}
+#| label: fig-zhouRatio
+#| fig-cap: "Ratio of bole volume on total volume"
+#| fig-subcap:
+#|   - "Broadleaves"
+#|   - "Conifers"
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 8
+#| layout-ncol: 1
+
+# Broadleaves
+plot(forest_dt[fct_type == "broadleaf", bole_volume_m3], forest_dt[fct_type == "broadleaf", total_ratio], pch = 20,
+	xlab = "Bole volume", ylab = "ratio BFT/tot", axes = FALSE, col = forest_dt[fct_type == "broadleaf", sp_colour])
+axis(1)
+axis(2, las = 1)
+legend(x = "bottomright", legend = forest_dt[fct_type == "broadleaf", unique(speciesName_sci)],
+	fill = broad_cols, bty = "n")
+
+# Conifers
+plot(forest_dt[fct_type == "conifer", bole_volume_m3], forest_dt[fct_type == "conifer", total_ratio], pch = 20,
+	xlab = "Bole volume", ylab = "ratio BFT/tot", axes = FALSE, col = forest_dt[fct_type == "conifer", sp_colour],
+	ylim = range(forest_dt[fct_type == "broadleaf", total_ratio]))
+axis(1)
+axis(2, las = 1)
+legend(x = "bottomright", legend = forest_dt[fct_type == "conifer", unique(speciesName_sci)],
+	fill = conif_cols, bty = "n")
+```
+
+```{r}
+#| label: fig-ratio_vallet
+#| fig-cap: "Ratio of total volume on a cylindre volume"
+#| fig-subcap:
+#|   - "Broadleaves"
+#|   - "Conifers"
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 8
+#| layout-ncol: 1
+
+# Broadleaves
+plot(forest_dt[fct_type == "broadleaf", circumference_m], forest_dt[fct_type == "broadleaf", vallet_ratio], pch = 20,
+	xlab = "Circumference", ylab = "ratio tot/cyl", axes = FALSE, col = forest_dt[fct_type == "broadleaf", sp_colour])
+axis(1)
+axis(2, las = 1)
+legend(x = "topright", legend = forest_dt[fct_type == "broadleaf", unique(speciesName_sci)],
+	fill = broad_cols, bty = "n")
+
+# Conifers
+plot(forest_dt[fct_type == "conifer", circumference_m], forest_dt[fct_type == "conifer", vallet_ratio], pch = 20,
+	xlab = "Circumference", ylab = "ratio tot/cyl", axes = FALSE, col = forest_dt[fct_type == "conifer", sp_colour],
+	ylim = range(forest_dt[fct_type == "broadleaf", vallet_ratio]))
+axis(1)
+axis(2, las = 1)
+legend(x = "topright", legend = forest_dt[fct_type == "conifer", unique(speciesName_sci)],
+	fill = conif_cols, bty = "n")
+```
+
+### Results
+
+I present the results only for the ratio of bole volume over total volume (see @fig-zhouRatio), I did not try for the ratio from @Vallet2006 (see @fig-ratio_vallet) as it is unpromising.
+
+```{r}
+## Run model
+# Common variables
+n_chains = 4
+
+stanData = list(
+	N = forest_dt[, .N],
+	G = forest_dt[, length(unique(speciesName_sci))],
+	start = forest_dt[, .(start = .I[1]), by = speciesName_sci][, start],
+	end = forest_dt[, .(end = .I[.N]), by = speciesName_sci][, end],
+
+	# Predictors
+	Vbft = forest_dt[, bole_volume_m3],
+
+	# Data
+	Vtot = forest_dt[, total_volume_m3]
+)
+
+zhou = cmdstan_model("./temp.stan")
+
+if (!file.exists("./fit_zhou.rds"))
+{
+	fit = zhou$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4))
+
+	# Save results
+	fit$save_output_files(dir = "./", basename = paste0("fit_zhou"), random = FALSE)
+	saveRDS(fit, "./fit_zhou.rds")
+} else {
+	fit = readRDS("./fit_zhou.rds")
+}
+```
+
+```{r}
+#| label: fig-results_zhou
+#| fig-cap: Results with Zhou's function (see zhou_fct)
+#| fig-subcap:
+#|   - "Abies alba"
+#|   - "Carpinus betulus"     
+#|   - "Cedrus atlantica"
+#|   - "Fagus sylvatica"      
+#|   - "Fraxinus excelsior"
+#|   - "Larix decidua"        
+#|   - "Picea abies"
+#|   - "Pinus halepensis"     
+#|   - "Pinus laricio"
+#|   - "Pinus nigra"          
+#|   - "Pinus pinaster"
+#|   - "Pinus sylvestris"     
+#|   - "Pinus uncinata"
+#|   - "Pseudotsuga menziesii"
+#|   - "Quercus petraea"
+#|   - "Quercus rubra"        
+#|   - "Quercus sp."
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 4
+#| layout-ncol: 2
+
+r_zhou = function(x, m, k, d)
+	return (m - d * exp(-k * x));
+	
+count = 0
+
+for (sp in forest_dt[, unique(speciesName_sci)])
+{
+	count = count + 1
+	sp = ls_species[count]
+
+	plot_sp(fit, sp, count, stanData, fun = r_zhou, args = c("m", "k","d"), pred = FALSE, n_subsample = 1)
+}
+```
+
+### Posteriors of the parameter $m$, $d$, and $k$ for *Abies alba* and *Fagus sylvatica*
+
+```{r}
+#| label: fig-posterior_m
+#| fig-cap: Posterior of $m$ for the four groups
+#| fig-subcap:
+#|   - "Posterior of $m$ for Abies alba"
+#|   - "Posterior of $m$ for Fagus sylvatica"
+#|   - "Posterior of $d$ for Abies alba"
+#|   - "Posterior of $d$ for Fagus sylvatica"
+#|   - "Posterior of $k$ for Abies alba"
+#|   - "Posterior of $k$ for Fagus sylvatica"
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 4
+#| output: false
+
+lazyPosterior(draws = fit$draws("m[1]"), fun = dnorm, mean = 0.85, sd = 0.05)
+lazyPosterior(draws = fit$draws("m[4]"), fun = dnorm, mean = 0.85, sd = 0.05)
+lazyPosterior(draws = fit$draws("d[1]"), fun = dnorm, mean = 0.5, sd = 0.15)
+lazyPosterior(draws = fit$draws("d[4]"), fun = dnorm, mean = 0.5, sd = 0.15)
+lazyPosterior(draws = fit$draws("k[1]"), fun = dnorm, mean = 0.0, sd = 0.1)
+lazyPosterior(draws = fit$draws("k[4]"), fun = dnorm, mean = 0.0, sd = 0.1)
+```
+
+### Residuals for *Abies alba* and *Fagus sylvatica*
+
+```{r}
+#| label: fig-residuals_zhou
+#| fig-cap: Residuals
+#| fig-subcap:
+#|   - "Abies alba"
+#|   - "Abies alba"
+#|   - "Fagus sylvatica" 
+#|   - "Fagus sylvatica" 
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 8
+#| layout-ncol: 1
+
+n_sampling = fit$metadata()$iter_sampling
+
+simResp = fit$draws("r_gen")
+dim(simResp)
+
+# Reshape simResp as a matrix nobs x n_repetition
+simResp_matrix = matrix(data = 0, nrow = forest_dt[, .N], ncol = n_sampling*n_chains)
+for (obs in seq_len(forest_dt[, .N]))
+	for (chain in 1:n_chains)
+		simResp_matrix[obs, ] = simResp[, chain, obs] # One line of n_sampling*n_chains simulations per observation
+
+## Simulated residuals
+for (i in c(1, 4))
+{
+	start = stanData[["start"]][i]
+	end = stanData[["end"]][i]
+	sim_dharma = createDHARMa(simulatedResponse = simResp_matrix[start:end, ],
+		observedResponse = forest_dt[start:end, total_ratio],
+		fittedPredictedResponse = apply(simResp[, , start:end], MARGIN = 3, median),
+		integerResponse = FALSE)
+
+	plot(sim_dharma, quantreg = TRUE)
+	plotResiduals(sim_dharma, forest_dt[start:end, bole_volume_m3], quantreg = TRUE)
+}
+```
+
+## Conclusion
+
+It seems that the best model so far, in terms of parameters uncertainty and residuals, is the the flexible model in @sec-flexible. Of course, properly selectioning a model requires PSIS-Leave-One-Out [@Vehtari2017].
+
+So now it is time to try a multivariate model, with both $\Vbft$ and $\Vtot$ as output variables. Indeed, with the above method, $\Vtot$ completely relies on $\Vbft$, which therefore must be as 'clean' as possible. Therefore it worth trying some models on $\Vbft$. I already started investigating multivariate models on simple examples in `04_test_multivariate.qmd`.
