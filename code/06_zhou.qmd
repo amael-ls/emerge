@@ -81,6 +81,7 @@ library(data.table)
 library(MetBrewer)
 library(cmdstanr)
 	register_knitr_engine(override = TRUE)
+library(inventR)
 library(stringi)
 library(DHARMa)
 
@@ -94,6 +95,7 @@ plot_sp = function(fit, sp, count, stanData, fun, args, forest = forest_dt[.(sp)
 	start = stanData[["start"]][count]
 	end = stanData[["end"]][count]
 	n_sampling = fit$metadata()$iter_sampling
+	n_chains = fit$num_chains()
 
 	# Plot figure
 	if (!is.null(folder))
@@ -485,6 +487,9 @@ model{
 
 generated quantities {
 	array[N] real r_gen = beta_rng(shape1, shape2);
+	array[N] real v_gen;
+	for (i in 1:N)
+		v_gen[i] = SB[i] / r_gen[i];
 }
 
 ```
@@ -900,6 +905,198 @@ for (i in c(1, 4))
 	plotResiduals(sim_dharma, forest_dt[start:end, bole_volume_m3], quantreg = TRUE)
 }
 ```
+
+It seems that the best model so far, in terms of parameters uncertainty and residuals, is the the flexible model in @sec-flexible. Of course, properly selectioning a model requires PSIS-Leave-One-Out [@Vehtari2017]. I will now check the differences of prediction for our model (see @eq-flexible) and @Vallet2006 for the 7 species that are in common.
+
+## Difference between @Vallet2006 and the newly developed allometries
+
+In this section, I check the differences of prediction for the 7 species used in @Vallet2006: *Abies alba* (silver fir), *Fagus sylvatica* (common beech), *Picea abies* (Norway spruce), *Pinus pinaster* (maritime pine), *Pinus sylvestris* (scots pine), *Pseudotsuga menziesii* (douglas fir), and *Quercus petraea* (sessile oak). I check the predictions on three different datasets:
+
+- The Emerge dataset that was used for @eq-flexible, which was also partially used (subset) by @Vallet2006.
+- The French NFI data for the six aformentionned species
+- An independent dataset from the Emerge project, collected in 2009-2010, that was not used to fit the models.
+
+### Comparison on the Emerge dataset
+
+```{r}
+## Extract average ratio bole/tot volume
+simVol = apply(X = fit$draws("v_gen"), MARGIN = 3, FUN = mean)
+
+## Compute average pred volume
+forest_dt[, my_predVolume := simVol]
+
+## Compute Vallet 2006 volume, among "chene", "hetre", "douglas", "epicea", "pin.sylvestre", "pin.maritime", "sapin"
+forest_dt["Fagus sylvatica", vallet_predVolume := TarVallet(c130 = circumference_m*100, htot = height, ess = "hetre")]
+
+## Plots
+# Pred vs obs
+plot(forest_dt["Fagus sylvatica", total_volume_m3], forest_dt["Fagus sylvatica", my_predVolume], pch = 20,
+	axes = FALSE, xlab = "Observed", ylab = "Predicted", col = "#FAB25544",
+	ylim = c(0, max(forest_dt["Fagus sylvatica", .(my_predVolume, vallet_predVolume)])))
+points(forest_dt["Fagus sylvatica", total_volume_m3], forest_dt["Fagus sylvatica", vallet_predVolume], pch = 20,
+	col = "#0F7BA244")
+axis(1)
+axis(2, las = 1)
+abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
+legend(x = "topleft", legend = c("Mine", "Vallet"), fill = c("#FAB255", "#0F7BA2"), bty = "n")
+
+# Mine vs Vallet
+plot(forest_dt["Fagus sylvatica", vallet_predVolume], forest_dt["Fagus sylvatica", my_predVolume], pch = 20,
+	axes = FALSE, xlab = "Vallet", ylab = "Mine")
+axis(1)
+axis(2, las = 1)
+abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
+```
+
+### Comparison on the French NFI data
+
+I now check the differences of prediction on the French NFI. This is just done out of curiosity, it is impossible here to check which model predicts the best as there is no total volume available for the NFI data.
+
+```{stan output.var = "betareg_pred", cache = TRUE}
+// Predicting model
+functions {
+	vector r_zhou(vector x, real beta_, real gamma, real b)
+	{
+		return exp(-beta_*x) .* (x - b) + gamma*x + b;
+	}
+}
+
+data {
+	// Dimensions
+	int <lower = 1> N; // Number of trees
+	int <lower = 1> N_new; // Number of trees (new data)
+	int <lower = 1, upper = N> G; // Number of genus
+	int <lower = 1, upper = G> sp_ind; // Selected_species
+	array[G] int <lower = 1, upper = N> start; // Genus index start
+	array[G] int <lower = 1, upper = N> end; // Genus index end
+
+	// Predictors
+	vector[N] SB;
+	vector[N_new] bole_volume_m3_new;
+
+	// Data
+	vector[N] AGB;
+}
+
+transformed data {
+	vector[N] ratio = SB ./ AGB;
+
+	vector[G] SB_max;
+	for (i in 1:G)
+		SB_max[i] = max(SB[start[i]:end[i]]);
+}
+
+parameters {
+	// Parameters of the 'bumpy' function r_zhou
+	vector <lower = 0> [G] beta_;
+	vector <lower = 0, upper = 1> [G]  b;
+	vector <lower = -b ./ SB_max, upper = 0> [G] gamma; // I expect d to be negative
+
+	real <lower = 0> phi; // Precision (well kind of...)
+}
+
+transformed parameters {
+	vector [N] shape1;
+	vector [N] shape2;
+
+	for (i in 1:G)
+	{
+		shape1[start[i]:end[i]] = phi*r_zhou(SB[start[i]:end[i]], beta_[i], gamma[i], b[i]);
+		shape2[start[i]:end[i]] = phi*(1 - r_zhou(SB[start[i]:end[i]], beta_[i], gamma[i], b[i]));
+	}
+}
+
+generated quantities {
+	vector [N_new] shape1_new = phi*r_zhou(bole_volume_m3_new, beta_[sp_ind], gamma[sp_ind], b[sp_ind]);
+	vector [N_new] shape2_new = phi*(1 - r_zhou(bole_volume_m3_new, beta_[sp_ind], gamma[sp_ind], b[sp_ind]));
+	array[N_new] real r_gen = beta_rng(shape1_new, shape2_new);
+	array[N_new] real v_gen;
+	for (i in 1:N_new)
+		v_gen[i] = bole_volume_m3_new[i] / r_gen[i];
+}
+
+```
+
+```{r}
+## Extract data from french NFI
+#! It would worth it to do the extraction for the 7 concerned species here! So far only Fag syl
+
+db = connect_db()
+
+#* ----------------------------- Query trees 2019 - 2023 ----------------------------- #
+data_trees = exec_req(conn = db,
+	req = "
+	SELECT DISTINCT
+		tree_dt.NPP AS plot_id, tree_dt.A AS tree_id,
+		tree_dt.C13 AS circumference_m, tree_dt.htot AS height, tree_dt.V AS bole_volume_m3,
+		tree_dt_u.U_V0 AS total_volume_m3,
+		EXTRACT(YEAR FROM coords.DATEPOINT) AS year
+
+	FROM
+		inv_exp_nm.g3arbre AS tree_dt
+
+		LEFT JOIN inv_exp_nm.u_g3arbre AS tree_dt_u
+		ON tree_dt.NPP = tree_dt_u.NPP AND tree_dt.A = tree_dt_u.A
+
+		LEFT JOIN inv_exp_nm.e2point AS coords
+		ON coords.NPP = tree_dt.NPP
+
+	WHERE
+		tree_dt.ESPAR = '09' AND -- Fagus sylvatica
+		tree_dt.VEGET = '0' AND -- Living standing trees
+		tree_dt.V > 0 AND -- I found some that are 0!
+		(EXTRACT(YEAR FROM coords.DATEPOINT) BETWEEN 2018 AND 2023)
+
+	ORDER BY
+		tree_dt.NPP, tree_dt.A;",
+	DT = TRUE)
+
+disconnect_db(db)
+```
+
+```{r}
+## Simulate posterior total volume on new data
+data_trees[30092:30097]
+data_trees = data_trees[bole_volume_m3 < 20] # This is to remove the tree (plot = 22-76-119-1-061T, tree = 3)
+
+stanData_new = list(
+	N = forest_dt[, .N],
+	N_new = data_trees[, .N],
+	G = forest_dt[, length(unique(speciesName_sci))],
+	sp_ind = 4,
+	start = forest_dt[, .(start = .I[1]), by = speciesName_sci][, start],
+	end = forest_dt[, .(end = .I[.N]), by = speciesName_sci][, end],
+
+	# Predictors
+	SB = forest_dt[, bole_volume_m3], # Same as reconstruct one
+	bole_volume_m3_new = data_trees[, bole_volume_m3],
+
+	# Data
+	AGB = forest_dt[, total_volume_m3]
+)
+
+betareg_pred = cmdstan_model("./temp.stan")
+
+posteriorVol = betareg_pred$generate_quantities(fitted_params = fit$draws(inc_warmup = FALSE), data = stanData_new,
+	parallel_chains = n_chains)
+posteriorVol = apply(X = posteriorVol$draws("v_gen"), MARGIN = 3, FUN = mean)
+rm(fit)
+
+## Compute average pred volume
+data_trees[, my_predVolume := posteriorVol]
+
+## Plot
+plot(data_trees[, total_volume_m3], data_trees[, my_predVolume], pch = 20, axes = FALSE,
+	xlab = "Vallet", ylab = "Mine")
+axis(1)
+axis(2, las = 1)
+abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
+```
+
+
+### Comparison on the independent dataset
+
+
 
 ## Conclusion
 
