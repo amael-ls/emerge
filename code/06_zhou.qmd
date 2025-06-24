@@ -20,6 +20,8 @@ keep-tex: true
 execute:
   error: true
   echo: false
+  warning: false
+  message: false
 bibliography: /home/ALe-Squin/work/library/bib_file/references.bib
 lightbox:
   match: auto
@@ -83,7 +85,9 @@ library(cmdstanr)
 	register_knitr_engine(override = TRUE)
 library(inventR)
 library(stringi)
+library(interp)
 library(DHARMa)
+library(shape)
 
 ## Tool function
 source("./toolFunctions.R")
@@ -97,10 +101,16 @@ plot_sp = function(fit, sp, count, stanData, fun, args, forest = forest_dt[.(sp)
 	n_sampling = fit$metadata()$iter_sampling
 	n_chains = fit$num_chains()
 
+	if (n_chains != nrow(fit$metadata()$time))
+	{
+		warning("Some chains are missing probably because they could not start! Using the number of successful chains")
+		n_chains = nrow(fit$metadata()$time)
+	}
+
 	# Plot figure
 	if (!is.null(folder))
 		png(paste0("./", folder, "/", sp, ".png"))
-	plot(forest[, bole_volume_m3], forest[, total_ratio], pch = 20, col = "#3355AA33", axes = FALSE,
+	plot(forest[, bole_volume_m3], forest[, total_ratio], pch = 19, col = "#3355AA33", axes = FALSE,
 		xlab = "Bole volume", ylab = "Ratio bole/tot volumes", main = sp)
 	axis(1)
 	axis(2, las = 1)
@@ -245,6 +255,9 @@ forest_dt = forest_dt[nb_indiv > 50]
 
 setkey(forest_dt, speciesName_sci)
 ls_species = forest_dt[, unique(speciesName_sci)]
+
+## Compute ratio
+forest_dt[, total_ratio := bole_volume_m3/total_volume_m3]
 ```
 
 
@@ -310,10 +323,7 @@ generated quantities {
 ```
 
 ```{r}
-#### Test of the temp.stan model on the forest data
-## Compute ratio
-forest_dt[, total_ratio := bole_volume_m3/total_volume_m3]
-
+#### Test simple beta regression model on the forest data
 ## Run model
 # Common variables
 n_chains = 4
@@ -377,11 +387,9 @@ r_zhou = function(x, k, lambda)
 
 count = 0
 
-for (sp in forest_dt[, unique(speciesName_sci)])
+for (sp in ls_species)
 {
 	count = count + 1
-	sp = ls_species[count]
-
 	plot_sp(fit, sp, count, stanData, fun = r_zhou, args = c("k", "lambda"), pred = TRUE, n_subsample = 1)
 }
 ```
@@ -552,11 +560,9 @@ if (!file.exists("./fit_zhou_beta_flexible.rds"))
 
 count = 0
 
-for (sp in forest_dt[, unique(speciesName_sci)])
+for (sp in ls_species)
 {
 	count = count + 1
-	sp = ls_species[count]
-
 	plot_sp(fit, sp, count, stanData, fun = ff, args = c("beta_", "gamma","b"), pred = TRUE, n_subsample = 1)
 }
 ```
@@ -610,6 +616,7 @@ n_sampling = fit$metadata()$iter_sampling
 
 simResp = fit$draws("r_gen")
 dim(simResp)
+n_chains = dim(simResp)[2] # Number of successful chains
 
 # Reshape simResp as a matrix nobs x n_repetition
 simResp_matrix = matrix(data = 0, nrow = forest_dt[, .N], ncol = n_sampling*n_chains)
@@ -632,7 +639,7 @@ for (i in seq_along(stanData[["start"]]))
 }
 ```
 
-## Second model: relation between $\Vzh$ and $\Vtot$
+## Second model: relation between $\Vzh$ and $\Vtot$ {#sec-vzh}
 
 This idea is based on the allometric scaling of tree biomass and size [@Zhou2021].
 
@@ -676,7 +683,7 @@ where $c$ is an integration constant. Now use exponetial to get:
 $$
 y = \omega x^{1 - \ln(p - \exp[-kx])/\ln(x)}
 $$
-which is the equation 1 of @Zhou2021, with $\Omega = \ln(p - \exp[-kx])/\ln(x)$. Then, to get the second equation of @Zhou, just (see his appendices) set $p = m/d$, compute many stuff, and you will reach:
+which is the equation 1 of @Zhou2021, with $\Omega = \ln(p - \exp[-kx])/\ln(x)$. Then, to get the second equation of @Zhou2021, just (see his appendices) set $p = m/d$, compute many stuff, and you will reach:
 $$
 y = \frac{x}{m - d\exp[-kx]},
 $$
@@ -718,7 +725,7 @@ forest_dt[, sp_colour := speciesCols[speciesName_sci], by = speciesName_sci]
 #| layout-ncol: 1
 
 # Broadleaves
-plot(forest_dt[fct_type == "broadleaf", bole_volume_m3], forest_dt[fct_type == "broadleaf", total_ratio], pch = 20,
+plot(forest_dt[fct_type == "broadleaf", bole_volume_m3], forest_dt[fct_type == "broadleaf", total_ratio], pch = 19,
 	xlab = "Bole volume", ylab = "ratio BFT/tot", axes = FALSE, col = forest_dt[fct_type == "broadleaf", sp_colour])
 axis(1)
 axis(2, las = 1)
@@ -726,7 +733,7 @@ legend(x = "bottomright", legend = forest_dt[fct_type == "broadleaf", unique(spe
 	fill = broad_cols, bty = "n")
 
 # Conifers
-plot(forest_dt[fct_type == "conifer", bole_volume_m3], forest_dt[fct_type == "conifer", total_ratio], pch = 20,
+plot(forest_dt[fct_type == "conifer", bole_volume_m3], forest_dt[fct_type == "conifer", total_ratio], pch = 19,
 	xlab = "Bole volume", ylab = "ratio BFT/tot", axes = FALSE, col = forest_dt[fct_type == "conifer", sp_colour],
 	ylim = range(forest_dt[fct_type == "broadleaf", total_ratio]))
 axis(1)
@@ -747,7 +754,7 @@ legend(x = "bottomright", legend = forest_dt[fct_type == "conifer", unique(speci
 #| layout-ncol: 1
 
 # Broadleaves
-plot(forest_dt[fct_type == "broadleaf", circumference_m], forest_dt[fct_type == "broadleaf", vallet_ratio], pch = 20,
+plot(forest_dt[fct_type == "broadleaf", circumference_m], forest_dt[fct_type == "broadleaf", vallet_ratio], pch = 19,
 	xlab = "Circumference", ylab = "ratio tot/cyl", axes = FALSE, col = forest_dt[fct_type == "broadleaf", sp_colour])
 axis(1)
 axis(2, las = 1)
@@ -755,7 +762,7 @@ legend(x = "topright", legend = forest_dt[fct_type == "broadleaf", unique(specie
 	fill = broad_cols, bty = "n")
 
 # Conifers
-plot(forest_dt[fct_type == "conifer", circumference_m], forest_dt[fct_type == "conifer", vallet_ratio], pch = 20,
+plot(forest_dt[fct_type == "conifer", circumference_m], forest_dt[fct_type == "conifer", vallet_ratio], pch = 19,
 	xlab = "Circumference", ylab = "ratio tot/cyl", axes = FALSE, col = forest_dt[fct_type == "conifer", sp_colour],
 	ylim = range(forest_dt[fct_type == "broadleaf", vallet_ratio]))
 axis(1)
@@ -767,6 +774,71 @@ legend(x = "topright", legend = forest_dt[fct_type == "conifer", unique(speciesN
 ### Results
 
 I present the results only for the ratio of bole volume over total volume (see @fig-zhouRatio), I did not try for the ratio from @Vallet2006 (see @fig-ratio_vallet) as it is unpromising.
+
+```{stan output.var = "zhou", cache = TRUE}
+functions {
+	vector r_zhou(vector x, real m, real k, real d)
+	{
+		return m - d * exp(-k * x); // Ratio from zhou 2021
+	}
+}
+
+data {
+	// Dimensions
+	int <lower = 1> N; // Number of trees
+	int <lower = 1, upper = N> G; // Number of genus
+	array[G] int <lower = 1, upper = N> start; // Genus index start
+	array[G] int <lower = 1, upper = N> end; // Genus index end
+
+	// Predictors
+	vector[N] Vbft;
+
+	// Data
+	vector[N] Vtot;
+}
+
+transformed data {
+	vector[N] ratio = Vbft ./ Vtot;
+}
+
+parameters {
+	// Parameters m, d, and k from Zhou2021 (Dynamic allometric scaling of tree biomass and size)
+	array[G] real <lower = 0.7, upper = 1> m;
+	array[G] real <lower = 0.05, upper = m> d;
+	array[G] real <lower = 0, upper = 0.3> k;
+
+	// Precision beta-regression Zhou
+	real <lower = 0> phi;
+}
+
+transformed parameters {
+	vector [N] shape1;
+	vector [N] shape2;
+
+	for (i in 1:G)
+	{
+		shape1[start[i]:end[i]] = phi * r_zhou(Vbft[start[i]:end[i]], m[i], k[i], d[i]);
+		shape2[start[i]:end[i]] = phi * (1 - r_zhou(Vbft[start[i]:end[i]], m[i], k[i], d[i]));
+	}
+}
+
+model{
+	// Prior Zhou formula
+	target += normal_lpdf(k | 0, 0.1);
+	target += normal_lpdf(m | 0.85, 0.05);
+	target += normal_lpdf(d | 0.5, 0.15);
+	target += gamma_lpdf(phi | 0.01, 0.01);
+
+	// Likelihood
+	target += beta_lpdf(ratio | shape1, shape2);
+}
+
+
+generated quantities {
+	array[N] real r_gen = beta_rng(shape1, shape2);
+}
+
+```
 
 ```{r}
 ## Run model
@@ -785,8 +857,6 @@ stanData = list(
 	# Data
 	Vtot = forest_dt[, total_volume_m3]
 )
-
-zhou = cmdstan_model("./temp.stan")
 
 if (!file.exists("./fit_zhou.rds"))
 {
@@ -831,11 +901,9 @@ r_zhou = function(x, m, k, d)
 	
 count = 0
 
-for (sp in forest_dt[, unique(speciesName_sci)])
+for (sp in ls_species)
 {
 	count = count + 1
-	sp = ls_species[count]
-
 	plot_sp(fit, sp, count, stanData, fun = r_zhou, args = c("m", "k","d"), pred = FALSE, n_subsample = 1)
 }
 ```
@@ -919,33 +987,91 @@ In this section, I check the differences of prediction for the 7 species used in
 ### Comparison on the Emerge dataset
 
 ```{r}
-## Extract average ratio bole/tot volume
-simVol = apply(X = fit$draws("v_gen"), MARGIN = 3, FUN = mean)
+## Reload the good fit object
+fit = readRDS("./fit_zhou_beta_flexible.rds")
 
 ## Compute average pred volume
-forest_dt[, my_predVolume := simVol]
+forest_dt[, my_predVolume := apply(X = fit$draws("v_gen"), MARGIN = 3, FUN = mean)]
 
-## Compute Vallet 2006 volume, among "chene", "hetre", "douglas", "epicea", "pin.sylvestre", "pin.maritime", "sapin"
-forest_dt["Fagus sylvatica", vallet_predVolume := TarVallet(c130 = circumference_m*100, htot = height, ess = "hetre")]
+## Compute Vallet 2006 volume 6 species available (listed in sp_dt)
+sp_dt = data.table(emerge = c("61", "09", "62", "51", "52", "64", "03"),
+	vallet = c("sapin", "hetre", "epicea", "pin.maritime", "pin.sylvestre", "douglas", "chene"),
+	speciesName_sci = c("Abies alba", "Fagus sylvatica", "Picea abies", "Pinus pinaster",
+		"Pinus sylvestris", "Pseudotsuga menziesii", "Quercus petraea"))
+
+setkey(sp_dt, speciesName_sci)
+
+for (current_sp in sp_dt[, speciesName_sci])
+	forest_dt[current_sp, vallet_predVolume := TarVallet(circumference_m*100, height, sp_dt[current_sp, vallet])]
+
+## Fitting range
+sp_dt[, c("min_c", "max_c") := forest_dt[.SD, .(min(circumference_m), max(circumference_m)),
+	on = .(speciesName_sci), by = .EACHI][, .(V1, V2)]]
+sp_dt[, c("min_h", "max_h") := forest_dt[.SD, .(min(height), max(height)),
+	on = .(speciesName_sci), by = .EACHI][, .(V1, V2)]]
+sp_dt[, c("min_v", "max_v") := forest_dt[.SD, .(min(bole_volume_m3), max(bole_volume_m3)),
+	on = .(speciesName_sci), by = .EACHI][, .(V1, V2)]]
+```
+
+```{r}
+#| label: fig-obs_vs_me-vallet
+#| fig-cap: Total volume predicted by my model and @Vallet2006 *vs* observed
+#| fig-subcap:
+#|   - "Abies alba"
+#|   - "Fagus sylvatica"
+#|   - "Picea abies"
+#|   - "Pinus pinaster"
+#|   - "Pinus sylvestris"
+#|   - "Pseudotsuga menziesii"
+#|   - "Quercus petraea"
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 4
+#| layout-ncol: 2
 
 ## Plots
 # Pred vs obs
-plot(forest_dt["Fagus sylvatica", total_volume_m3], forest_dt["Fagus sylvatica", my_predVolume], pch = 20,
-	axes = FALSE, xlab = "Observed", ylab = "Predicted", col = "#FAB25544",
-	ylim = c(0, max(forest_dt["Fagus sylvatica", .(my_predVolume, vallet_predVolume)])))
-points(forest_dt["Fagus sylvatica", total_volume_m3], forest_dt["Fagus sylvatica", vallet_predVolume], pch = 20,
-	col = "#0F7BA244")
-axis(1)
-axis(2, las = 1)
-abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
-legend(x = "topleft", legend = c("Mine", "Vallet"), fill = c("#FAB255", "#0F7BA2"), bty = "n")
+for (current_sp in sp_dt[, speciesName_sci])
+{
+	plot(forest_dt[current_sp, total_volume_m3], forest_dt[current_sp, my_predVolume], pch = 19,
+		axes = FALSE, xlab = "Observed", ylab = "Predicted", col = "#FAB255",
+		ylim = c(0, max(forest_dt[current_sp, .(my_predVolume, vallet_predVolume)])))
+	points(forest_dt[current_sp, total_volume_m3], forest_dt[current_sp, vallet_predVolume], pch = 19,
+		col = "#0F7BA244")
+	axis(1)
+	axis(2, las = 1)
+	abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
+	# Arrows(x0 = sp_dt[current_sp, min_v], y0 = 0.1, x1 = sp_dt[current_sp, max_v], y1 = 0.1,
+	# 	arr.type = "triangle", code = 3, arr.adj = 1) # A bit useless given pred vs obs!
+	legend(x = "topleft", legend = c("Mine", "Vallet"), fill = c("#FAB255", "#0F7BA2"), bty = "n")
+}
+```
+
+```{r}
+#| label: fig-me_vs_vallet
+#| fig-cap: My model *vs* @Vallet2006
+#| fig-subcap:
+#|   - "Abies alba"
+#|   - "Fagus sylvatica"
+#|   - "Picea abies"
+#|   - "Pinus pinaster"
+#|   - "Pinus sylvestris"
+#|   - "Pseudotsuga menziesii"
+#|   - "Quercus petraea"
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 4
+#| layout-ncol: 2
 
 # Mine vs Vallet
-plot(forest_dt["Fagus sylvatica", vallet_predVolume], forest_dt["Fagus sylvatica", my_predVolume], pch = 20,
-	axes = FALSE, xlab = "Vallet", ylab = "Mine")
-axis(1)
-axis(2, las = 1)
-abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
+for (current_sp in sp_dt[, speciesName_sci])
+{
+	plot(forest_dt[current_sp, vallet_predVolume], forest_dt[current_sp, my_predVolume], pch = 19,
+		axes = FALSE, xlab = "Vallet", ylab = "Mine")
+	axis(1)
+	axis(2, las = 1)
+	abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
+}
 ```
 
 ### Comparison on the French NFI data
@@ -1019,15 +1145,12 @@ generated quantities {
 
 ```{r}
 ## Extract data from french NFI
-#! It would worth it to do the extraction for the 7 concerned species here! So far only Fag syl
-
 db = connect_db()
 
-#* ----------------------------- Query trees 2019 - 2023 ----------------------------- #
 data_trees = exec_req(conn = db,
 	req = "
 	SELECT DISTINCT
-		tree_dt.NPP AS plot_id, tree_dt.A AS tree_id,
+		tree_dt.NPP AS plot_id, tree_dt.A AS tree_id, tree_dt.ESPAR as sp_code,
 		tree_dt.C13 AS circumference_m, tree_dt.htot AS height, tree_dt.V AS bole_volume_m3,
 		tree_dt_u.U_V0 AS total_volume_m3,
 		EXTRACT(YEAR FROM coords.DATEPOINT) AS year
@@ -1042,7 +1165,7 @@ data_trees = exec_req(conn = db,
 		ON coords.NPP = tree_dt.NPP
 
 	WHERE
-		tree_dt.ESPAR = '09' AND -- Fagus sylvatica
+		tree_dt.ESPAR IN ('61', '09', '62', '51', '52', '64', '03') AND
 		tree_dt.VEGET = '0' AND -- Living standing trees
 		tree_dt.V > 0 AND -- I found some that are 0!
 		(EXTRACT(YEAR FROM coords.DATEPOINT) BETWEEN 2018 AND 2023)
@@ -1055,43 +1178,213 @@ disconnect_db(db)
 ```
 
 ```{r}
+## Get an approximation of the max bole volume before model collapse
+sp_dt[, sp_index := which(ls_species %in% sp_dt[, speciesName_sci])] # Species index from forest_dt (species is the key)
+
+params = getParams(model_cmdstan = fit, params_names = c(paste0("beta_[", sp_dt[, sp_index], "]"),
+	paste0("b[", sp_dt[, sp_index], "]"), paste0("gamma[", sp_dt[, sp_index], "]")))
+
+sp_dt[, beta_ := params[paste0("beta_[", sp_index, "]")]]
+sp_dt[, b := params[paste0("b[", sp_index, "]")]]
+sp_dt[, gamma := params[paste0("gamma[", sp_index, "]")]]
+
+sp_dt[, collapse_at := -b/gamma]
+sp_dt[, value_neglected := exp(beta_*b/gamma)]
+
 ## Simulate posterior total volume on new data
-data_trees[30092:30097]
-data_trees = data_trees[bole_volume_m3 < 20] # This is to remove the tree (plot = 22-76-119-1-061T, tree = 3)
-
-stanData_new = list(
-	N = forest_dt[, .N],
-	N_new = data_trees[, .N],
-	G = forest_dt[, length(unique(speciesName_sci))],
-	sp_ind = 4,
-	start = forest_dt[, .(start = .I[1]), by = speciesName_sci][, start],
-	end = forest_dt[, .(end = .I[.N]), by = speciesName_sci][, end],
-
-	# Predictors
-	SB = forest_dt[, bole_volume_m3], # Same as reconstruct one
-	bole_volume_m3_new = data_trees[, bole_volume_m3],
-
-	# Data
-	AGB = forest_dt[, total_volume_m3]
-)
-
-betareg_pred = cmdstan_model("./temp.stan")
-
-posteriorVol = betareg_pred$generate_quantities(fitted_params = fit$draws(inc_warmup = FALSE), data = stanData_new,
-	parallel_chains = n_chains)
-posteriorVol = apply(X = posteriorVol$draws("v_gen"), MARGIN = 3, FUN = mean)
-rm(fit)
-
-## Compute average pred volume
-data_trees[, my_predVolume := posteriorVol]
-
-## Plot
-plot(data_trees[, total_volume_m3], data_trees[, my_predVolume], pch = 20, axes = FALSE,
-	xlab = "Vallet", ylab = "Mine")
-axis(1)
-axis(2, las = 1)
-abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
+# Remove volumes that are beyond the computed limit
+data_trees[, limit := sp_dt[emerge == unique(sp_code), floor(collapse_at)], by = sp_code]
+data_trees = data_trees[bole_volume_m3 < limit][, limit := NULL]
+setkey(data_trees, sp_code)
 ```
+
+```{r}
+#| label: fig-comparions
+#| fig-cap: Comparison of my model, @Vallet2006, and Emerge from `inventR`
+#| fig-subcap:
+#|   - "Abies alba, Emerge and mine vs @Vallet2006"
+#|   - "Abies alba"
+#|   - "Fagus sylvatica, Emerge and mine vs @Vallet2006"
+#|   - "Fagus sylvatica"
+#|   - "Picea abies, Emerge and mine vs @Vallet2006"
+#|   - "Picea abies"
+#|   - "Pinus pinaster, Emerge and mine vs @Vallet2006"
+#|   - "Pinus pinaster"
+#|   - "Pinus sylvestris, Emerge and mine vs @Vallet2006"
+#|   - "Pinus sylvestris"
+#|   - "Pseudotsuga menziesii, Emerge and mine vs @Vallet2006"
+#|   - "Pseudotsuga menziesii"
+#|   - "Quercus petraea, Emerge and mine vs @Vallet2006"
+#|   - "Quercus petraea"
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 4
+#| layout-ncol: 2
+
+## Species-specific plots
+for (sp_ind in sp_dt[, sp_index])
+{
+	stanData_new = list(
+		N = forest_dt[, .N],
+		N_new = data_trees[sp_dt[sp_index == sp_ind, emerge], .N],
+		G = forest_dt[, length(unique(speciesName_sci))],
+		sp_ind = sp_ind,
+		start = forest_dt[, .(start = .I[1]), by = speciesName_sci][, start],
+		end = forest_dt[, .(end = .I[.N]), by = speciesName_sci][, end],
+
+		# Predictors
+		SB = forest_dt[, bole_volume_m3], # Same as reconstruct one
+		bole_volume_m3_new = data_trees[sp_dt[sp_index == sp_ind, emerge], bole_volume_m3],
+
+		# Data
+		AGB = forest_dt[, total_volume_m3]
+	)
+
+	# betareg_pred = cmdstan_model("./temp.stan")
+
+	posteriorVol = betareg_pred$generate_quantities(fitted_params = fit$draws(inc_warmup = FALSE), data = stanData_new,
+		parallel_chains = n_chains)
+
+	## Compute average pred volume
+	posteriorVol = apply(X = posteriorVol$draws("v_gen"), MARGIN = 3, FUN = mean)
+	data_trees[sp_dt[sp_index == sp_ind, emerge], my_predVolume := posteriorVol]
+
+	rm(posteriorVol)
+
+	## Add Emerge volumes
+	data_trees[sp_dt[sp_index == sp_ind, emerge], emerge_predVolume := TarEmerge(c130 = circumference_m*100,
+		htot = height, espar = sp_dt[sp_index == sp_ind, emerge], typevol = "total")]
+
+	# ## Plot
+	# # Comparison Emerge (inventR::TarEmerge) and mine vs Vallet 2006
+	# plot(data_trees[sp_dt[sp_index == sp_ind, emerge], total_volume_m3],
+	# 	data_trees[sp_dt[sp_index == sp_ind, emerge], my_predVolume],
+	# 	pch = 19, axes = FALSE, col = "#FAB25544", xlab = "Vallet", ylab = "Others")
+	# points(data_trees[sp_dt[sp_index == sp_ind, emerge], total_volume_m3],
+	# 	data_trees[sp_dt[sp_index == sp_ind, emerge], emerge_predVolume],
+	# 	pch = 19, col = "#0F7BA244")
+	# axis(1)
+	# axis(2, las = 1)
+	# abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
+	# legend(x = "topleft", legend = c("Mine", "Emerge"), fill = c("#FAB255", "#0F7BA2"), bty = "n")
+
+	# # Comparison Emerge (inventR::TarEmerge), mine and Vallet 2006 vs bole volume (volume bois-fort tige)
+	# plot(data_trees[sp_dt[sp_index == sp_ind, emerge], bole_volume_m3],
+	# 	data_trees[sp_dt[sp_index == sp_ind, emerge], total_volume_m3],
+	# 	pch = 19, axes = FALSE, col = "#43B28444", xlab = "Bole volume", ylab = "Total volume",
+	# 	ylim = c(0, max(data_trees[sp_dt[sp_index == sp_ind, emerge],
+	# 		.(total_volume_m3, emerge_predVolume, my_predVolume)], na.rm = TRUE)))
+	# points(data_trees[sp_dt[sp_index == sp_ind, emerge], bole_volume_m3],
+	# 	data_trees[sp_dt[sp_index == sp_ind, emerge], emerge_predVolume],
+	# 	pch = 19, col = "#0F7BA244")
+	# points(data_trees[sp_dt[sp_index == sp_ind, emerge], bole_volume_m3],
+	# 	data_trees[sp_dt[sp_index == sp_ind, emerge], my_predVolume],
+	# 	pch = 19, col = "#FAB25544")
+	# axis(1)
+	# axis(2, las = 1)
+	# abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
+	# legend(x = "topleft", legend = c("Mine", "Emerge", "Vallet"), fill = c("#FAB255", "#0F7BA2", "#43B284"), bty = "n")
+}
+
+rm(fit)
+```
+
+## Heatmap
+
+```{r}
+#| label: fig-heatmaps
+#| fig-cap: Heatmaps in the circumference/height space of my model, @Vallet2006, and Emerge from `inventR`
+#| fig-subcap:
+#|   - "Abies alba, my model"
+#|   - "Abies alba, @Vallet2006"
+#|   - "Abies alba, Emerge"
+#|   - "Fagus sylvatica, my model"
+#|   - "Fagus sylvatica, @Vallet2006"
+#|   - "Fagus sylvatica, Emerge"
+#|   - "Picea abies, my model"
+#|   - "Picea abies, @Vallet2006"
+#|   - "Picea abies, Emerge"
+#|   - "Pinus pinaster, my model"
+#|   - "Pinus pinaster, @Vallet2006"
+#|   - "Pinus pinaster, Emerge"
+#|   - "Pinus sylvestris, my model"
+#|   - "Pinus sylvestris, @Vallet2006"
+#|   - "Pinus sylvestris, Emerge"
+#|   - "Pseudotsuga menziesii, my model"
+#|   - "Pseudotsuga menziesii, @Vallet2006"
+#|   - "Pseudotsuga menziesii, Emerge"
+#|   - "Quercus petraea, my model"
+#|   - "Quercus petraea, @Vallet2006"
+#|   - "Quercus petraea, Emerge"
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 4
+#| layout-ncol: 3
+
+## Species-specific heatmaps
+for (sp_ind in sp_dt[, sp_index])
+{
+	aa = data_trees[sp_dt[sp_index == sp_ind, emerge]][!is.na(emerge_predVolume)][
+		sample(x = seq_len(.N), size = min(4000, .N), replace = FALSE)]
+
+	# Heatmap of my model
+	si = interp(x = aa[, circumference_m], y = aa[, height], z = aa[, my_predVolume],
+		method = "linear", duplicate = "mean")
+
+	filled.contour(si,
+		plot.axes = {
+			axis(1)
+			axis(2, las = 1)
+			contour(si, add = TRUE, lwd = 2, axes = NULL)
+		}, xlab = "Circumference", ylab = "Height",
+		color.palette = colorRampPalette(met.brewer("Hiroshige", direction = -1))
+	)
+
+	# Heatmap of Vallet 2006
+	si = interp(x = aa[, circumference_m], y = aa[, height], z = aa[, total_volume_m3],
+		method = "linear", duplicate = "mean")
+
+	filled.contour(si,
+		plot.axes = {
+			axis(1)
+			axis(2, las = 1)
+			contour(si, add = TRUE, lwd = 2, axes = NULL)
+		}, xlab = "Circumference", ylab = "Height", frame.plot = FALSE,
+		color.palette = colorRampPalette(met.brewer("Hiroshige", direction = -1))
+	)
+
+	# Heatmap of Emerge
+	si = interp(x = aa[, circumference_m], y = aa[, height], z = aa[, emerge_predVolume],
+		method = "linear", duplicate = "mean")
+
+	filled.contour(si,
+		plot.axes = {
+			axis(1)
+			axis(2, las = 1)
+			contour(si, add = TRUE, lwd = 2, axes = NULL)
+		}, xlab = "Circumference", ylab = "Height",
+		color.palette = colorRampPalette(met.brewer("Hiroshige", direction = -1))
+	)
+}
+```
+
+Range of parameterisation:
+
+::: {#tbl-table_1 .borderless .hover}
+
+| species           | max circumference (m) | max height (m) | max $V_{\text{BFT}}$ |
+|------------------:|:------------------|:-----------|:-----------------|
+| *Abies alba* | `{r} forest_dt["Abies alba", max(circumference_m)]` |  `{r} forest_dt["Abies alba", max(height)]` | `{r} forest_dt["Abies alba", format(max(bole_volume_m3), 2)]` |
+| *Fagus sylvatica* | `{r} forest_dt["Fagus sylvatica", max(circumference_m)]` |  `{r} forest_dt["Fagus sylvatica", max(height)]` | `{r} forest_dt["Fagus sylvatica", format(max(bole_volume_m3), 2)]` |
+| *Picea abies* | `{r} forest_dt["Picea abies", max(circumference_m)]` |  `{r} forest_dt["Picea abies", max(height)]` | `{r} forest_dt["Picea abies", format(max(bole_volume_m3), 2)]` |
+| *Pinus pinaster* | `{r} forest_dt["Pinus pinaster", max(circumference_m)]` |  `{r} forest_dt["Pinus pinaster", max(height)]` | `{r} forest_dt["Pinus pinaster", format(max(bole_volume_m3), 2)]` |
+| *Pinus sylvestris* | `{r} forest_dt["Pinus sylvestris", max(circumference_m)]` |  `{r} forest_dt["Pinus sylvestris", max(height)]` | `{r} forest_dt["Pinus sylvestris", format(max(bole_volume_m3), 2)]` |
+| *Pseudotsuga menziesii* | `{r} forest_dt["Pseudotsuga menziesii", max(circumference_m)]` |  `{r} forest_dt["Pseudotsuga menziesii", max(height)]` | `{r} forest_dt["Pseudotsuga menziesii", format(max(bole_volume_m3), 2)]` |
+| *Quercus petraea* | `{r} forest_dt["Quercus petraea", max(circumference_m)]` |  `{r} forest_dt["Quercus petraea", max(height)]` | `{r} forest_dt["Quercus petraea", format(max(bole_volume_m3), 2)]` |
+
+Species-specific range of parameterisation
+
+:::
 
 
 ### Comparison on the independent dataset
