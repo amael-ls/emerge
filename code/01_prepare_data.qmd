@@ -7,7 +7,7 @@ filters:
   - fontawesome
 execute:
   error: true
-bibliography: references.bib
+bibliography: /home/ALe-Squin/work/library/bib_file/references.bib
 lightbox:
   match: auto
 css: style.css
@@ -67,7 +67,7 @@ Trees are partitioned into hierarchical elements in Forest Inventories (\eg @fig
 ```{mermaid}
 %%| label: fig-partition
 %%| fig-cap: Partition of a tree (inspired by @Gschwantner2009)
-%%{init: {"flowchart": {"defaultRenderer": "elk"}} }%%
+
 flowchart LR
 subgraph SUB0 [Level 0]
 	W(Whole tree)
@@ -195,7 +195,7 @@ if (os == "Linux" || os == "Darwin")
 {
 	if (!dir.exists(mnt_point))
 		stop(paste0("The mounting point <", mnt_point, "> does not exist"))
-	path_data = paste0(mnt_point, "/data_orig/")
+	path_data = paste0(mnt_point, "data_orig/")
 	if (!dir.exists(path_data))
 		stop(paste0("Folder <", path_data, "> does not exist! Check mounting point and mounted folder"))
 } else if (os == "Windows") {
@@ -296,8 +296,8 @@ inra_arbres[, circumference_m := c130/100]
 inra_arbres[, year := format(as.Date(date, "%Y-%m-%d"), "%Y")]
 
 ## Keep only column of interest and rename them
-inra_arbres = unique(inra_arbres[, .(nom_fichier, id_codesessences, circumference_m, h_tot, total_volume_m3, v_tronc_verif,
-	v_courrone, genre, id_codesforets, year)])
+inra_arbres = unique(inra_arbres[, .(nom_fichier, id_codesessences, circumference_m, h_tot,
+	total_volume_m3, v_tronc_verif, v_courrone, genre, id_codesforets, year)])
 inra_arbres = merge.data.table(inra_arbres, codesforets[, .(id, longitude, latitude)],
 	by.x = "id_codesforets", by.y = "id")
 inra_arbres = merge.data.table(inra_arbres, codesessences[, .(essence, speciesName_sci, fct_type)],
@@ -305,8 +305,9 @@ inra_arbres = merge.data.table(inra_arbres, codesessences[, .(essence, speciesNa
 
 inra_arbres = na.omit(inra_arbres)
 
-setnames(inra_arbres, new = c("species_code_inra", "plot_id", "unique_id", "circumference_m", "height", "total_volume_m3",
-	"bole_volume_m3", "crown_volume_m3", "genus", "year", "lon", "lat", "speciesName_sci", "fct_type"))
+setnames(inra_arbres, new = c("species_code_inra", "plot_id", "unique_id", "circumference_m", "height",
+	"total_volume_m3", "bole_volume_m3", "crown_volume_m3", "genus", "year", "lon", "lat",
+	"speciesName_sci", "fct_type"))
 
 ## Change type of cols
 inra_arbres[, unique_id := as.character(unique_id)]
@@ -328,6 +329,7 @@ nfi_data = exec_req(conn = db, req = "
 		log.surlon, log.surdia, log.ns,
 		coords1.XL, coords1.YL,
 		EXTRACT(YEAR FROM coords2.DATEPOINT) AS year
+
 	FROM
 		inv_exp_am.g3arbre AS tree
 		
@@ -339,11 +341,12 @@ nfi_data = exec_req(conn = db, req = "
 		
 		LEFT JOIN inv_exp_am.e2point AS coords2
 		ON coords2.npp = tree.npp
+
 	WHERE
 		tree.CUBE = 'M' AND -- Tree volume measured rather than evaluated by a model
 		tree.MC IN ('4', '5') AND -- Circumference measured, and not diameter
 		(tree.DOM BETWEEN '0' AND '5') -- No pollarded nor heavily pruned tree
-		-- coords2.DATEPOINT >= '1988-01-01'::date -- I think there is no need for this one
+
 	ORDER BY
 		npp, a;", DT = TRUE)
 
@@ -439,7 +442,7 @@ axis(1)
 axis(2, las = 1)
 ```
 
-For most of the trees I find back the volume. I do not really know why some differences still persist, and I do not have much time to investigate.
+For most of the trees I find back the volume. I do not really know why some differences still persist, and I do not have much time to investigate. Florence was also unable to reproduce exactly the numbers of IGN, and she told me that it is either a mistake from them, or a lost knowledge of something done but not written.
 
 ### Coordinates
 
@@ -665,115 +668,186 @@ saveRDS(ind_species_50, paste0(mnt_point, "data/ind_species_nfi-inra", add_name,
 
 ## Data for posterior checks
 
-After running a Bayesian model, it is important to do a 'predict' on new data to check that the model can generate sensible volume. For this, I use the volume-measured trees dataset from 2009 and 2010, which I format in this section. There are three datasets for each year, one for:
+After running a Bayesian model, it is important to do a 'predict' on new data to check that the model can generate sensible volumes. For this, I use the volume-measured trees dataset from 2009 and 2010, which I format in this section. There are three datasets for each year (here detailed for 2010):
 
 1. `emerge_2010_profils`: tree profiles, containing bole dimensions (circumference every 2 meters)
 2. `emerge_2010_branches`: tree branches, containing small and large branches dimensions
-3. `emerge_2010_arbres`: tree information, such as dbh, plot, etc... It also contains the total above-ground volume, the total branch volume, and the bole volume. Note that I was able to reconstruct the total branch volume, but that I never succeeded to reconstruct the bole volume
+3. `emerge_2010_arbres`: tree information, such as dbh, plot, etc... It also contains the total above-ground volume, the total branch volume, and the bole volume. Note that I was able to reconstruct the total branch volume, but that I never succeeded to reconstruct the bole volume.
 
 ### Reconstruct bole volumes from profiles and comparison with provided data {#sec-trunkVol}
 ```{r}
+reshape_profiles = function(profile_dt)
+{
+	if (!is.data.table(profile_dt))
+	{
+		warning("Changed argument to data table")
+		setDT(profile_dt)
+	}
+
+	ls_names = c("id", "tree", "longueur_billon_pese_m", "poids_hum_billon_kg",
+	"poids_hum_rondelle_partiebef_kg", "poids_hum_rondelle_partieqb_kg", "poids_hum_rondelle_kg",
+	"circ_bas_cm", "circ_haut_cm", "niveau_bas_m", "niveau_haut_m", "commentaires",
+	"circ_bottom_m", "circ_top_m")
+
+	if (!all(colnames(profile_dt) %in% ls_names))
+		stop("Names mismatch between what is provided and what is expected (see the function itself)")
+
+	## Clean the tree dataset and keep only columns of interest (tree is already unique id, no need for site, nor parcelle)
+	profile_dt[, c("circ_bottom_m", "circ_top_m") := .(circ_bas_cm/100, circ_haut_cm/100)]
+	profile_dt[, c("id", "poids_hum_billon_kg", "poids_hum_rondelle_partiebef_kg", "circ_haut_cm",
+		"poids_hum_rondelle_partieqb_kg", "poids_hum_rondelle_kg", "commentaires", "circ_bas_cm")  := NULL]
+	setnames(profile_dt, old = c("tree", "longueur_billon_pese_m", "niveau_bas_m", "niveau_haut_m"),
+		new = c("tree_id", "length", "h_bottom", "h_top")) 
+
+	setkey(profile_dt, tree_id)
+	profile_dt = profile_dt[, setorder(.SD, h_bottom), by = tree_id]
+
+	## Compute length when missing, and volumes using the frustum and cylinder formulae
+	profile_dt[is.na(length), length := h_top - h_bottom]
+
+	profile_dt[, vol_log_conic := length/(12*pi)*(circ_bottom_m^2 + circ_top_m^2 + circ_bottom_m*circ_top_m)]
+	profile_dt[, cumulated_vol_conic := cumsum(vol_log_conic), by = tree_id]
+	profile_dt[, bole_volume_conic_m3 := sum(vol_log_conic), by = tree_id]
+
+	profile_dt[, vol_log_cyl := length/(16*pi)*(circ_bottom_m + circ_top_m)^2]
+	profile_dt[, cumulated_vol_cyl := cumsum(vol_log_cyl), by = tree_id]
+	profile_dt[, bole_volume_cyl_m3 := sum(vol_log_cyl), by = tree_id]
+
+	## Height
+	profile_dt[, height := max(h_top), by = tree_id]
+
+	return (profile_dt)
+}
+
 ## Change to data table
 setDT(emerge_2010_arbres)
+setDT(emerge_bure09_arbres)
 setDT(emerge_2010_profils)
+setDT(emerge_bure09_profils)
 
-## Clean the tree dataset and keep only columns of interest (tree is already unique id, no need for site, nor parcelle)
-emerge_2010_profils[, c("circ_bottom_m", "circ_top_m") := .(circ_bas_cm/100, circ_haut_cm/100)]
-emerge_2010_profils[, c("id", "poids_hum_billon_kg", "poids_hum_rondelle_partiebef_kg", "circ_haut_cm",
-	"poids_hum_rondelle_partieqb_kg", "poids_hum_rondelle_kg", "commentaires", "circ_bas_cm")  := NULL]
-setnames(emerge_2010_profils, old = c("tree", "longueur_billon_pese_m", "niveau_bas_m", "niveau_haut_m"),
-	new = c("tree_id", "length", "h_bottom", "h_top")) 
-
-setkey(emerge_2010_profils, tree_id, h_bottom)
-setkey(emerge_2010_profils, tree_id)
-
-## Compute length when missing, and volumes using the frustum and cylinder formulae
-emerge_2010_profils[is.na(length), length := h_top - h_bottom]
-
-emerge_2010_profils[, vol_log_conic := length/(12*pi)*(circ_bottom_m^2 + circ_top_m^2 + circ_bottom_m*circ_top_m)]
-emerge_2010_profils[, cumulated_vol_conic := cumsum(vol_log_conic), by = tree_id]
-emerge_2010_profils[, bole_volume_conic_m3 := sum(vol_log_conic), by = tree_id]
-
-emerge_2010_profils[, vol_log_cyl := length/(16*pi)*(circ_bottom_m + circ_top_m)^2]
-emerge_2010_profils[, cumulated_vol_cyl := cumsum(vol_log_cyl), by = tree_id]
-emerge_2010_profils[, bole_volume_cyl_m3 := sum(vol_log_cyl), by = tree_id]
-
-## Height
-emerge_2010_profils[, height := max(h_top), by = tree_id]
+emerge_2010_profils = reshape_profiles(emerge_2010_profils)
+emerge_bure09_profils = reshape_profiles(emerge_bure09_profils)
 
 ## Compare with the volume provided in emerge_2010_arbres
-compare = unique(emerge_2010_profils[, .(tree_id, bole_volume_cyl_m3, bole_volume_conic_m3)])
-compare = merge.data.table(compare, emerge_2010_arbres[, .(tree, v_tronc_cone_verif, v_tronc_cylindre_verif)],
+compare = unique(emerge_2010_profils[, .(tree_id, height, bole_volume_cyl_m3, bole_volume_conic_m3)])
+compare = merge.data.table(compare, emerge_2010_arbres[, .(tree, circumference_m = c130/100,
+	v_tronc_cone_verif, volume_tronc_humide)],
 	by.x = "tree_id", by.y = "tree")
+
+compare[, rel_diff := 100*(bole_volume_conic_m3 - v_tronc_cone_verif)/v_tronc_cone_verif]
+
+plot(density(compare[rel_diff < 50, rel_diff]))
+
+compare[rel_diff > 50]
+
+# compare[, my_c := 2*sqrt(pi*bole_volume_conic_m3/height)]
+# compare[, de_c := 2*sqrt(pi*v_tronc_cone_verif/height)]
+
+# plot(compare[rel_diff > 50, circumference_m], compare[rel_diff > 50, v_tronc_cone_verif],
+# 	pch = 20, col = "#FAB255", axes = FALSE, xlab = "Circumference", ylab = "Bole volume",
+# 	ylim = c(0, max(compare[rel_diff > 50, .(v_tronc_cone_verif, bole_volume_conic_m3)])))
+# points(compare[rel_diff > 50, circumference_m], compare[rel_diff > 50, bole_volume_conic_m3], pch = 20, col = "#CD212A")
+# axis(1)
+# axis(2, las = 1)
+
+# plot(compare[rel_diff > 50, circumference_m], compare[rel_diff > 50, de_c],
+# 	pch = 20, col = "#FAB255", axes = FALSE, xlab = "Circumference", ylab = "Circumference cyl",
+# 	ylim = c(0, max(compare[rel_diff > 50, .(de_c, my_c)])))
+# points(compare[rel_diff > 50, circumference_m], compare[rel_diff > 50, my_c], pch = 20, col = "#CD212A")
+# axis(1)
+# axis(2, las = 1)
+# abline(a = 0, b = 1)
 ```
 
-Now, I compare these reconstructed volumes with those provided in `emerge_2010_arbres`.
-```{r}
-#| echo: false
-#| label: fig-compare_bole_vol
-#| fig-cap: Compare the volumes (reconstruction - provided)
-#| fig-subcap: 
-#|   - "Frustum formula"
-#|   - "Cylinder"
-#| layout-ncol: 2
-#| fig-asp: 1
-#| out-width: 95%
-#| fig-width: 8.142857
-
-plot(density(compare[, (bole_volume_conic_m3 - v_tronc_cone_verif)/v_tronc_cone_verif]),
-	xlab = "Relative change in conical volume", main = "", lwd = 4, axes = FALSE, log = "x")
-axis(1)
-axis(2, las = 1)
-
-plot(density(compare[, (bole_volume_cyl_m3 - v_tronc_cylindre_verif)/v_tronc_cylindre_verif]),
-	xlab = "Relative change in cylinder volume", main = "", lwd = 4, axes = FALSE, log = "x")
-axis(1)
-axis(2, las = 1)
-```
-
-Given that I believe it is important to know how the data are constructed and also because the differences are negligeable as can be seen on @fig-compare_bole_vol. Mind the log scale on the x-axis of the relative change computed as:
-
-$$
-\frac{\text{my volume} - \text{provided volume}}{\text{provided volume}}
-$$
+I did several test to check the trunk volumes that I rebuild and those provided in the database. I concluded that they provides sometimes weird values, and that mine are more plausible, especially because they match the column `volume_tronc_humide` when this data is available. Therefore I keep my reconstruction `bole_volume_conic_m3` and do not use their values `v_tronc_cone_verif`.
 
 ### Reconstruct branch volume and comparison with provided data {#sec-branchVol}
 
-BLABLABLA
+I now try to reconstruct the volume of large branches. For this, I associate each branch to a cylinder.
 
 ```{r}
-## Change class to data table
+## Change class to data table, adjust colnames
+setDT(emerge_bure09_branches)
 setDT(emerge_2010_branches)
+
+setnames(emerge_bure09_branches, old = c("tree", "c", "l", "m_wet"), new = c("tree_id", "c_cm", "l_cm", "m_wet_kg"))
 setnames(emerge_2010_branches, old = "tree", new = "tree_id")
 
-# qq = copy(emerge_2010_branches)
-# emerge_2010_branches = copy(qq)
+reshape_branches = function(branches_dt)
+{
+	# Remove lines for which I cannot deduce a volume because there is only l_cm or c_cm provided but no m_wet_kg
+	branches_dt = branches_dt[!((is.na(l_cm) & is.na(m_wet_kg)) | (is.na(c_cm) & is.na(m_wet_kg)))]
+
+	# Compute branch volumes for branches with both a length and circumference, using a cylinder formula
+	branches_dt[!is.na(c_cm) & !is.na(l_cm), vol_branches_m3 := c_cm^2*l_cm/(4*pi*1e6)]
+
+	# Use a density of 1000 kg/m^3 to convert the wet weight into volume when both c_cm, and l_cm are missing
+	branches_dt[is.na(l_cm) & is.na(c_cm), vol_branches_m3 := m_wet_kg/1e3]
+
+	# Remove NAs
+	branches_dt = branches_dt[!is.na(vol_branches_m3)] # It removes one branch which was broken
+
+	## Compute total branch volume
+	branches_dt[, branch_volume := sum(vol_branches_m3), by = tree_id]
+
+	return (branches_dt)
+}
 
 ## Clean the branch dataset and compute total branch volume per tree
 # Remove lines for which I cannot deduce a volume because all information are missing
-emerge_2010_branches = emerge_2010_branches[!(is.na(l_cm) & is.na(c_cm) & is.na(m_wet_kg))]
+emerge_bure09_branches = reshape_branches(emerge_bure09_branches)
+emerge_2010_branches = reshape_branches(emerge_2010_branches)
 
-# Remove lines for which I cannot deduce a volume because there is only l_cm or c_cm provided but no m_wet_kg
-emerge_2010_branches = emerge_2010_branches[!((is.na(l_cm) & is.na(m_wet_kg)) | (is.na(c_cm) & is.na(m_wet_kg)))]
+compare = unique(emerge_bure09_branches[, .(tree_id, branch_volume)])
+compare = merge.data.table(compare, emerge_bure09_arbres[, .(tree, v_br_verif)],
+	by.x = "tree_id", by.y = "tree")
 
-# Compute branch volumes for branches with both a length and circumference, using a cylinder formula
-emerge_2010_branches[!is.na(c_cm) & !is.na(l_cm), vol_branches_m3 := c_cm^2*l_cm/(4*pi*1e6)]
-
-# Use a density of 1000 kg/m^3 to convert the wet weight into volume when both c_cm, and l_cm are missing
-emerge_2010_branches[is.na(l_cm) & is.na(c_cm), vol_branches_m3 := m_wet_kg/1e3]
-
-# Remove NAs
-emerge_2010_branches = emerge_2010_branches[!is.na(vol_branches_m3)] # It removes one branch which was broken
-
-## Compute total branch volume
-emerge_2010_branches[, vol_tot_branch_m3 := sum(vol_branches_m3), by = tree_id]
-
-compare = unique(emerge_2010_branches[, .(tree_id, vol_tot_branch_m3)])
+compare = unique(emerge_2010_branches[, .(tree_id, branch_volume)])
 compare = merge.data.table(compare, emerge_2010_arbres[, .(tree, v_br_verif)],
 	by.x = "tree_id", by.y = "tree")
 ```
 
-My reconstruction matches the provided branch volumes except for `{r} compare[abs(vol_tot_branch_m3 - v_br_verif) > 1e-5, .N]` trees. Note that I did like Christine Deleuze and her team: for the incomplete trees I use a density of \qty{1000}{\kilogram\per\cubic\metre} to convert the wet weight into a volume when branch's length or circumference are missing.
+My reconstruction matches the provided branch volumes except for `{r} compare[abs(branch_volume - v_br_verif) > 1e-5, .N]` trees. Note that I did like Christine Deleuze and her team: for the incomplete trees I use a density of \qty{1000}{\kilogram\per\cubic\metre} to convert the wet weight into a volume when branch's length or circumference are missing.
+
+### Reconstruct twigs/small branches
+
+Don't bother with that, and read @Santenoise2012. Note that the method described in his document is not up to date (see the following conversation):
+
+> On 25/06/2025 18:40, Philippe Santenoise wrote:
+> J'ai travaillé sur la BDD Emerge jusqu'en 2015. Une partie de mon travail consistait à importer de nouvelles données et à mettre à jour les données de la BDD.
+> 
+> Le travail sur le calcul des volumes par compartiment et la mise à jour de ces données dans la BDD datent de 2011-2012 (rapport en pj). 
+> 
+> Les données que j'ai envoyé sont utilisées dans le script et sont donc essentielles pour refaire les calculs.
+
+> Après 2015, de nouvelles mises à jour ont peut-être été apportées à la BDD, ce qui pourraient expliquer ces différences dans les calculs de volume.
+
+> Bonne soirée,
+> Philippe 
+> 
+> > On 25/06/2025 17:15, Amaël Le Squin wrote:
+> > Parfait, merci!
+> > 
+> > Si j’ai bien compris, les données envoyées sont proches des données brutes. Je vais y jeter un coup d’oeil ces prochains jours. En appliquant la formule trouvée ligne 533 du script `Calcul_volume_Emerge.r`, je ne retombe pas sûr les valeurs fournies par Christine (même si assez proches). Il y a aussi pas mal de NA dans la table de Christine pour les taux d’humidité ou infra densité. Je pense que vos données ‘brutes’ vont grandement m’aider!
+> > 
+> > Merci et bonne soirée,
+> > 
+> > Amaël.
+> > 
+> > > On 25/06/2025 16:44, Philippe Santenoise wrote:
+> > >
+> > > Bonjour Amael,
+> > >
+> > >
+> > > J'ai pu retrouver un ancien script R détaillant le calcul des volumes par compartiment pour les campagnes Emerge 2009 et 2010 + les données utilisées aux différentes étapes de calcul (en pj). 
+> > >
+> > > Selon l'encodage choisi pour lire le script, il peut y avoir des caractères (en général lettres avec accent) qui sont remplacés par "?". 
+> > >
+> > >
+> > > Bonne journée,
+> > >
+> > > Philippe
+
 
 ### Join my reconstructions together
 
@@ -781,17 +855,151 @@ Here, it would be good to join both profile and branches tables. However, there 
 
 ```{r}
 ## Join both profile and branches table
-emerge_2010 = merge.data.table(x = unique(emerge_2010_branches[, .(tree_id, vol_tot_branch_m3)]),
-	y = unique(emerge_2010_profils[, .(tree_id, bole_volume_cyl_m3, bole_volume_conic_m3)]), all.y = TRUE)
 
-emerge_2010 = merge.data.table(emerge_2010, emerge_2010_arbres[, .(tree, id_codesforets, id_codesessences, c130,
-	v_br_verif, v_tronc_cone_verif, v_menu_verif)], by.x = "tree_id", by.y = "tree")
+emerge_2009 = merge.data.table(x = unique(emerge_bure09_branches[, .(tree_id, branch_volume)]),
+	y = unique(emerge_bure09_profils[, .(tree_id, bole_volume_conic_m3)]), all.y = TRUE)
 
-# emerge_2010[is.na(vol_tot_branch_m3)] # I checked, v_br_verif is set to 0 in this case, so no branch
+emerge_2009 = merge.data.table(emerge_2009, emerge_bure09_arbres[, .(tree, id_codesforets,
+	id_codesessences, circumference_m = c130, twig_volume = v_menu_verif)], by.x = "tree_id", by.y = "tree")
+
+emerge_2009 = merge.data.table(emerge_2009, codesessences[, .(essence, speciesName_sci, fct_type)],
+	by.x = "id_codesessences", by.y = "essence", all.x = TRUE)
+
+emerge_bure09_arbres[, .(humidite_0a4, infradensite_0a4, humidite_4a7, infradensite_4a7,
+	test = poids_fagots_0a4cm*humidite_0a4/infradensite_0a4 +
+	poids_fagots_4a7cm*humidite_4a7/infradensite_4a7, v_menu_verif)]
+
+emerge_bure09_arbres[, .(test, v_menu_verif)]
+
+
+## Keep only variables of interest
+data_check = unique(emerge_2010_profils[, .(tree, speciesName_sci, height, circumference_m,
+	bole_volume_conic_m3, bole_volume_cyl_m3)])
+
+## Change vernacular species names to scientific
+species_dt = data.table(species = c("Frêne", "Chêne vert", "Tilia cordata", "Chêne sessile", "Eucalyptus",
+		"Robinier", "Pin Alep", "Chêne pubescent", "Aulne", "Bouleau"),
+	speciesName_sci = c("Fraxinus excelsior", "Quercus ilex", "Tilia cordata", "Quercus petraea", "Eucalyptus spp.",
+		"Robinia pseudoacacia", "Pinus halepensis", "Quercus pubescens", "Alnus glutinosa", "Betula pendula"),
+	fct_type = c(rep("broadleaf", 6), "conifer", rep("broadleaf", 3)))
+
+data_check = merge.data.table(data_check, species_dt, by = "species")
+data_check[, species := NULL]
+data_check[speciesName_sci == "Quercus petraea", speciesName_sci := "Quercus robur_petraea"] # Because of inra_arbres
+setkey(data_check, speciesName_sci)
+
+data_check = data_check[speciesName_sci %in% species_nb[, speciesName_sci]]
+
+data_check[, hdn := sqrt(circumference_m)/height]
+data_check[, slenderness := height/circumference_m]
+data_check[, corrected_cyl_vol := height*circumference_m^2/(4*pi*(1 - 1.3/height)^2)]
+
+data_check[, feuil.res := as.factor(fct_type)]
+
+
+
+
+
+
+emerge_2010 = merge.data.table(x = unique(emerge_2010_branches[, .(tree_id, branch_volume)]),
+	y = unique(emerge_2010_profils[, .(tree_id, bole_volume_conic_m3)]), all.y = TRUE)
+
+emerge_2010 = merge.data.table(emerge_2010, emerge_2010_arbres[, .(tree, id_codesforets,
+	id_codesessences, c130, v_menu_verif)], by.x = "tree_id", by.y = "tree")
+
+# emerge_2010[is.na(branch_volume)] # I checked, v_br_verif is set to 0 in this case, so no branch
+
+emerge_2010_arbres[, poids_fagots_0a4cm - poids_fagots_0a4cm_verif]
+emerge_2010_arbres[, check_weight := total_poids_fagots - (poids_fagots_0a4cm + poids_fagots_4a7cm +
+	poids_fagots_7a20cm + poids_fagots_sup20cm)]
+
+emerge_2010_arbres[, plot(density(check_weight))]
+
+emerge_2010_arbres[, .(tree, species, c130, prop_bois_bas_houppier_pourcent,
+	poids_fagots_0a4cm, poids_fagots_4a7cm,
+	humidite_0a4, infradensite_0a4, humidite_4a7, infradensite_4a7,
+	v_menu_verif)]
+
+# Ok, je valide les poids car je ne sais pas ce qu'ils ont foutu pour les 18 eucalyptus de merde
+
+emerge_2010_arbres[, total_poids_fagots]
+
+
+
+
+
+emerge_2010_arbres[, 100 - (prop_bois_bas_houppier_pourcent + prop_feuilles_bas_houppier_pourcent)]
+
+r$> sort(colnames(emerge_2010_arbres))
+ [1] "brin_taillis"                            
+ [2] "c130"                                    
+ [3] "cmax_grossebranche"                      
+ [4] "commentaire"                             
+ [5] "ctronc_grossebranche"                    
+ [6] "date"                                    
+ [7] "distance_trou_generatrice"               
+ [8] "h_fourche1_m"                            
+ [9] "h_fourche2_m"                            
+[10] "h_fourche3_m"                            
+[11] "h_fourche4_m"                            
+[12] "h_grossebranche"                         
+[13] "hauteur_souche_m"                        
+[14] "humidite_0a4"                            
+[15] "humidite_4a7"                            
+[16] "id"                                      
+[17] "id_codesessences"                        
+[18] "id_codesforets"                          
+[19] "id_codesorganismes"                      
+[20] "id_codesstructures"                      
+[21] "infradensite_0a4"                        
+[22] "infradensite_4a7"                        
+[23] "insersion_1ere_branche_vivante_m"        
+[24] "longueur_arbre_m"                        
+[25] "longueur_d4_m"                           
+[26] "longueur_d7_m"                           
+[27] "parcelle"                                
+[28] "poids_fagots_0a4_bas"                    
+[29] "poids_fagots_0a4cm"                      
+[30] "poids_fagots_0a4cm_cime"                 
+[31] "poids_fagots_0a4cm_haut"                 
+[32] "poids_fagots_0a4cm_milieu"               
+[33] "poids_fagots_0a4cm_mort"                 
+[34] "poids_fagots_0a4cm_verif"                
+[35] "poids_fagots_0a4cm_vivant"               
+[36] "poids_fagots_4a7_cime"                   
+[37] "poids_fagots_4a7cm"                      
+[38] "poids_fagots_4a7cm_mort"                 
+[39] "poids_fagots_4a7cm_vivant"               
+[40] "poids_fagots_7a20cm"                     
+[41] "poids_fagots_cime_peses"                 
+[42] "poids_fagots_sup20cm"                    
+[43] "poids_tronc_humide_kg"                   
+[44] "prop_bois_bas_houppier_pourcent"         
+[45] "prop_bois_haut_houppier_pourcent"        
+[46] "prop_boismort_milieu_houppier_pourcent"  
+[47] "prop_boisvivant_milieu_houppier_pourcent"
+[48] "prop_feuilles_bas_houppier_pourcent"     
+[49] "prop_feuilles_haut_houppier_pourcent"    
+[50] "prop_feuilles_milieu_houppier_pourcent"  
+[51] "prop_fruits_bas_houppier_pourcent"       
+[52] "prop_fruits_haut_houppier_pourcent"      
+[53] "prop_fruits_milieu_houppier_pourcent"    
+[54] "site"                                    
+[55] "species"                                 
+[56] "total_poids_fagots"                      
+[57] "total_poids_tronc_fagots_humide_kg"      
+[58] "tree"                                    
+[59] "trou_contrainte"                         
+[60] "v_br_verif"                              
+[61] "v_menu_verif"                            
+[62] "v_tronc_cone_verif"                      
+[63] "v_tronc_cylindre_verif"                  
+[64] "volume_tronc_branches_humide"            
+[65] "volume_tronc_humide"  
 ```
 
 ```{r}
-# trees_2010 = merge.data.table(unique(emerge_2010_branches[, .(tree_id, vol_tot_branch_m3)]),
+# trees_2010 = merge.data.table(unique(emerge_2010_branches[, .(tree_id, branch_volume)]),
 # 	unique(emerge_2010_profils[, .(tree_id, bole_volume_cyl_m3, bole_volume_conic_m3)]))
 
 # emerge_2010_arbres = merge.data.table(emerge_2010_arbres, codesessences[, .(essence, genre, espece)],
