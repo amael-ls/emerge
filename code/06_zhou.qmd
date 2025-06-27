@@ -88,6 +88,7 @@ library(stringi)
 library(interp)
 library(DHARMa)
 library(shape)
+library(loo)
 
 ## Tool function
 source("./toolFunctions.R")
@@ -190,6 +191,7 @@ opt = "_full"
 stanData = readRDS(paste0(path_data, "stanData_nfi-inra", opt, ".rds"))
 forest_dt = readRDS(paste0(path_data, "nfi-inra_dt", opt, ".rds"))
 ind_species = readRDS(paste0(path_data, "ind_species_nfi-inra", opt, ".rds"))
+check_data = readRDS(paste0(path_data, "emerge_2009-2010.rds"))
 
 colours = paste0(met.brewer("Egypt")[1:4])
 names(colours) = c("conifer", "broadleaf", "inra", "nfi")
@@ -1222,6 +1224,7 @@ setkey(data_trees, sp_code)
 #| layout-ncol: 2
 
 ## Species-specific plots
+# betareg_pred = cmdstan_model("./temp.stan")
 for (sp_ind in sp_dt[, sp_index])
 {
 	stanData_new = list(
@@ -1240,10 +1243,8 @@ for (sp_ind in sp_dt[, sp_index])
 		AGB = forest_dt[, total_volume_m3]
 	)
 
-	# betareg_pred = cmdstan_model("./temp.stan")
-
 	posteriorVol = betareg_pred$generate_quantities(fitted_params = fit$draws(inc_warmup = FALSE), data = stanData_new,
-		parallel_chains = n_chains)
+		parallel_chains = min(n_chains, 4))
 
 	## Compute average pred volume
 	posteriorVol = apply(X = posteriorVol$draws("v_gen"), MARGIN = 3, FUN = mean)
@@ -1255,38 +1256,36 @@ for (sp_ind in sp_dt[, sp_index])
 	data_trees[sp_dt[sp_index == sp_ind, emerge], emerge_predVolume := TarEmerge(c130 = circumference_m*100,
 		htot = height, espar = sp_dt[sp_index == sp_ind, emerge], typevol = "total")]
 
-	# ## Plot
-	# # Comparison Emerge (inventR::TarEmerge) and mine vs Vallet 2006
-	# plot(data_trees[sp_dt[sp_index == sp_ind, emerge], total_volume_m3],
-	# 	data_trees[sp_dt[sp_index == sp_ind, emerge], my_predVolume],
-	# 	pch = 19, axes = FALSE, col = "#FAB25544", xlab = "Vallet", ylab = "Others")
-	# points(data_trees[sp_dt[sp_index == sp_ind, emerge], total_volume_m3],
-	# 	data_trees[sp_dt[sp_index == sp_ind, emerge], emerge_predVolume],
-	# 	pch = 19, col = "#0F7BA244")
-	# axis(1)
-	# axis(2, las = 1)
-	# abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
-	# legend(x = "topleft", legend = c("Mine", "Emerge"), fill = c("#FAB255", "#0F7BA2"), bty = "n")
+	## Plot
+	# Comparison Emerge (inventR::TarEmerge) and mine vs Vallet 2006
+	plot(data_trees[sp_dt[sp_index == sp_ind, emerge], total_volume_m3],
+		data_trees[sp_dt[sp_index == sp_ind, emerge], my_predVolume],
+		pch = 19, axes = FALSE, col = "#FAB25544", xlab = "Vallet", ylab = "Others")
+	points(data_trees[sp_dt[sp_index == sp_ind, emerge], total_volume_m3],
+		data_trees[sp_dt[sp_index == sp_ind, emerge], emerge_predVolume],
+		pch = 19, col = "#0F7BA244")
+	axis(1)
+	axis(2, las = 1)
+	abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
+	legend(x = "topleft", legend = c("Mine", "Emerge"), fill = c("#FAB255", "#0F7BA2"), bty = "n")
 
-	# # Comparison Emerge (inventR::TarEmerge), mine and Vallet 2006 vs bole volume (volume bois-fort tige)
-	# plot(data_trees[sp_dt[sp_index == sp_ind, emerge], bole_volume_m3],
-	# 	data_trees[sp_dt[sp_index == sp_ind, emerge], total_volume_m3],
-	# 	pch = 19, axes = FALSE, col = "#43B28444", xlab = "Bole volume", ylab = "Total volume",
-	# 	ylim = c(0, max(data_trees[sp_dt[sp_index == sp_ind, emerge],
-	# 		.(total_volume_m3, emerge_predVolume, my_predVolume)], na.rm = TRUE)))
-	# points(data_trees[sp_dt[sp_index == sp_ind, emerge], bole_volume_m3],
-	# 	data_trees[sp_dt[sp_index == sp_ind, emerge], emerge_predVolume],
-	# 	pch = 19, col = "#0F7BA244")
-	# points(data_trees[sp_dt[sp_index == sp_ind, emerge], bole_volume_m3],
-	# 	data_trees[sp_dt[sp_index == sp_ind, emerge], my_predVolume],
-	# 	pch = 19, col = "#FAB25544")
-	# axis(1)
-	# axis(2, las = 1)
-	# abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
-	# legend(x = "topleft", legend = c("Mine", "Emerge", "Vallet"), fill = c("#FAB255", "#0F7BA2", "#43B284"), bty = "n")
+	# Comparison Emerge (inventR::TarEmerge), mine and Vallet 2006 vs bole volume (volume bois-fort tige)
+	plot(data_trees[sp_dt[sp_index == sp_ind, emerge], bole_volume_m3],
+		data_trees[sp_dt[sp_index == sp_ind, emerge], total_volume_m3],
+		pch = 19, axes = FALSE, col = "#43B28444", xlab = "Bole volume", ylab = "Total volume",
+		ylim = c(0, max(data_trees[sp_dt[sp_index == sp_ind, emerge],
+			.(total_volume_m3, emerge_predVolume, my_predVolume)], na.rm = TRUE)))
+	points(data_trees[sp_dt[sp_index == sp_ind, emerge], bole_volume_m3],
+		data_trees[sp_dt[sp_index == sp_ind, emerge], emerge_predVolume],
+		pch = 19, col = "#0F7BA244")
+	points(data_trees[sp_dt[sp_index == sp_ind, emerge], bole_volume_m3],
+		data_trees[sp_dt[sp_index == sp_ind, emerge], my_predVolume],
+		pch = 19, col = "#FAB25544")
+	axis(1)
+	axis(2, las = 1)
+	abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
+	legend(x = "topleft", legend = c("Mine", "Emerge", "Vallet"), fill = c("#FAB255", "#0F7BA2", "#43B284"), bty = "n")
 }
-
-rm(fit)
 ```
 
 ## Heatmap
@@ -1336,7 +1335,7 @@ for (sp_ind in sp_dt[, sp_index])
 			axis(1)
 			axis(2, las = 1)
 			contour(si, add = TRUE, lwd = 2, axes = NULL)
-		}, xlab = "Circumference", ylab = "Height",
+		}, xlab = "Circumference", ylab = "Height", frame.plot = FALSE,
 		color.palette = colorRampPalette(met.brewer("Hiroshige", direction = -1))
 	)
 
@@ -1362,7 +1361,7 @@ for (sp_ind in sp_dt[, sp_index])
 			axis(1)
 			axis(2, las = 1)
 			contour(si, add = TRUE, lwd = 2, axes = NULL)
-		}, xlab = "Circumference", ylab = "Height",
+		}, xlab = "Circumference", ylab = "Height", frame.plot = FALSE,
 		color.palette = colorRampPalette(met.brewer("Hiroshige", direction = -1))
 	)
 }
@@ -1386,10 +1385,115 @@ Species-specific range of parameterisation
 
 :::
 
-
 ### Comparison on the independent dataset
+I use data collected in 2009 in Bure (France), and in 2010 (unknown location). The preparation of the data is detailed in the document `01_prepare_data.qmd`.
+
+```{stan output.var = "betareg_loglik", cache = TRUE}
+// Log-likelihood model
+functions {
+	vector r_zhou(vector x, real beta_, real gamma, real b)
+	{
+		return exp(-beta_*x) .* (x - b) + gamma*x + b;
+	}
+}
+
+data {
+	// Dimensions
+	int <lower = 1> N; // Number of trees
+	int <lower = 1> N_new; // Number of trees (new data)
+	int <lower = 1, upper = N> G; // Number of genus
+	int <lower = 1, upper = G> sp_ind; // Selected_species
+	array[G] int <lower = 1, upper = N> start; // Genus index start
+	array[G] int <lower = 1, upper = N> end; // Genus index end
+
+	// Predictors
+	vector[N] SB;
+	vector[N_new] bole_volume_m3_new;
+
+	// Data
+	vector[N] AGB;
+	vector[N_new] total_volume_m3_new;
+}
+
+transformed data {
+	vector[N] ratio = SB ./ AGB;
+
+	vector[G] SB_max;
+	for (i in 1:G)
+		SB_max[i] = max(SB[start[i]:end[i]]);
+}
+
+parameters {
+	// Parameters of the 'bumpy' function r_zhou
+	vector <lower = 0> [G] beta_;
+	vector <lower = 0, upper = 1> [G]  b;
+	vector <lower = -b ./ SB_max, upper = 0> [G] gamma; // I expect d to be negative
+
+	real <lower = 0> phi; // Precision (well kind of...)
+}
+
+transformed parameters {
+	vector [N] shape1;
+	vector [N] shape2;
+
+	for (i in 1:G)
+	{
+		shape1[start[i]:end[i]] = phi*r_zhou(SB[start[i]:end[i]], beta_[i], gamma[i], b[i]);
+		shape2[start[i]:end[i]] = phi*(1 - r_zhou(SB[start[i]:end[i]], beta_[i], gamma[i], b[i]));
+	}
+}
+
+generated quantities {
+	array[N_new] real log_lik;
+	{
+		// Variables declared insided will not be exported
+		vector [N_new] shape1_new = phi*r_zhou(bole_volume_m3_new, beta_[sp_ind], gamma[sp_ind], b[sp_ind]);
+		vector [N_new] shape2_new = phi*(1 - r_zhou(bole_volume_m3_new, beta_[sp_ind], gamma[sp_ind], b[sp_ind]));
+		real current_ratio;
+
+		for (i in 1:N_new)
+		{
+			current_ratio = bole_volume_m3_new[i]/total_volume_m3_new[i];
+			log_lik[i] = beta_lpdf(current_ratio | shape1_new[i], shape2_new[i]);
+		}
+	}
+}
 
 
+```
+
+```{r}
+## Prepare data
+betareg_loglik = cmdstan_model("./temp.stan")
+for (current_sp in c("Fagus sylvatica", "Quercus petraea")) # The only two species in common
+{
+	stanData_new = list(
+		N = forest_dt[, .N],
+		N_new = check_data[current_sp, .N],
+		G = forest_dt[, length(unique(speciesName_sci))],
+		sp_ind = sp_dt[current_sp, sp_index],
+		start = forest_dt[, .(start = .I[1]), by = speciesName_sci][, start],
+		end = forest_dt[, .(end = .I[.N]), by = speciesName_sci][, end],
+
+		# Predictors
+		SB = forest_dt[, bole_volume_m3], # Same as reconstruct one
+		bole_volume_m3_new = check_data[current_sp, bole_volume_conic_m3],
+
+		# Data
+		AGB = forest_dt[, total_volume_m3],
+		total_volume_m3_new = check_data[current_sp, total_volume_m3]
+	)
+
+	loglik_beta = betareg_loglik$generate_quantities(fitted_params = fit$draws(inc_warmup = FALSE),
+		data = stanData_new, parallel_chains = min(n_chains, 4))
+
+	loglik_beta$draws("log_lik")
+	r_eff_beta = loo::relative_eff(loglik_beta$draws("log_lik"), cores = 8)
+	loo_beta = loo::loo(x = loglik_beta$draws("log_lik"), r_eff = r_eff_beta, cores = 8, save_psis = TRUE)
+	saveRDS(loo_beta, paste0("./loo_beta-", current_sp, ".rds")
+}
+
+```
 
 ## Conclusion
 
