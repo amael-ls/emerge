@@ -1515,8 +1515,6 @@ for (current_sp in c("Fagus sylvatica", "Quercus petraea")) # The only two speci
 	axis(2, las = 1)
 	abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
 	legend(x = "topleft", legend = c("Vallet", "Vallet Bayes"), fill = c("#0F7BA2", "#FAB255"), bty = "n")
-
-
 }
 ```
 
@@ -1595,13 +1593,65 @@ generated quantities {
 
 ```
 
+```{stan output.var = "vallet_loglik", cache = TRUE}
+functions {
+	vector vallet(vector circumference, vector hdn, vector params, int N_params)
+	{
+		if (N_params == 4)
+			return (params[1] + params[2]*circumference + params[3]*hdn).*(1 + params[4]./circumference.^2);
+		
+		return params[1] + params[2]*circumference + params[3]*hdn;
+	}
+}
+
+data{
+	// Dimensions
+	int <lower = 1> N; // Number of trees // In m, while in cm in Vallet2006
+	int <lower = 3, upper = 4> N_params; // Number of parameters
+
+	// Predictors
+	vector[N] circumference_cm;
+	vector[N] height;
+
+	// New data
+	int <lower = 1> N_new; // Number of trees // In m, while in cm in Vallet2006
+	vector[N_new] circumference_cm_new;
+	vector[N] height_new;
+	vector[N] total_volume_m3_new;
+
+	// Observations
+	vector[N] total_volume_m3;
+}
+
+transformed data {
+	vector[N] hdn = sqrt(circumference_cm) ./ height;
+}
+
+parameters {
+	vector[N_params] vec_params;
+	real<lower = 0> sigma;
+}
+
+generated quantities {
+	array[N_new] real log_lik;
+	{
+		// Variables declared here are local and not exported
+		vector[N_new] hdn_new = sqrt(circumference_cm_new) ./ height_new;
+		for (i in 1:N_new)
+			log_lik[i] = normal_lpdf(total_volume_m3_new |
+			vallet(circumference_cm_new, hdn_new, vec_params, N_params) ./ (40000*pi()) .*
+				circumference_cm_new.^2 .* height_new, sigma);
+	}
+}
+
+```
+
 ```{r}
-## Prepare data
-betareg_loglik = cmdstan_model("./temp.stan")
 ls_params = c("beta_", "b", "gamma", "phi", "shape1", "shape2")
 
 for (current_sp in c("Fagus sylvatica", "Quercus petraea")) # The only two species in common
 {
+	## PSIS-LOO for my model
 	stanData_new = list(
 		N = forest_dt[, .N],
 		N_new = check_data[current_sp, .N],
@@ -1619,13 +1669,49 @@ for (current_sp in c("Fagus sylvatica", "Quercus petraea")) # The only two speci
 		total_volume_m3_new = check_data[current_sp, total_volume_m3]
 	)
 
-	loglik_beta = betareg_loglik$generate_quantities(fitted_params = fit$draws(ls_params, inc_warmup = FALSE),
-		data = stanData_new, parallel_chains = min(n_chains, 4))
+	filename = paste0("./loo_beta_", stri_replace(str = current_sp, replacement = "-", regex = " "), ".rds")
+	if (!file.exists(filename))
+	{
+		loglik_beta = betareg_loglik$generate_quantities(fitted_params = fit$draws(ls_params, inc_warmup = FALSE),
+			data = stanData_new, parallel_chains = min(n_chains, 4))
 
-	loglik_beta$draws("log_lik")
-	r_eff_beta = loo::relative_eff(loglik_beta$draws("log_lik"), cores = 8)
-	loo_beta = loo::loo(x = loglik_beta$draws("log_lik"), r_eff = r_eff_beta, cores = 8, save_psis = TRUE)
-	saveRDS(loo_beta, paste0("./loo_beta-", current_sp, ".rds"))
+		loglik_beta$draws("log_lik")
+		r_eff_beta = loo::relative_eff(loglik_beta$draws("log_lik"), cores = 8)
+		loo_beta = loo::loo(x = loglik_beta$draws("log_lik"), r_eff = r_eff_beta, cores = 8, save_psis = TRUE)
+
+		saveRDS(loo_beta, filename)
+	} else {
+		loo_beta = readRDS(filename)
+	}
+
+	## PSIS-LOO for my Vallet Bayesian
+	stanData_new = list(
+		N = forest_dt[current_sp, .N],
+		N_params = if (is.na(vallet_dt[current_sp, delta])) 3 else 4,
+
+		circumference_cm = forest_dt[current_sp, circumference_cm],
+		height = forest_dt[current_sp, height],
+
+		N_new = check_data[current_sp, .N],
+		circumference_cm_new = 100*check_data[current_sp, circumference_m],
+		height_new = check_data[current_sp, height],
+		total_volume_m3_new = check_data[current_sp, total_volume_m3],
+
+		total_volume_m3 = forest_dt[current_sp, total_volume_m3]
+	)
+
+	filename = paste0("./loo_vallet_", stri_replace(str = current_sp, replacement = "-", regex = " "), ".rds")
+	if (!file.exists(filename))
+	{
+		loglik_vallet = vallet_loglik$generate_quantities(fitted_params = results$draws(inc_warmup = FALSE),
+			data = stanData_new, parallel_chains = min(n_chains, 4))
+
+		loglik_vallet$draws("log_lik")
+		r_eff_vallet = loo::relative_eff(loglik_vallet$draws("log_lik"), cores = 8)
+		loo_vallet = loo::loo(x = loglik_vallet$draws("log_lik"), r_eff = r_eff_vallet, cores = 8, save_psis = TRUE)
+
+		saveRDS(loo_vallet, filename)
+	}
 }
 ```
 
