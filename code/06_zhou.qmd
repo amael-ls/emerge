@@ -1386,7 +1386,141 @@ Species-specific range of parameterisation
 :::
 
 ### Comparison on the independent dataset
-I use data collected in 2009 in Bure (France), and in 2010 (unknown location). The preparation of the data is detailed in the document `01_prepare_data.qmd`.
+I use data collected in 2009 in Bure (France), and in 2010 (unknown location). The preparation of the data is detailed in the document `01_prepare_data.qmd`. I want to compare my model with @Vallet2006 using PSIS-LOO [@Vehtari2017]. However, that requires to refit @Vallet2006 in a Bayesian framework. His dataset was a subsample of Emerge which I cannot recreate. Therefore, I am going to use the same dataset as my model.
+
+#### Recreate the study of @Vallet2006
+
+```{stan output.var = "vallet_bayesian", cache = TRUE}
+functions {
+	vector vallet(vector circumference, vector hdn, vector params, int N_params)
+	{
+		if (N_params == 4)
+			return (params[1] + params[2]*circumference + params[3]*hdn).*(1 + params[4]./circumference.^2);
+		
+		return params[1] + params[2]*circumference + params[3]*hdn;
+	}
+}
+
+data{
+	// Dimensions
+	int <lower = 1> N; // Number of trees // In m, while in cm in Vallet2006
+	int <lower = 3, upper = 4> N_params; // Number of parameters
+
+	// Predictors
+	vector[N] circumference_cm;
+	vector[N] height;
+
+	// Observations
+	vector[N] total_volume_m3;
+}
+
+transformed data {
+	vector[N] hdn = sqrt(circumference_cm) ./ height;
+}
+
+parameters {
+	vector[N_params] vec_params;
+	real<lower = 0> sigma;
+}
+
+model {
+	target += normal_lpdf(vec_params[1] | 0, 1);
+	target += normal_lpdf(vec_params[2] | 0, 0.01);
+	target += normal_lpdf(vec_params[3] | 0, 1);
+
+	if (N_params == 4)
+		target += normal_lpdf(vec_params[4] | 45, 10);
+	
+	target += gamma_lpdf(sigma | 0.06^2/0.01, 0.06/0.01);
+	
+	target += normal_lpdf(total_volume_m3 |
+		vallet(circumference_cm, hdn, vec_params, N_params) ./ (40000*pi()) .* circumference_cm.^2 .* height, sigma);
+}
+
+```
+
+```{r}
+#### Run Vallet 2006, Bayesian version and with our dataset (which contains Vallet's dataset)
+## Compute some useful variables and store Vallet's results in a data table
+forest_dt[, circumference_cm := 100*circumference_m]
+n_chains = 4
+
+## Table 5 from Vallet2006
+vallet_dt = data.table(speciesName_sci = c("Fagus sylvatica", "Quercus petraea"),
+	alpha = c(0.395, 0.471),
+	sd_alpha = c(0.01, 0.014),
+	beta = c(2.66e-4, -3.45e-4),
+	sd_beta = c(4.9e-5, 1.3e-5),
+	gamma = c(0.421, 0.377),
+	sd_gamma = c(0.025, 0.031),
+	delta = c(45.4, NA),
+	sd_delta = c(4, NA),
+	var_res = c(0.0036, 0.004), key = "speciesName_sci")
+
+form_vallet = function(circumference_cm, height, alpha, beta, gamma, delta)
+{
+	res = alpha + beta*circumference_cm + gamma*sqrt(circumference_cm)/height
+	if (!is.na(delta))
+		res = res*(1 + delta/circumference_cm^2)
+	return (res)
+}
+
+for (current_sp in c("Fagus sylvatica", "Quercus petraea")) # The only two species in common
+{
+	stanData = list(
+		N = forest_dt[current_sp, .N],
+		N_params = if (is.na(vallet_dt[current_sp, delta])) 3 else 4,
+
+		circumference_cm = forest_dt[current_sp, circumference_cm],
+		height = forest_dt[current_sp, height],
+
+		total_volume_m3 = forest_dt[current_sp, total_volume_m3]
+	)
+	
+	filename = paste0("./fit_vallet_bayesian_", stri_replace(str = current_sp, replacement = "-", regex = " "), ".rds")
+	
+	if (!file.exists(filename))
+	{
+		results = vallet_bayesian$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4),
+			max_treedepth = 12)
+		saveRDS(results, filename)
+	} else {
+		results = readRDS(filename)
+	}
+
+	## Predict with Vallet
+	# Vallet
+	forest_dt[current_sp, form_vallet := form_vallet(circumference_cm, height, vallet_dt[current_sp, alpha],
+		vallet_dt[current_sp, beta], vallet_dt[current_sp, gamma], vallet_dt[current_sp, delta])]
+	forest_dt[current_sp, vallet_pred := form_vallet/(4*pi) * circumference_m^2*height]
+
+	# Bayesian Vallet
+	params_vallet = apply(X = results$draws("vec_params"), MARGIN = 3, FUN = mean)
+	
+	if (stanData$N_params == 3)
+		params_vallet = c(params_vallet, NA)
+	
+	names(params_vallet) = c("alpha", "beta","gamma", "delta")
+	
+	forest_dt[current_sp, my_form := form_vallet(circumference_cm, height, params_vallet["alpha"],
+		params_vallet["beta"], params_vallet["gamma"], params_vallet["delta"])]
+	forest_dt[current_sp, my_vallet_pred := my_form/(4*pi) * circumference_m^2*height]
+
+	## Plot Vallet and Bayesian vallet vs observed
+	plot(forest_dt[current_sp, total_volume_m3], forest_dt[current_sp, vallet_pred],
+		pch = 19, xlab = "Obs", ylab = "Pred", axes = FALSE, col = "#0F7BA255", cex = 0.75)
+	points(forest_dt[current_sp, total_volume_m3], forest_dt["Fagus sylvatica", my_vallet_pred],
+		pch = 19, cex = 0.25, col = "#FAB255")
+	axis(1)
+	axis(2, las = 1)
+	abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
+	legend(x = "topleft", legend = c("Vallet", "Vallet Bayes"), fill = c("#0F7BA2", "#FAB255"), bty = "n")
+
+
+}
+```
+
+#### Compute the PSIS-LOO and compare both models
 
 ```{stan output.var = "betareg_loglik", cache = TRUE}
 // Log-likelihood model
@@ -1459,12 +1593,13 @@ generated quantities {
 	}
 }
 
-
 ```
 
 ```{r}
 ## Prepare data
 betareg_loglik = cmdstan_model("./temp.stan")
+ls_params = c("beta_", "b", "gamma", "phi", "shape1", "shape2")
+
 for (current_sp in c("Fagus sylvatica", "Quercus petraea")) # The only two species in common
 {
 	stanData_new = list(
@@ -1484,15 +1619,14 @@ for (current_sp in c("Fagus sylvatica", "Quercus petraea")) # The only two speci
 		total_volume_m3_new = check_data[current_sp, total_volume_m3]
 	)
 
-	loglik_beta = betareg_loglik$generate_quantities(fitted_params = fit$draws(inc_warmup = FALSE),
+	loglik_beta = betareg_loglik$generate_quantities(fitted_params = fit$draws(ls_params, inc_warmup = FALSE),
 		data = stanData_new, parallel_chains = min(n_chains, 4))
 
 	loglik_beta$draws("log_lik")
 	r_eff_beta = loo::relative_eff(loglik_beta$draws("log_lik"), cores = 8)
 	loo_beta = loo::loo(x = loglik_beta$draws("log_lik"), r_eff = r_eff_beta, cores = 8, save_psis = TRUE)
-	saveRDS(loo_beta, paste0("./loo_beta-", current_sp, ".rds")
+	saveRDS(loo_beta, paste0("./loo_beta-", current_sp, ".rds"))
 }
-
 ```
 
 ## Conclusion
