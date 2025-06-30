@@ -1509,7 +1509,7 @@ for (current_sp in c("Fagus sylvatica", "Quercus petraea")) # The only two speci
 	## Plot Vallet and Bayesian vallet vs observed
 	plot(forest_dt[current_sp, total_volume_m3], forest_dt[current_sp, vallet_pred],
 		pch = 19, xlab = "Obs", ylab = "Pred", axes = FALSE, col = "#0F7BA255", cex = 0.75)
-	points(forest_dt[current_sp, total_volume_m3], forest_dt["Fagus sylvatica", my_vallet_pred],
+	points(forest_dt[current_sp, total_volume_m3], forest_dt[current_sp, my_vallet_pred],
 		pch = 19, cex = 0.25, col = "#FAB255")
 	axis(1)
 	axis(2, las = 1)
@@ -1577,6 +1577,7 @@ transformed parameters {
 
 generated quantities {
 	array[N_new] real log_lik;
+	array[N_new] real sim_tot_vol;
 	{
 		// Variables declared insided will not be exported
 		vector [N_new] shape1_new = phi*r_zhou(bole_volume_m3_new, beta_[sp_ind], gamma[sp_ind], b[sp_ind]);
@@ -1587,6 +1588,7 @@ generated quantities {
 		{
 			current_ratio = bole_volume_m3_new[i]/total_volume_m3_new[i];
 			log_lik[i] = beta_lpdf(current_ratio | shape1_new[i], shape2_new[i]);
+			sim_tot_vol[i] = bole_volume_m3_new[i] ./ beta_rng(shape1_new[i], shape2_new[i]);
 		}
 	}
 }
@@ -1662,6 +1664,7 @@ generated quantities {
 
 ```{r}
 ls_params = c("beta_", "b", "gamma", "phi", "shape1", "shape2")
+# betareg_loglik = cmdstan_model("./temp.stan")
 
 for (current_sp in c("Fagus sylvatica", "Quercus petraea")) # The only two species in common
 {
@@ -1686,9 +1689,12 @@ for (current_sp in c("Fagus sylvatica", "Quercus petraea")) # The only two speci
 	loglik_beta = betareg_loglik$generate_quantities(fitted_params = fit$draws(ls_params, inc_warmup = FALSE),
 		data = stanData_new, parallel_chains = min(n_chains, 4))
 
-	loglik_beta$draws("log_lik")
+	sim_vol_beta = apply(loglik_beta$draws("sim_tot_vol"), 3, mean)
+
 	r_eff_beta = loo::relative_eff(loglik_beta$draws("log_lik"), cores = 8)
 	loo_beta = loo::loo(x = loglik_beta$draws("log_lik"), r_eff = r_eff_beta, cores = 8, save_psis = TRUE)
+
+	ls_problems_beta = pareto_k_ids(loo_beta)
 
 	## PSIS-LOO for my Vallet Bayesian
 	stanData_new = list(
@@ -1706,6 +1712,8 @@ for (current_sp in c("Fagus sylvatica", "Quercus petraea")) # The only two speci
 		total_volume_m3 = forest_dt[current_sp, total_volume_m3]
 	)
 
+	filename = paste0("./fit_vallet_bayesian_", stri_replace(str = current_sp, replacement = "-", regex = " "), ".rds")
+	results = readRDS(filename)
 	# vallet_loglik = cmdstan_model("./temp.stan")
 	loglik_vallet = vallet_loglik$generate_quantities(fitted_params = results$draws(inc_warmup = FALSE),
 		data = stanData_new, parallel_chains = min(n_chains, 4))
@@ -1714,18 +1722,21 @@ for (current_sp in c("Fagus sylvatica", "Quercus petraea")) # The only two speci
 
 	r_eff_vallet = loo::relative_eff(loglik_vallet$draws("log_lik"), cores = 8)
 	loo_vallet = loo::loo(x = loglik_vallet$draws("log_lik"), r_eff = r_eff_vallet, cores = 8, save_psis = TRUE)
-
-	# plot(loo_vallet, diagnostic = c("k", "ESS", "n_eff"), label_points = TRUE, main = "")
 	
 	ls_problems_vallet = pareto_k_ids(loo_vallet)
 
-	plot(stanData_new$total_volume_m3_new, sim_vol_vallet, pch = 19, xlab = "Obs", ylab = "Pred",
-		axes = FALSE, col = "#0F7BA255", cex = 0.75)
-	text(x = stanData_new$total_volume_m3_new[ls_problems_vallet], y = sim_vol_vallet[ls_problems_vallet],
-		labels = as.character(ls_problems_vallet), pos = 4, offset = 0.5)
+	plot(stanData_new$total_volume_m3_new, sim_vol_beta, pch = 19, xlab = "Obs", ylab = "Pred",
+		axes = FALSE, col = "#0F7BA255", cex = 0.75, ylim = c(0, max(sim_vol_beta, sim_vol_vallet)))
+	points(stanData_new$total_volume_m3_new, sim_vol_vallet, pch = 19,col = "#FAB255", cex = 0.25)
+	if (length(ls_problems_vallet) != 0)
+		text(x = stanData_new$total_volume_m3_new[ls_problems_vallet], y = sim_vol_vallet[ls_problems_vallet],
+			labels = as.character(ls_problems_vallet), pos = 4, offset = 0.5)
 	axis(1)
 	axis(2, las = 1)
 	abline(a = 0, b = 1, col = "#CD212A", lwd = 2)
+	legend(x = "topleft", legend = c("Mine", "Vallet Bayes"), fill = c("#0F7BA2", "#FAB255"), bty = "n")
+
+	loo::loo_compare(list(beta = loo_beta, vallet = loo_vallet))
 }
 ```
 
