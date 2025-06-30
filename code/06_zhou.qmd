@@ -1602,6 +1602,14 @@ functions {
 		
 		return params[1] + params[2]*circumference + params[3]*hdn;
 	}
+
+	real vallet_real(real circumference, real hdn, vector params, int N_params)
+	{
+		if (N_params == 4)
+			return (params[1] + params[2]*circumference + params[3]*hdn).*(1 + params[4]./circumference.^2);
+		
+		return params[1] + params[2]*circumference + params[3]*hdn;
+	}
 }
 
 data{
@@ -1616,8 +1624,8 @@ data{
 	// New data
 	int <lower = 1> N_new; // Number of trees // In m, while in cm in Vallet2006
 	vector[N_new] circumference_cm_new;
-	vector[N] height_new;
-	vector[N] total_volume_m3_new;
+	vector[N_new] height_new;
+	vector[N_new] total_volume_m3_new;
 
 	// Observations
 	vector[N] total_volume_m3;
@@ -1634,13 +1642,19 @@ parameters {
 
 generated quantities {
 	array[N_new] real log_lik;
+	array[N_new] real sim_tot_vol;
 	{
 		// Variables declared here are local and not exported
 		vector[N_new] hdn_new = sqrt(circumference_cm_new) ./ height_new;
 		for (i in 1:N_new)
-			log_lik[i] = normal_lpdf(total_volume_m3_new |
-			vallet(circumference_cm_new, hdn_new, vec_params, N_params) ./ (40000*pi()) .*
-				circumference_cm_new.^2 .* height_new, sigma);
+		{
+			log_lik[i] = normal_lpdf(total_volume_m3_new[i] |
+				vallet_real(circumference_cm_new[i], hdn_new[i], vec_params, N_params) ./ (40000*pi()) .*
+				circumference_cm_new[i].^2 .* height_new[i], sigma);
+		}
+
+		sim_tot_vol = normal_rng(vallet(circumference_cm_new, hdn_new, vec_params, N_params) ./ (40000*pi()) .*
+			circumference_cm_new.^2 .* height_new, sigma);
 	}
 }
 
@@ -1669,20 +1683,12 @@ for (current_sp in c("Fagus sylvatica", "Quercus petraea")) # The only two speci
 		total_volume_m3_new = check_data[current_sp, total_volume_m3]
 	)
 
-	filename = paste0("./loo_beta_", stri_replace(str = current_sp, replacement = "-", regex = " "), ".rds")
-	if (!file.exists(filename))
-	{
-		loglik_beta = betareg_loglik$generate_quantities(fitted_params = fit$draws(ls_params, inc_warmup = FALSE),
-			data = stanData_new, parallel_chains = min(n_chains, 4))
+	loglik_beta = betareg_loglik$generate_quantities(fitted_params = fit$draws(ls_params, inc_warmup = FALSE),
+		data = stanData_new, parallel_chains = min(n_chains, 4))
 
-		loglik_beta$draws("log_lik")
-		r_eff_beta = loo::relative_eff(loglik_beta$draws("log_lik"), cores = 8)
-		loo_beta = loo::loo(x = loglik_beta$draws("log_lik"), r_eff = r_eff_beta, cores = 8, save_psis = TRUE)
-
-		saveRDS(loo_beta, filename)
-	} else {
-		loo_beta = readRDS(filename)
-	}
+	loglik_beta$draws("log_lik")
+	r_eff_beta = loo::relative_eff(loglik_beta$draws("log_lik"), cores = 8)
+	loo_beta = loo::loo(x = loglik_beta$draws("log_lik"), r_eff = r_eff_beta, cores = 8, save_psis = TRUE)
 
 	## PSIS-LOO for my Vallet Bayesian
 	stanData_new = list(
@@ -1700,18 +1706,26 @@ for (current_sp in c("Fagus sylvatica", "Quercus petraea")) # The only two speci
 		total_volume_m3 = forest_dt[current_sp, total_volume_m3]
 	)
 
-	filename = paste0("./loo_vallet_", stri_replace(str = current_sp, replacement = "-", regex = " "), ".rds")
-	if (!file.exists(filename))
-	{
-		loglik_vallet = vallet_loglik$generate_quantities(fitted_params = results$draws(inc_warmup = FALSE),
-			data = stanData_new, parallel_chains = min(n_chains, 4))
+	# vallet_loglik = cmdstan_model("./temp.stan")
+	loglik_vallet = vallet_loglik$generate_quantities(fitted_params = results$draws(inc_warmup = FALSE),
+		data = stanData_new, parallel_chains = min(n_chains, 4))
 
-		loglik_vallet$draws("log_lik")
-		r_eff_vallet = loo::relative_eff(loglik_vallet$draws("log_lik"), cores = 8)
-		loo_vallet = loo::loo(x = loglik_vallet$draws("log_lik"), r_eff = r_eff_vallet, cores = 8, save_psis = TRUE)
+	sim_vol_vallet = apply(loglik_vallet$draws("sim_tot_vol"), 3, mean)
 
-		saveRDS(loo_vallet, filename)
-	}
+	r_eff_vallet = loo::relative_eff(loglik_vallet$draws("log_lik"), cores = 8)
+	loo_vallet = loo::loo(x = loglik_vallet$draws("log_lik"), r_eff = r_eff_vallet, cores = 8, save_psis = TRUE)
+
+	# plot(loo_vallet, diagnostic = c("k", "ESS", "n_eff"), label_points = TRUE, main = "")
+	
+	ls_problems_vallet = pareto_k_ids(loo_vallet)
+
+	plot(stanData_new$total_volume_m3_new, sim_vol_vallet, pch = 19, xlab = "Obs", ylab = "Pred",
+		axes = FALSE, col = "#0F7BA255", cex = 0.75)
+	text(x = stanData_new$total_volume_m3_new[ls_problems_vallet], y = sim_vol_vallet[ls_problems_vallet],
+		labels = as.character(ls_problems_vallet), pos = 4, offset = 0.5)
+	axis(1)
+	axis(2, las = 1)
+	abline(a = 0, b = 1, col = "#CD212A", lwd = 2)
 }
 ```
 
