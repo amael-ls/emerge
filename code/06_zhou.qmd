@@ -1201,7 +1201,7 @@ setkey(data_trees, sp_code)
 ```
 
 ```{r}
-#| label: fig-comparions
+#| label: fig-comparisons
 #| fig-cap: Comparison of my model, @Vallet2006, and Emerge from `inventR`
 #| fig-subcap:
 #|   - "Abies alba, Emerge and mine vs @Vallet2006"
@@ -1222,6 +1222,7 @@ setkey(data_trees, sp_code)
 #| out-width: 95%
 #| fig-width: 4
 #| layout-ncol: 2
+#| output: false
 
 ## Species-specific plots
 # betareg_pred = cmdstan_model("./temp.stan")
@@ -1440,6 +1441,8 @@ model {
 ```
 
 ```{r}
+#| output: false
+
 #### Run Vallet 2006, Bayesian version and with our dataset (which contains Vallet's dataset)
 ## Compute some useful variables and store Vallet's results in a data table
 forest_dt[, circumference_cm := 100*circumference_m]
@@ -1483,6 +1486,9 @@ for (current_sp in c("Fagus sylvatica", "Quercus petraea")) # The only two speci
 	{
 		results = vallet_bayesian$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4),
 			max_treedepth = 12)
+		results$save_output_files(dir = "./",
+			basename = stri_sub(filename, to = stri_locate(filename, regex = ".rds")[, "start"] - 1),
+			random = FALSE)
 		saveRDS(results, filename)
 	} else {
 		results = readRDS(filename)
@@ -1663,6 +1669,8 @@ generated quantities {
 ```
 
 ```{r}
+#|output: false
+
 ls_params = c("beta_", "b", "gamma", "phi", "shape1", "shape2")
 # betareg_loglik = cmdstan_model("./temp.stan")
 
