@@ -943,8 +943,8 @@ lazyPosterior(draws = fit$draws("k[4]"), fun = dnorm, mean = 0.0, sd = 0.1)
 #| fig-subcap:
 #|   - "Abies alba"
 #|   - "Abies alba"
-#|   - "Fagus sylvatica" 
-#|   - "Fagus sylvatica" 
+#|   - "Fagus sylvatica"
+#|   - "Fagus sylvatica"
 #| fig-asp: 1
 #| out-width: 95%
 #| fig-width: 8
@@ -978,7 +978,7 @@ for (i in c(1, 4))
 
 It seems that the best model so far, in terms of parameters uncertainty and residuals, is the the flexible model in @sec-flexible. Of course, properly selectioning a model requires PSIS-Leave-One-Out [@Vehtari2017]. I will now check the differences of prediction for our model (see @eq-flexible) and @Vallet2006 for the 7 species that are in common.
 
-## Difference between @Vallet2006 and the newly developed allometries
+## Difference between @Vallet2006, Emerge, and the newly developed allometries
 
 In this section, I check the differences of prediction for the 7 species used in @Vallet2006: *Abies alba* (silver fir), *Fagus sylvatica* (common beech), *Picea abies* (Norway spruce), *Pinus pinaster* (maritime pine), *Pinus sylvestris* (scots pine), *Pseudotsuga menziesii* (douglas fir), and *Quercus petraea* (sessile oak). I check the predictions on three different datasets:
 
@@ -995,7 +995,7 @@ fit = readRDS("./fit_zhou_beta_flexible.rds")
 ## Compute average pred volume
 forest_dt[, my_predVolume := apply(X = fit$draws("v_gen"), MARGIN = 3, FUN = mean)]
 
-## Compute Vallet 2006 volume 6 species available (listed in sp_dt)
+## Compute Vallet 2006 volume 7 species available (listed in sp_dt)
 sp_dt = data.table(emerge = c("61", "09", "62", "51", "52", "64", "03"),
 	vallet = c("sapin", "hetre", "epicea", "pin.maritime", "pin.sylvestre", "douglas", "chene"),
 	speciesName_sci = c("Abies alba", "Fagus sylvatica", "Picea abies", "Pinus pinaster",
@@ -1006,6 +1006,11 @@ setkey(sp_dt, speciesName_sci)
 for (current_sp in sp_dt[, speciesName_sci])
 	forest_dt[current_sp, vallet_predVolume := TarVallet(circumference_m*100, height, sp_dt[current_sp, vallet])]
 
+## Compute Emerge volume. WATCH OUT: it is necessary to specify dec = 0 to get total volume
+for (current_sp in sp_dt[, speciesName_sci])
+	forest_dt[current_sp, emerge_predVolume := TarEmerge(c130 = circumference_m*100,
+		htot = height, espar = sp_dt[current_sp, emerge], typevol = "total", dec = 0)]
+
 ## Fitting range
 sp_dt[, c("min_c", "max_c") := forest_dt[.SD, .(min(circumference_m), max(circumference_m)),
 	on = .(speciesName_sci), by = .EACHI][, .(V1, V2)]]
@@ -1013,11 +1018,24 @@ sp_dt[, c("min_h", "max_h") := forest_dt[.SD, .(min(height), max(height)),
 	on = .(speciesName_sci), by = .EACHI][, .(V1, V2)]]
 sp_dt[, c("min_v", "max_v") := forest_dt[.SD, .(min(bole_volume_m3), max(bole_volume_m3)),
 	on = .(speciesName_sci), by = .EACHI][, .(V1, V2)]]
+
+## Get an approximation of the max bole volume before model collapse
+sp_dt[, sp_index := which(ls_species %in% sp_dt[, speciesName_sci])] # Species index from forest_dt (species is the key)
+
+params = getParams(model_cmdstan = fit, params_names = c(paste0("beta_[", sp_dt[, sp_index], "]"),
+	paste0("b[", sp_dt[, sp_index], "]"), paste0("gamma[", sp_dt[, sp_index], "]")))
+
+sp_dt[, beta_ := params[paste0("beta_[", sp_index, "]")]]
+sp_dt[, b := params[paste0("b[", sp_index, "]")]]
+sp_dt[, gamma := params[paste0("gamma[", sp_index, "]")]]
+
+sp_dt[, collapse_at := -b/gamma]
+sp_dt[, value_neglected := exp(beta_*b/gamma)]
 ```
 
 ```{r}
-#| label: fig-obs_vs_me-vallet
-#| fig-cap: Total volume predicted by my model and @Vallet2006 *vs* observed
+#| label: fig-obs_vs_me-emerge-vallet
+#| fig-cap: Total volume predicted by my model, `inventR::TarEmerge`, and @Vallet2006 *vs* observed
 #| fig-subcap:
 #|   - "Abies alba"
 #|   - "Fagus sylvatica"
@@ -1036,16 +1054,19 @@ sp_dt[, c("min_v", "max_v") := forest_dt[.SD, .(min(bole_volume_m3), max(bole_vo
 for (current_sp in sp_dt[, speciesName_sci])
 {
 	plot(forest_dt[current_sp, total_volume_m3], forest_dt[current_sp, my_predVolume], pch = 19,
-		axes = FALSE, xlab = "Observed", ylab = "Predicted", col = "#FAB255",
-		ylim = c(0, max(forest_dt[current_sp, .(my_predVolume, vallet_predVolume)])))
-	points(forest_dt[current_sp, total_volume_m3], forest_dt[current_sp, vallet_predVolume], pch = 19,
-		col = "#0F7BA244")
+		lwd = 0, cex = 0.75, axes = FALSE, xlab = "Observed", ylab = "Predicted", col = "#FAB255",
+		ylim = c(0, max(forest_dt[current_sp, .(my_predVolume, emerge_predVolume, vallet_predVolume)])))
+	points(forest_dt[current_sp, total_volume_m3], forest_dt[current_sp, emerge_predVolume],
+		pch = 19, lwd = 0, cex = 0.6, col = "#0F7BA2")
+	points(forest_dt[current_sp, total_volume_m3], forest_dt[current_sp, vallet_predVolume],
+		pch = 19, lwd = 0, cex = 0.6, col = "#43B284")
 	axis(1)
 	axis(2, las = 1)
 	abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
 	# Arrows(x0 = sp_dt[current_sp, min_v], y0 = 0.1, x1 = sp_dt[current_sp, max_v], y1 = 0.1,
 	# 	arr.type = "triangle", code = 3, arr.adj = 1) # A bit useless given pred vs obs!
-	legend(x = "topleft", legend = c("Mine", "Vallet"), fill = c("#FAB255", "#0F7BA2"), bty = "n")
+	legend(x = "topleft", legend = c("Mine", "TarEmerge", "Vallet"),
+		fill = c("#FAB255", "#0F7BA2", "#43B284"), bty = "n")
 }
 ```
 
@@ -1177,23 +1198,7 @@ data_trees = exec_req(conn = db,
 	DT = TRUE)
 
 disconnect_db(db)
-```
 
-```{r}
-## Get an approximation of the max bole volume before model collapse
-sp_dt[, sp_index := which(ls_species %in% sp_dt[, speciesName_sci])] # Species index from forest_dt (species is the key)
-
-params = getParams(model_cmdstan = fit, params_names = c(paste0("beta_[", sp_dt[, sp_index], "]"),
-	paste0("b[", sp_dt[, sp_index], "]"), paste0("gamma[", sp_dt[, sp_index], "]")))
-
-sp_dt[, beta_ := params[paste0("beta_[", sp_index, "]")]]
-sp_dt[, b := params[paste0("b[", sp_index, "]")]]
-sp_dt[, gamma := params[paste0("gamma[", sp_index, "]")]]
-
-sp_dt[, collapse_at := -b/gamma]
-sp_dt[, value_neglected := exp(beta_*b/gamma)]
-
-## Simulate posterior total volume on new data
 # Remove volumes that are beyond the computed limit
 data_trees[, limit := sp_dt[emerge == unique(sp_code), floor(collapse_at)], by = sp_code]
 data_trees = data_trees[bole_volume_m3 < limit][, limit := NULL]
@@ -1255,16 +1260,18 @@ for (sp_ind in sp_dt[, sp_index])
 
 	## Add Emerge volumes
 	data_trees[sp_dt[sp_index == sp_ind, emerge], emerge_predVolume := TarEmerge(c130 = circumference_m*100,
-		htot = height, espar = sp_dt[sp_index == sp_ind, emerge], typevol = "total")]
+		htot = height, espar = sp_dt[sp_index == sp_ind, emerge], typevol = "total", dec = 0)]
 
 	## Plot
 	# Comparison Emerge (inventR::TarEmerge) and mine vs Vallet 2006
 	plot(data_trees[sp_dt[sp_index == sp_ind, emerge], total_volume_m3],
 		data_trees[sp_dt[sp_index == sp_ind, emerge], my_predVolume],
-		pch = 19, axes = FALSE, col = "#FAB25544", xlab = "Vallet", ylab = "Others")
+		pch = 20, lwd = 0, axes = FALSE, col = "#FAB25544", xlab = "Vallet", ylab = "Others", cex = 0.75,
+		ylim = c(0, max(data_trees[sp_dt[sp_index == sp_ind, emerge],
+			.(emerge_predVolume, my_predVolume)], na.rm = TRUE)))
 	points(data_trees[sp_dt[sp_index == sp_ind, emerge], total_volume_m3],
 		data_trees[sp_dt[sp_index == sp_ind, emerge], emerge_predVolume],
-		pch = 19, col = "#0F7BA244")
+		pch = 20, lwd = 0, col = "#0F7BA244", cex = 0.6)
 	axis(1)
 	axis(2, las = 1)
 	abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
@@ -1273,15 +1280,15 @@ for (sp_ind in sp_dt[, sp_index])
 	# Comparison Emerge (inventR::TarEmerge), mine and Vallet 2006 vs bole volume (volume bois-fort tige)
 	plot(data_trees[sp_dt[sp_index == sp_ind, emerge], bole_volume_m3],
 		data_trees[sp_dt[sp_index == sp_ind, emerge], total_volume_m3],
-		pch = 19, axes = FALSE, col = "#43B28444", xlab = "Bole volume", ylab = "Total volume",
+		pch = 20, lwd = 0, cex = 0.75, axes = FALSE, col = "#43B28444", xlab = "Bole volume", ylab = "Total volume",
 		ylim = c(0, max(data_trees[sp_dt[sp_index == sp_ind, emerge],
 			.(total_volume_m3, emerge_predVolume, my_predVolume)], na.rm = TRUE)))
 	points(data_trees[sp_dt[sp_index == sp_ind, emerge], bole_volume_m3],
 		data_trees[sp_dt[sp_index == sp_ind, emerge], emerge_predVolume],
-		pch = 19, col = "#0F7BA244")
+		pch = 20, lwd = 0, cex = 0.6, col = "#0F7BA244")
 	points(data_trees[sp_dt[sp_index == sp_ind, emerge], bole_volume_m3],
 		data_trees[sp_dt[sp_index == sp_ind, emerge], my_predVolume],
-		pch = 19, col = "#FAB25544")
+		pch = 20, lwd = 0, cex = 0.6, col = "#FAB25544")
 	axis(1)
 	axis(2, las = 1)
 	abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
