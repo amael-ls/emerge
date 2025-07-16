@@ -1,0 +1,312 @@
+---
+title: "Hierachical models"
+date: today
+author: Amaël Le Squin
+date-format: iso
+filters:
+  - fontawesome
+  - siunitx-quarto
+  - imagify
+imagify:
+  header-includes: |
+    \usepackage{pgfplots}
+    \pgfplotsset{compat=1.18}
+    \usepgfplotslibrary{fillbetween}
+    \usetikzlibrary{positioning}
+    \usetikzlibrary{calc}
+  pdf-engine: lualatex
+pdf-engine: lualatex
+keep-tex: true
+execute:
+  error: true
+  echo: false
+  warning: false
+  message: false
+bibliography: /home/ALe-Squin/work/library/bib_file/references.bib
+lightbox:
+  match: auto
+css: style.css
+knitr:
+  opts_chunk: 
+    dev: ragg_png
+    crop: null
+    out.width: "70%"
+    fig.width: 6
+    fig.asp: 0.618
+    fig.align: "center"
+format:
+  html:
+    toc: true
+    include-in-header: mathjax.html
+    code-fold: true
+    df-print: paged
+    number-sections: true
+    theme:
+      light: cerulean
+      dark: darkly
+    margin: 5% 0;
+  pdf:
+    mathspec: true
+    include-in-header:
+      - text: |
+          \usepackage{unicode-math}
+---
+
+```{r}
+#| output: false
+
+#### Clear space and load packages
+rm(list = ls())
+graphics.off()
+
+options(max.print = 500)
+
+library(data.table)
+library(MetBrewer)
+library(interp)
+# library(cmdstanr)
+# 	register_knitr_engine(override = TRUE)
+# library(stringi)
+# library(DHARMa)
+
+## Tool function
+# source("./toolFunctions.R")
+```
+
+```{r}
+#| output: false
+
+#### Load the data
+## Path
+os = Sys.info()[['sysname']]
+mnt_point = "/mnt/local_share/"
+if (os == "Linux" || os == "Darwin")
+{
+	if (!dir.exists(mnt_point))
+		stop(paste0("The mounting point <", mnt_point, "> does not exist"))
+} else if (os == "Windows") {
+	stop("TO DO!!! No idea how that works on Windows!")
+} else {
+	stop(paste("Unknown Operating System:", os))
+}
+
+path_data = paste0(mnt_point, "/data/")
+if (!dir.exists(path_data))
+	stop(paste0("Folder <", path_data, "> does not exist! Did you run 01_prepare_data.qmd?"))
+
+opt = "_full"
+
+## Loading
+stanData = readRDS(paste0(path_data, "stanData_nfi-inra", opt, ".rds"))
+forest_dt = readRDS(paste0(path_data, "nfi-inra_dt", opt, ".rds"))
+ind_species = readRDS(paste0(path_data, "ind_species_nfi-inra", opt, ".rds"))
+
+colours = paste0(met.brewer("Egypt")[1:4])
+names(colours) = c("conifer", "broadleaf", "inra", "nfi")
+
+forest_dt[fct_type == "broadleaf", fct_colour := colours["broadleaf"]]
+forest_dt[fct_type == "conifer", fct_colour := colours["conifer"]]
+forest_dt[origin_data == "inra", origin_colour := colours["inra"]]
+forest_dt[origin_data == "nfi", origin_colour := colours["nfi"]]
+
+setkey(forest_dt, origin_data, fct_type)
+
+forest_dt[.("inra", "broadleaf"), origin_fct_colour := paste0(colours["nfi"], "FF")]
+forest_dt[.("inra", "conifer"), origin_fct_colour := paste0(colours["inra"], "AA")]
+forest_dt[.("nfi", "broadleaf"), origin_fct_colour := paste0(colours["broadleaf"], "88")]
+forest_dt[.("nfi", "conifer"), origin_fct_colour := paste0(colours["conifer"], "55")]
+
+dt_hull = unique(forest_dt[, .(scaled_c = (circumference_m - mean(circumference_m))/sd(circumference_m),
+	scaled_h = (height - mean(height))/sd(height), origin_fct_colour), by = .(origin_data, fct_type)])
+
+## Subset data
+forest_dt = forest_dt["inra"]
+forest_dt = forest_dt[, n_indiv := .N, by = speciesName_sci]
+forest_dt = forest_dt[n_indiv > 50]
+
+forest_dt[, ratio := bole_volume_m3/total_volume_m3]
+forest_dt[, hdn := sqrt(circumference_m)/height]
+
+setkey(forest_dt, speciesName_sci)
+ls_species = forest_dt[, unique(speciesName_sci)]
+```
+
+## Exploration on the 'stability' if total volume
+
+C. Deleuze claims that the total volume is 'more stable' than the bole volume. By more stable, I understand that there is less variability in total volume for a given couple of height--circumference. I doubt about this claim, and think that this is an artefact from the Emerge dataset itself. The NFI is exhaustive both geographically and in terms of monitored trees, while Emerge mostly has slendered trees (as can be seen in `01_prepare_data.qmd`), especially for *Fagus* and *Picea*.
+
+So, in the next figures, I plot heatmaps of bole volume, total volume, and the ratio bole of total in the circumference--height space. If there is no difference, we should see similar figures between bole and total volume, while the ratio should be evenly distributed in the space once the 'threshold' of small trees passed (for which the ratio is quite deterministic).
+
+```{r}
+#| label: fig-results_simple
+#| fig-cap: Correlation between the bole volume and the total volume
+#| fig-subcap:
+#|   - "Abies alba"
+#|   - "Abies alba"
+#|   - "Abies alba"
+#|   - "Carpinus betulus"
+#|   - "Carpinus betulus"
+#|   - "Carpinus betulus"
+#|   - "Cedrus atlantica"
+#|   - "Cedrus atlantica"
+#|   - "Cedrus atlantica"
+#|   - "Fagus sylvatica"
+#|   - "Fagus sylvatica"
+#|   - "Fagus sylvatica"
+#|   - "Fraxinus excelsior"
+#|   - "Fraxinus excelsior"
+#|   - "Fraxinus excelsior"
+#|   - "Larix decidua"
+#|   - "Larix decidua"
+#|   - "Larix decidua"
+#|   - "Picea abies"
+#|   - "Picea abies"
+#|   - "Picea abies"
+#|   - "Pinus halepensis"
+#|   - "Pinus halepensis"
+#|   - "Pinus halepensis"
+#|   - "Pinus laricio"
+#|   - "Pinus laricio"
+#|   - "Pinus laricio"
+#|   - "Pinus nigra"
+#|   - "Pinus nigra"
+#|   - "Pinus nigra"
+#|   - "Pinus pinaster"
+#|   - "Pinus pinaster"
+#|   - "Pinus pinaster"
+#|   - "Pinus sylvestris"
+#|   - "Pinus sylvestris"
+#|   - "Pinus sylvestris"
+#|   - "Pinus uncinata"
+#|   - "Pinus uncinata"
+#|   - "Pinus uncinata"
+#|   - "Pseudotsuga menziesii"
+#|   - "Pseudotsuga menziesii"
+#|   - "Pseudotsuga menziesii"
+#|   - "Quercus petraea"
+#|   - "Quercus petraea"
+#|   - "Quercus petraea"
+#|   - "Quercus rubra"
+#|   - "Quercus rubra"
+#|   - "Quercus rubra"
+#|   - "Quercus sp."
+#|   - "Quercus sp."
+#|   - "Quercus sp."
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 6
+#| layout-ncol: 3
+#| output: false
+
+# Heatmap of bole volume (trunk, from base to diameter = 7 cm)
+for (current_sp in ls_species)
+{
+	si = interp(x = forest_dt[current_sp, circumference_m], y = forest_dt[current_sp, height],
+		z = forest_dt[current_sp, bole_volume_m3], method = "linear", duplicate = "mean")
+
+	filled.contour(si,
+		plot.axes = {
+			axis(1)
+			axis(2, las = 1)
+			contour(si, add = TRUE, lwd = 2, axes = NULL)
+		}, xlab = "Circumference", ylab = "Height", frame.plot = FALSE,
+		color.palette = colorRampPalette(met.brewer("Hiroshige", direction = -1))
+	)
+
+	# Heatmap of total volume
+	si = interp(x = forest_dt[current_sp, circumference_m], y = forest_dt[current_sp, height],
+		z = forest_dt[current_sp, total_volume_m3], method = "linear", duplicate = "mean")
+
+	filled.contour(si,
+		plot.axes = {
+			axis(1)
+			axis(2, las = 1)
+			contour(si, add = TRUE, lwd = 2, axes = NULL)
+		}, xlab = "Circumference", ylab = "Height", frame.plot = FALSE,
+		color.palette = colorRampPalette(met.brewer("Hiroshige", direction = -1))
+	)
+
+	# Heatmap of ratio
+	si = interp(x = forest_dt[current_sp, circumference_m], y = forest_dt[current_sp, height],
+		z = forest_dt[current_sp, ratio], method = "linear", duplicate = "mean")
+
+	filled.contour(si,
+		plot.axes = {
+			axis(1)
+			axis(2, las = 1)
+			contour(si, add = TRUE, lwd = 2, axes = NULL)
+		}, xlab = "Circumference", ylab = "Height", frame.plot = FALSE,
+		color.palette = colorRampPalette(met.brewer("Hiroshige", direction = -1))
+	)
+}
+```
+
+Out of curiosity, I also 'replicate' the Fig. 2 of @Jucker2025 for my own study, with the height of trees, $h$, and their circumference, $c$. Both are standardised.
+
+```{r}
+#| label: fig-jucker2025
+#| fig-cap: "Figure inspired by @Jucker2025"
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 6
+
+plot(dt_hull[, scaled_c], dt_hull[, scaled_h], axes = FALSE, xlab = "Circumference (m)", ylab = "Height (m)",
+	pch = 20, col = dt_hull[, origin_fct_colour], xlim = c(-3, 10), ylim = c(-3, 5), lwd = 0)
+axis(1)
+axis(2, las = 1)
+abline(h = 0, lty = 2, cex = 0.8, col = "#57895758")
+abline(v = 0, lty = 2, cex = 0.8, col = "#57895758")
+
+legend(x = "topleft", legend = c("nfi-conif", "nfi-broad", "inra-conif", "inra-broad"),
+	fill = colours, bty = "n", cex = 1.25)
+```
+
+```{r}
+#| label: fig-jucker2025_hull
+#| fig-cap: "Figure inspired by @Jucker2025 using alpha convex hull"
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 6
+
+epsilon = 1e-5
+
+min_dt_hull = dt_hull[, .(min_scaled_c = min(scaled_c)), by = .(origin_data, fct_type)]
+
+dt_hull[origin_data == "nfi" & fct_type == "broadleaf" & scaled_c == min_dt_hull[.("nfi", "broadleaf"), min_scaled_c],
+	scaled_c := scaled_c + runif(.N, 0, epsilon)] # Hull problem because vertical line at min(dbh)
+
+dt_hull[origin_data == "nfi" & fct_type == "conifer" & scaled_c == min_dt_hull[.("nfi", "conifer"), min_scaled_c],
+	scaled_c := scaled_c + runif(.N, 0, epsilon)] # Hull problem because vertical line at min(dbh)
+
+a1 = alphahull::ahull(x = dt_hull[.("inra", "broadleaf"), .(scaled_c, scaled_h)],
+	alpha = 5)
+a2 = alphahull::ahull(x = dt_hull[.("inra", "conifer"), .(scaled_c, scaled_h)],
+	alpha = 5)
+a3 = alphahull::ahull(x = dt_hull[.("nfi", "broadleaf"), .(scaled_c, scaled_h)],
+	alpha = 5)
+a4 = alphahull::ahull(x = dt_hull[.("nfi", "conifer"), .(scaled_c, scaled_h)],
+	alpha = 5)
+
+plot(NA, NA, xlim = c(-3, 10), ylim = c(-3, 5), xlab = "Circumference (m)", ylab = "Height (m)", axes = FALSE)
+
+plot(a1, col = paste0(colours["nfi"], "55"), add = TRUE, wpoints = FALSE, lwd = 4)
+plot(a2, col = paste0(colours["inra"], "55"), add = TRUE, wpoints = FALSE, lwd = 4)
+plot(a3, col = paste0(colours["broadleaf"], "55"), add = TRUE, wpoints = FALSE, lwd = 4)
+plot(a4, col = paste0(colours["conifer"], "55"), add = TRUE, wpoints = FALSE, lwd = 4)
+
+axis(1)
+axis(2, las = 1)
+abline(h = 0, lty = 2, cex = 0.8, col = "#57895758")
+abline(v = 0, lty = 2, cex = 0.8, col = "#57895758")
+
+legend(x = "topleft", legend = c("nfi-conif", "nfi-broad", "inra-conif", "inra-broad"),
+	fill = colours, bty = "n", cex = 1.25)
+```
+
+Finally, 
+
+```{r}
+forest_dt[, class_circumference := as.numeric(cut(circumference_m, breaks = 4)), by = speciesName_sci]
+forest_dt[, .(var_tot = var(total_volume_m3), var_bole = var(bole_volume_m3)),
+	by = .(speciesName_sci, class_circumference)][order(speciesName_sci, class_circumference)]
+```
