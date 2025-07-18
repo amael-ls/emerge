@@ -255,10 +255,21 @@ codesessences[, nomessence := as.character(nomessence)]
 codesessences[essence_ifn < 10, nfi := paste0("0", nfi)]
 ```
 
-I noticed one error in the `codesessences` data.table for the species `essence_ifn = 65`. It is written *Cedrus atlantica ou libani* but it should be *Cedrus atlantica* according to the French NFI.
+I noticed one error in the `codesessences` data.table for the species `essence_ifn = 65`. It is written *Cedrus atlantica ou libani* but it should be *Cedrus atlantica* according to the French NFI. The species *Sorbus torminalis* is also missing.
 
 ```{r}
 codesessences[essence_ifn == 65, c("nomessence", "espece") := .("cèdre de l Atlas", "atlantica")]
+
+codesessences = rbind(codesessences, data.table(
+	numero = NA,
+	essence = NA,
+	plusgeneral = NA,
+	nomessence = "Alisier torminal	",
+	genre = "Sorbus",
+	espece = "torminalis",
+	essence_ifn = 41,
+	feuillu = 1,
+	nfi = "41"))
 ```
 
 Then, I also decided to merge *Pinus nigra ssp pallasiana* with *Pinus nigra* because there are only 7 individuals *v.s.* 240. Note that after all, *Pinus nigra ssp pallasiana* [is a synonym](https://inpn.mnhn.fr/espece/listeEspeces/pinus+nigra/) of *Pinus nigra ssp nigra*, which is quite close to *Pinus nigra*. There is also a mistake for `Thuja plicata`, it is written `Thuya`. The unknown genus are transformed when possible to `Broadleaves` or `Conifers`.
@@ -322,12 +333,14 @@ As said above, I do not trust the data.frame `ifn_arbres`. I do my own request h
 ## French NFI data query
 db = connect_db()
 
+# In Ancient Method (am), the inventory was done by cycle rather than homogeneously distributed everywhere
+
 nfi_data = exec_req(conn = db, req = "
 	SELECT
 		tree.NPP, tree.A, tree.ESS, tree.C13, tree.HTOT, tree.R, tree.V, tree.VTOT,
 		tree.d26, tree.ddec, tree.dmed, tree.cmed, tree.hdec,
 		log.surlon, log.surdia, log.ns,
-		coords1.XL, coords1.YL,
+		coords1.XL, coords1.YL, coords1.dep as department, coords1.cyc as cycle,
 		EXTRACT(YEAR FROM coords2.DATEPOINT) AS year
 
 	FROM
@@ -352,6 +365,22 @@ nfi_data = exec_req(conn = db, req = "
 
 disconnect_db(db)
 ```
+
+::: {#nte-AM .callout-note}
+
+## Ancient Method
+
+Note that the Ancient Method (AM) was done by cycle rather than having points sampled on the whole territory every year. That means a whole department is done once within a cycle (that last around 10 years), and then a new cycle starts. Therefore the variable `incref` does not exist in AM, and it is the cycle variable that ensures that all the trees where measured with the same protocol.
+
+:::
+
+::: {.callout-caution}
+
+## NAs
+
+There are some `NA` values for the `year` and `ddec` (taper diameter, taken near the taper height `hdec`) variables. I decided to keep these measurement instead of doing `na.omit`, especially for the year variable as it is mostly a useless info especially in ancient method (see @nte-AM).
+
+:::
 
 I believe that it is important to know how the data are built! Here, `vtot` is the sum of three volumes coming from:
 
@@ -407,8 +436,6 @@ axis(2, las = 1)
 ## Remove columns of little interest
 nfi_data[, c("v1", "v2", "v3", "d26", "dmed", "cmed", "verif") := NULL]
 
-nfi_data = na.omit(nfi_data)
-
 ## Add scientific species names
 nfi_data = merge.data.table(nfi_data, codesessences[, .(nfi, genre, speciesName_sci, fct_type)],
 	by.x = "ess", by.y = "nfi")
@@ -424,9 +451,9 @@ if (isTRUE(nfi_data[, all.equal(v, vtot, tol = 1e-5)]))
 }
 
 ## Change column names
-setnames(nfi_data, new = c("species_code_nfi", "plot_id", "tree_id", "circumference_m", "height", "bole_volume_m3",
-	"taper_diameter", "taper_height", "x_lambert", "y_lambert", "year", "bole_volume_reconstruct_m3", "genus",
-	"speciesName_sci", "fct_type"))
+setnames(nfi_data, new = c("species_code_nfi", "plot_id", "tree_id", "circumference_m", "height",
+	"bole_volume_m3", "taper_diameter", "taper_height", "x_lambert", "y_lambert", "department",
+	"cycle", "year", "bole_volume_reconstruct_m3", "genus", "speciesName_sci", "fct_type"))
 
 ## Densities of circumference and height for taper_height < 2.6
 plot(nfi_data[taper_height <= 2.6, density(height)], xlab = "Height", main = "", axes = FALSE, lwd = 3)
