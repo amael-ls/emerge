@@ -52,25 +52,36 @@ format:
           \usepackage{unicode-math}
 ---
 
+<!-- New command -->
+\newcommand{\ie}{*i.e.,*}
+
+<!-- Math commands -->
+\newcommand{\Vbft}{V_{\text{BFT}}}
+\newcommand{\Fbft}{F_{\text{BFT}}}
+\newcommand{\Vtot}{V_{\text{tot}}}
+\newcommand{\hdec}{h_{\text{tap}}}
+\newcommand{\ddec}{\phi_{\text{tap}}}
+
 ```{r}
 #| output: false
 
 #### Clear space and load packages
-rm(list = ls())
+# rm(list = ls())
 graphics.off()
 
 options(max.print = 500)
 
 library(data.table)
 library(MetBrewer)
+library(cmdstanr)
 library(interp)
-# library(cmdstanr)
-# 	register_knitr_engine(override = TRUE)
-# library(stringi)
+library(gt)
+	register_knitr_engine(override = TRUE)
+library(stringi)
 # library(DHARMa)
 
 ## Tool function
-# source("./toolFunctions.R")
+source("./toolFunctions.R")
 ```
 
 ```{r}
@@ -120,18 +131,22 @@ dt_hull = unique(forest_dt[, .(scaled_c = (circumference_m - mean(circumference_
 	scaled_h = (height - mean(height))/sd(height), origin_fct_colour), by = .(origin_data, fct_type)])
 
 ## Subset data
-forest_dt = forest_dt["inra"]
-forest_dt = forest_dt[, n_indiv := .N, by = speciesName_sci]
-forest_dt = forest_dt[n_indiv > 50]
+inra = forest_dt["inra"]
+inra = inra[, n_indiv := .N, by = speciesName_sci]
+inra = inra[n_indiv > 50]
 
-forest_dt[, ratio := bole_volume_m3/total_volume_m3]
-forest_dt[, hdn := sqrt(circumference_m)/height]
+inra[, ratio := bole_volume_m3/total_volume_m3]
+inra[, hdn := sqrt(circumference_m)/height]
 
-setkey(forest_dt, speciesName_sci)
-ls_species = forest_dt[, unique(speciesName_sci)]
+setkey(inra, speciesName_sci)
+ls_species = inra[, unique(speciesName_sci)]
+
+nfi = forest_dt["nfi"]
+nfi = nfi[, n_indiv := .N, by = speciesName_sci]
+nfi = nfi[n_indiv > 5000]
 ```
 
-## Exploration on the 'stability' if total volume
+## Exploration on the 'stability' of total volume *v.s.* bole volume
 
 C. Deleuze claims that the total volume is 'more stable' than the bole volume. By more stable, I understand that there is less variability in total volume for a given couple of height--circumference. I doubt about this claim, and think that this is an artefact from the Emerge dataset itself. The NFI is exhaustive both geographically and in terms of monitored trees, while Emerge mostly has slendered trees (as can be seen in `01_prepare_data.qmd`), especially for *Fagus* and *Picea*.
 
@@ -141,68 +156,71 @@ So, in the next figures, I plot heatmaps of bole volume, total volume, and the r
 #| label: fig-results_simple
 #| fig-cap: Correlation between the bole volume and the total volume
 #| fig-subcap:
-#|   - "Abies alba"
-#|   - "Abies alba"
-#|   - "Abies alba"
-#|   - "Carpinus betulus"
-#|   - "Carpinus betulus"
-#|   - "Carpinus betulus"
-#|   - "Cedrus atlantica"
-#|   - "Cedrus atlantica"
-#|   - "Cedrus atlantica"
-#|   - "Fagus sylvatica"
-#|   - "Fagus sylvatica"
-#|   - "Fagus sylvatica"
-#|   - "Fraxinus excelsior"
-#|   - "Fraxinus excelsior"
-#|   - "Fraxinus excelsior"
-#|   - "Larix decidua"
-#|   - "Larix decidua"
-#|   - "Larix decidua"
-#|   - "Picea abies"
-#|   - "Picea abies"
-#|   - "Picea abies"
-#|   - "Pinus halepensis"
-#|   - "Pinus halepensis"
-#|   - "Pinus halepensis"
-#|   - "Pinus laricio"
-#|   - "Pinus laricio"
-#|   - "Pinus laricio"
-#|   - "Pinus nigra"
-#|   - "Pinus nigra"
-#|   - "Pinus nigra"
-#|   - "Pinus pinaster"
-#|   - "Pinus pinaster"
-#|   - "Pinus pinaster"
-#|   - "Pinus sylvestris"
-#|   - "Pinus sylvestris"
-#|   - "Pinus sylvestris"
-#|   - "Pinus uncinata"
-#|   - "Pinus uncinata"
-#|   - "Pinus uncinata"
-#|   - "Pseudotsuga menziesii"
-#|   - "Pseudotsuga menziesii"
-#|   - "Pseudotsuga menziesii"
-#|   - "Quercus petraea"
-#|   - "Quercus petraea"
-#|   - "Quercus petraea"
-#|   - "Quercus rubra"
-#|   - "Quercus rubra"
-#|   - "Quercus rubra"
-#|   - "Quercus sp."
-#|   - "Quercus sp."
-#|   - "Quercus sp."
+#|   - "Abies alba, bole vol"
+#|   - "Abies alba, tot vol"
+#|   - "Abies alba, ratio"
+#|   - "Carpinus betulus, bole vol"
+#|   - "Carpinus betulus, tot vol"
+#|   - "Carpinus betulus, ratio"
+#|   - "Cedrus atlantica, bole vol"
+#|   - "Cedrus atlantica, tot vol"
+#|   - "Cedrus atlantica, ratio"
+#|   - "Fagus sylvatica, bole vol"
+#|   - "Fagus sylvatica, tot vol"
+#|   - "Fagus sylvatica, ratio"
+#|   - "Fraxinus excelsior, bole vol"
+#|   - "Fraxinus excelsior, tot vol"
+#|   - "Fraxinus excelsior, ratio"
+#|   - "Larix decidua, bole vol"
+#|   - "Larix decidua, tot vol"
+#|   - "Larix decidua, ratio"
+#|   - "Picea abies, bole vol"
+#|   - "Picea abies, tot vol"
+#|   - "Picea abies, ratio"
+#|   - "Pinus halepensis, bole vol"
+#|   - "Pinus halepensis, tot vol"
+#|   - "Pinus halepensis, ratio"
+#|   - "Pinus laricio, bole vol"
+#|   - "Pinus laricio, tot vol"
+#|   - "Pinus laricio, ratio"
+#|   - "Pinus nigra, bole vol"
+#|   - "Pinus nigra, tot vol"
+#|   - "Pinus nigra, ratio"
+#|   - "Pinus pinaster, bole vol"
+#|   - "Pinus pinaster, tot vol"
+#|   - "Pinus pinaster, ratio"
+#|   - "Pinus sylvestris, bole vol"
+#|   - "Pinus sylvestris, tot vol"
+#|   - "Pinus sylvestris, ratio"
+#|   - "Pinus uncinata, bole vol"
+#|   - "Pinus uncinata, tot vol"
+#|   - "Pinus uncinata, ratio"
+#|   - "Pseudotsuga menziesii, bole vol"
+#|   - "Pseudotsuga menziesii, tot vol"
+#|   - "Pseudotsuga menziesii, ratio"
+#|   - "Quercus petraea, bole vol"
+#|   - "Quercus petraea, tot vol"
+#|   - "Quercus petraea, ratio"
+#|   - "Quercus rubra, bole vol"
+#|   - "Quercus rubra, tot vol"
+#|   - "Quercus rubra, ratio"
+#|   - "Quercus sp., bole vol"
+#|   - "Quercus sp., tot vol"
+#|   - "Quercus sp., ratio"
 #| fig-asp: 1
 #| out-width: 95%
 #| fig-width: 6
 #| layout-ncol: 3
-#| output: false
+#| output: true
+
+forest_dt_heatmap = unique(inra[, .(speciesName_sci, circumference_m, height,
+	bole_volume_m3, total_volume_m3, ratio)], by = c("speciesName_sci", "circumference_m", "height"))
 
 # Heatmap of bole volume (trunk, from base to diameter = 7 cm)
 for (current_sp in ls_species)
 {
-	si = interp(x = forest_dt[current_sp, circumference_m], y = forest_dt[current_sp, height],
-		z = forest_dt[current_sp, bole_volume_m3], method = "linear", duplicate = "mean")
+	si = interp(x = forest_dt_heatmap[current_sp, circumference_m], y = forest_dt_heatmap[current_sp, height],
+		z = forest_dt_heatmap[current_sp, bole_volume_m3], method = "linear", duplicate = "mean")
 
 	filled.contour(si,
 		plot.axes = {
@@ -214,8 +232,8 @@ for (current_sp in ls_species)
 	)
 
 	# Heatmap of total volume
-	si = interp(x = forest_dt[current_sp, circumference_m], y = forest_dt[current_sp, height],
-		z = forest_dt[current_sp, total_volume_m3], method = "linear", duplicate = "mean")
+	si = interp(x = forest_dt_heatmap[current_sp, circumference_m], y = forest_dt_heatmap[current_sp, height],
+		z = forest_dt_heatmap[current_sp, total_volume_m3], method = "linear", duplicate = "mean")
 
 	filled.contour(si,
 		plot.axes = {
@@ -227,8 +245,8 @@ for (current_sp in ls_species)
 	)
 
 	# Heatmap of ratio
-	si = interp(x = forest_dt[current_sp, circumference_m], y = forest_dt[current_sp, height],
-		z = forest_dt[current_sp, ratio], method = "linear", duplicate = "mean")
+	si = interp(x = forest_dt_heatmap[current_sp, circumference_m], y = forest_dt_heatmap[current_sp, height],
+		z = forest_dt_heatmap[current_sp, ratio], method = "linear", duplicate = "mean")
 
 	filled.contour(si,
 		plot.axes = {
@@ -239,6 +257,8 @@ for (current_sp in ls_species)
 		color.palette = colorRampPalette(met.brewer("Hiroshige", direction = -1))
 	)
 }
+
+rm(forest_dt_heatmap)
 ```
 
 Out of curiosity, I also 'replicate' the Fig. 2 of @Jucker2025 for my own study, with the height of trees, $h$, and their circumference, $c$. Both are standardised.
@@ -303,10 +323,162 @@ legend(x = "topleft", legend = c("nfi-conif", "nfi-broad", "inra-conif", "inra-b
 	fill = colours, bty = "n", cex = 1.25)
 ```
 
-Finally, 
+Finally, here are the variances of both bole and total volume per species and per class of circumference. As can be seen, we cannot claim that one volume is more stable than the other...
+
+::: {.callout-note collapse=true}
+
+## 
 
 ```{r}
-forest_dt[, class_circumference := as.numeric(cut(circumference_m, breaks = 4)), by = speciesName_sci]
-forest_dt[, .(var_tot = var(total_volume_m3), var_bole = var(bole_volume_m3)),
-	by = .(speciesName_sci, class_circumference)][order(speciesName_sci, class_circumference)]
+inra[, class_circumference := as.numeric(cut(circumference_m, breaks = 4)), by = speciesName_sci]
+inra[, .(var_tot = var(total_volume_m3), var_bole = var(bole_volume_m3)),
+	by = .(speciesName_sci, class_circumference)][order(speciesName_sci, class_circumference)] |>
+	gt() |>
+	cols_label(
+		speciesName_sci = "Species",
+		class_circumference = "Circumference class",
+		var_tot = "Var(tot vol)",
+		var_bole = "Var(bole vol)"
+	) |>
+	tab_style(
+		style = cell_borders(sides = "all", style = NULL),
+		locations = cells_body()
+	) |>
+	tab_style(
+		style = cell_text(weight = "bold", align = "right"),
+		locations = list(cells_column_labels(), cells_column_spanners())
+	) |>
+	tab_style(
+		style = list(cell_fill(color = "#FFFFFF"), cell_text(color = "#122112", weight = "bold",
+			align = "right")),
+		locations = cells_body(columns = speciesName_sci)
+	) |>
+	tab_style(
+		style = list(cell_fill(color = "#FFFFFF"), cell_text(align = "left")),
+		locations = cells_body(columns = class_circumference)
+	) |>
+	fmt_number(
+		columns = starts_with("var_"),
+		decimals = 2
+	)
+
+## This shows that I can just compare the variances as they both follow the same law:
+# ceil_halfway = function(x)
+# 	return (ceiling(x * 2) / 2)
+
+# xx = inra[speciesName_sci == "Fagus sylvatica", total_volume_m3]
+# yy = inra[speciesName_sci == "Fagus sylvatica", bole_volume_m3]
+
+# hist(xx, breaks = seq(0, ceil_halfway(max(xx)), by = 0.1), prob = TRUE)
+# mm = mean(xx)
+# vv = var(xx)
+# curve(dgamma(x, shape = mm^2/vv, rate = mm/vv), lwd = 2, col = "#CD212A", add = TRUE)
+
+# hist(yy, breaks = seq(0, ceil_halfway(max(yy)), by = 0.1), prob = TRUE)
+# mm = mean(yy)
+# vv = var(yy)
+# curve(dgamma(x, shape = mm^2/vv, rate = mm/vv), lwd = 2, col = "#CD212A", add = TRUE)
 ```
+
+:::
+
+As a conclusion, the two volumes are as 'stable' or messy as each other!
+
+## A first not so simple joined model
+
+This model is based on the ratio developed in `06_zhou.qmd` for the total volume, $\Vtot$. For $\Vbft$, I explore few relations between the taper diametre, $\ddec$, and taper height, $\hdec$.
+
+### Heatmaps $\ddec$, $\hdec$, and $\Vbft$
+
+```{r}
+forest_dt_heatmap = unique(nfi[!is.na(taper_diameter), .(speciesName_sci, taper_diameter, taper_height,
+	bole_volume_m3)], by = c("speciesName_sci", "taper_diameter", "taper_height"))
+
+forest_dt_heatmap2 = unique(nfi[, .(speciesName_sci, circumference_m, height,
+	bole_volume_m3)], by = c("speciesName_sci", "circumference_m", "height"))
+
+setkey(forest_dt_heatmap, speciesName_sci)
+setkey(forest_dt_heatmap2, speciesName_sci)
+
+# Heatmap of bole volume (trunk, from base to diameter = 7 cm)
+for (current_sp in forest_dt_heatmap[, unique(speciesName_sci)])
+{
+	si = interp(x = forest_dt_heatmap[current_sp, taper_diameter], y = forest_dt_heatmap[current_sp, taper_height],
+		z = forest_dt_heatmap[current_sp, bole_volume_m3], method = "linear", duplicate = "mean")
+
+	filled.contour(si,
+		plot.axes = {
+			axis(1)
+			axis(2, las = 1)
+			contour(si, add = TRUE, lwd = 2, axes = NULL)
+		}, xlab = "Taper diametre", ylab = "Taper height", main = current_sp, frame.plot = FALSE,
+		color.palette = colorRampPalette(met.brewer("Hiroshige", direction = -1))
+	)
+
+	si = interp(x = forest_dt_heatmap2[current_sp, circumference_m], y = forest_dt_heatmap2[current_sp, height],
+		z = forest_dt_heatmap2[current_sp, bole_volume_m3], method = "linear", duplicate = "mean")
+
+	filled.contour(si,
+		plot.axes = {
+			axis(1)
+			axis(2, las = 1)
+			contour(si, add = TRUE, lwd = 2, axes = NULL)
+		}, xlab = "Circumference", ylab = "Height", main = current_sp, frame.plot = FALSE,
+		color.palette = colorRampPalette(met.brewer("Hiroshige", direction = -1))
+	)
+}
+
+rm(forest_dt_heatmap)
+```
+
+```{r}
+model = cmdstan_model("./temp.stan")
+
+test = nfi[speciesName_sci == "Pinus nigra"][sample(x = seq_len(.N), size = 500)]
+
+stanData = list(
+	N = test[, .N],
+
+	circumference_m = test[, circumference_m],
+	height = test[, height],
+
+	taper_volume_m3 = test[, bole_volume_m3]
+)
+
+n_chains = 4
+
+fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4), max_treedepth = 12)
+
+lazyTrace(fit$draws("max_potential_v_taper"), main = "potential taper volume")
+lazyTrace(fit$draws("rho"), main = "rho")
+lazyTrace(fit$draws("loc_circum"), main = "loc circum")
+lazyTrace(fit$draws("disp_circum"), main = "disp circum")
+lazyTrace(fit$draws("loc_height"), main = "loc height")
+lazyTrace(fit$draws("disp_height"), main = "disp height")
+
+sim = apply(X = fit$draws("taper_vol_gen"), MARGIN = 3, FUN = mean)
+
+plot(stanData$taper_volume_m3, sim, pch = 19, lwd = 0)
+abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
+
+
+
+si = interp(x = stanData$circumference_m, y = stanData$height,
+	z = sim, method = "linear", duplicate = "mean")
+
+filled.contour(si,
+	plot.axes = {
+		axis(1)
+		axis(2, las = 1)
+		contour(si, add = TRUE, lwd = 2, axes = NULL)
+	}, xlab = "Circumference", ylab = "Height", main = "Pinus nigra (sim)", frame.plot = FALSE,
+	color.palette = colorRampPalette(met.brewer("Hiroshige", direction = -1))
+)
+
+```
+
+
+## Bibliography {.unnumbered}
+
+::: {#refs}
+:::
