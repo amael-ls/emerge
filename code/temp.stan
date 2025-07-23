@@ -22,53 +22,53 @@ data {
 	// Predictors
 	vector[N] circumference_m;
 	vector[N] height;
+	vector[N] taper_height;
 
 	// Observations
 	vector[N] taper_volume_m3;
 }
 
-/*
+
 transformed data {
-	vector[N] norm_circumference_m = circumference_m ./ sd(circumference_m);
-	vector[N] norm_height = height ./ sd(height);
+	vector[N] log_circumference_m = log(circumference_m);
+	vector[N] log_height = log(height);
+	vector[N] log_taper_height = log(taper_height);
+	vector[N] log_taper_volume_m3 = log(taper_volume_m3);
 }
-*/
+
 
 parameters {
-	real<lower = 5> max_potential_v_taper;
-	real<lower = 0> loc_circum;
-	real<lower = 0> loc_height;
-	real<lower = 0> disp_circum;
-	real<lower = 0> disp_height;
-	real<lower = -1, upper = 1> rho; // Positive relation expected (for circum/height, negative for taper c/h?)
+	real beta0;
+	real beta1;
+	real beta2;
+	real beta3;
 	
+	// real<lower = 0> alpha;
+	// real<lower = 0> beta_; // Increasing variance with volume expected
 	real<lower = 0> sigma;
 }
 
-model {
-	vector[6] vec_params = [max_potential_v_taper, loc_circum, loc_height, disp_circum, disp_height, rho]';
+// transformed parameters {
+// 	vector[N] sigma = alpha*(circumference_m.^2 .* height).^beta_;
+// }
 
-	target += gamma_lpdf(max_potential_v_taper | 10.0^2/20.0, 10.0/20.0); // Mean of 5, var of 10, loc circumference
-	target += gamma_lpdf(loc_circum | 5.0^2/10.0, 5.0/10.0); // Mean of 5, var of 10, loc circumference
-	target += gamma_lpdf(loc_height | 20.0^2/40.0, 20.0/40.0); // Mean of 20, var of 40, loc height
-	target += gamma_lpdf(disp_circum | 0.1, 0.1); // Disp around circum
-	target += gamma_lpdf(disp_height | 0.05, 0.05); // Disp around circum
-	target += uniform_lpdf(rho | -1, 1); // Correlation circum/height
+model {
+	// vector[6] vec_params = [max_potential_v_taper, loc_circum, loc_height, disp_circum, disp_height, rho]';
+
+	target += normal_lpdf(beta0 | 0, 10);
+	target += normal_lpdf(beta1 | 0, 10);
+	target += normal_lpdf(beta2 | 0, 10);
+	target += normal_lpdf(beta3 | 0, 10);
+
+	target += gamma_lpdf(sigma | 1.0^2/10.0, 1.0/10.0); // Mean of 5, var of 10, for var around surface
 	
-	target += gamma_lpdf(sigma | 5.0^2/10.0, 5.0/10.0); // Mean of 5, var of 10, for var around surface
-	
-	target += gamma_lpdf(taper_volume_m3 |
-		surf_Vtaper(circumference_m, height, vec_params).^2/sigma^2,
-		surf_Vtaper(circumference_m, height, vec_params)/sigma^2);
+	target += normal_lpdf(log_taper_volume_m3 | beta0 + beta1*log_circumference_m + beta2*log_height +
+		beta3*log_taper_height, sigma);
 }
 
 generated quantities {
-	array[N] real taper_vol_gen;
-	{
-		vector[6] vec_params = [max_potential_v_taper, loc_circum, loc_height, disp_circum, disp_height, rho]';
-		taper_vol_gen = gamma_rng(surf_Vtaper(circumference_m, height, vec_params).^2/sigma^2,
-			surf_Vtaper(circumference_m, height, vec_params)/sigma^2);
-	}
+	array[N] real taper_vol_gen = lognormal_rng(beta0 + beta1*log_circumference_m + beta2*log_height +
+		beta3*log_taper_height, sigma);
 }
 
 
