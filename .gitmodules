@@ -1,0 +1,3 @@
+[submodule "code/centralised_bibliography"]
+	path = code/centralised_bibliography
+	url = https://github.com/amael-ls/centralised_bibliography.git
