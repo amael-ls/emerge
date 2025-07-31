@@ -78,7 +78,7 @@ library(interp)
 library(gt)
 	register_knitr_engine(override = TRUE)
 library(stringi)
-# library(DHARMa)
+library(DHARMa)
 
 ## Tool function
 source("./toolFunctions.R")
@@ -434,34 +434,105 @@ rm(forest_dt_heatmap)
 ```{r}
 model = cmdstan_model("./temp.stan")
 
-test = nfi[speciesName_sci == "Pinus nigra"][sample(x = seq_len(.N), size = 500)]
+current_sp = "Fagus sylvatica" # "Pinus nigra"
+test = nfi[speciesName_sci == current_sp] #[sample(x = seq_len(.N), size = 500)]
 
 stanData = list(
 	N = test[, .N],
 
 	circumference_m = test[, circumference_m],
 	height = test[, height],
+	taper_height = test[, taper_height],
 
 	taper_volume_m3 = test[, bole_volume_m3]
 )
 
 n_chains = 4
 
-fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4), max_treedepth = 12)
+filename = paste0("./fit_taperVol_", stri_replace(current_sp, regex = " ", replacement = "-"), ".rds")
 
-lazyTrace(fit$draws("max_potential_v_taper"), main = "potential taper volume")
-lazyTrace(fit$draws("rho"), main = "rho")
-lazyTrace(fit$draws("loc_circum"), main = "loc circum")
-lazyTrace(fit$draws("disp_circum"), main = "disp circum")
-lazyTrace(fit$draws("loc_height"), main = "loc height")
-lazyTrace(fit$draws("disp_height"), main = "disp height")
+if (!file.exists(filename))
+{
+	fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4), max_treedepth = 12)
+	fit$save_output_files(dir = "./", basename = paste0("fit_tapperVol"), random = FALSE)
+	saveRDS(fit, filename)
+} else {
+	fit = readRDS(filename)
+}
+
+# lazyTrace(fit$draws("max_potential_v_taper"), main = "potential taper volume")
+# lazyTrace(fit$draws("rho"), main = "rho")
+# lazyTrace(fit$draws("loc_circum"), main = "loc circum")
+# lazyTrace(fit$draws("disp_circum"), main = "disp circum")
+# lazyTrace(fit$draws("loc_height"), main = "loc height")
+# lazyTrace(fit$draws("disp_height"), main = "disp height")
+
+lazyTrace(fit$draws("beta0"), main = "beta 0")
+lazyTrace(fit$draws("beta1"), main = "beta 1")
+lazyTrace(fit$draws("beta2"), main = "beta 2")
+lazyTrace(fit$draws("sigma"), main = "sigma")
+
+lazyPosterior(fit$draws("sigma"), main = "sigma", fun = dgamma, shape = 0.1, rate = 0.1)
+
+# lazyTrace(fit$draws("alpha"), main = "alpha")
+# lazyTrace(fit$draws("beta_"), main = "beta")
 
 sim = apply(X = fit$draws("taper_vol_gen"), MARGIN = 3, FUN = mean)
 
+sigma = apply(X = fit$draws("sigma"), MARGIN = 3, FUN = mean)
+
+
+tt = which(stanData$taper_volume_m3 < 7) # 1
+qq = which(sim > 12) # 2.5
+
+cc = qq[qq %in% tt]
+
+test[cc]
+
+png("bourrin.png")
 plot(stanData$taper_volume_m3, sim, pch = 19, lwd = 0)
 abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
+abline(lm(sim ~ stanData$taper_volume_m3), col = "#FAB255", lwd = 2)
+points(stanData$taper_volume_m3[cc], sim[cc], pch = 4, col = "#0F7BA2", cex = 2, lwd = 3)
+dev.off()
 
 
+
+#### Heatmap with weird point
+## Heatmap circum/height
+si = interp(x = forest_dt_heatmap2[current_sp, circumference_m], y = forest_dt_heatmap2[current_sp, height],
+	z = forest_dt_heatmap2[current_sp, bole_volume_m3], method = "linear", duplicate = "mean")
+
+filled.contour(si,
+	plot.axes = {
+		axis(1)
+		axis(2, las = 1)
+		contour(si, add = TRUE, lwd = 2, axes = NULL)
+	}, xlab = "Circumference", ylab = "Height", main = current_sp, frame.plot = FALSE,
+	color.palette = colorRampPalette(met.brewer("Hiroshige", direction = -1))
+)
+points(x = nfi[speciesName_sci == current_sp][cc, circumference_m], y = nfi[speciesName_sci == current_sp][cc, height], pch = 4, col = "#CD212A", cex = 2, lwd = 3)
+
+## Heatmap taper circum/height
+si = interp(x = forest_dt_heatmap[current_sp, taper_diameter], y = forest_dt_heatmap[current_sp, taper_height],
+	z = forest_dt_heatmap[current_sp, bole_volume_m3], method = "linear", duplicate = "mean")
+
+filled.contour(si,
+	plot.axes = {
+		axis(1)
+		axis(2, las = 1)
+		contour(si, add = TRUE, lwd = 2, axes = NULL)
+	}, xlab = "Taper diametre", ylab = "Taper height", main = current_sp, frame.plot = FALSE,
+	color.palette = colorRampPalette(met.brewer("Hiroshige", direction = -1))
+)
+points(x = nfi[speciesName_sci == current_sp][cc, taper_diameter], y = nfi[speciesName_sci == current_sp][cc, taper_height], pch = 4, col = "#CD212A", cex = 2, lwd = 3)
+
+#### Other stuff
+plot(stanData$taper_volume_m3, sigma, pch = 19, lwd = 0)
+
+aa = lm(stanData$taper_volume_m3 ~ I(stanData$circumference_m^2*stanData$height))
+plot(stanData$circumference_m^2*stanData$height, stanData$taper_volume_m3, pch = 19, lwd = 0)
+abline(aa, lwd = 2, col = "#CD212A")
 
 si = interp(x = stanData$circumference_m, y = stanData$height,
 	z = sim, method = "linear", duplicate = "mean")
@@ -474,6 +545,53 @@ filled.contour(si,
 	}, xlab = "Circumference", ylab = "Height", main = "Pinus nigra (sim)", frame.plot = FALSE,
 	color.palette = colorRampPalette(met.brewer("Hiroshige", direction = -1))
 )
+
+
+
+#### Residuals
+n_sampling = fit$metadata()$iter_sampling
+
+simResp = fit$draws("taper_vol_gen")
+dim(simResp)
+if (dim(simResp)[2]  != n_chains)# Number of successful chains
+	stop("The number of successful chains is not equal to n_chains")
+
+# Reshape simResp as a matrix nobs x n_repetition
+simResp_matrix = matrix(data = 0, nrow = length(stanData$taper_volume_m3), ncol = n_sampling*n_chains)
+for (obs in seq_len(length(stanData$taper_volume_m3)))
+	for (chain in 1:n_chains)
+		simResp_matrix[obs, ] = simResp[, chain, obs] # One line of n_sampling*n_chains simulations per observation
+
+## Simulated residuals
+sim_dharma = createDHARMa(simulatedResponse = simResp_matrix,
+	observedResponse = stanData$taper_volume_m3,
+	fittedPredictedResponse = apply(simResp, MARGIN = 3, median),
+	integerResponse = FALSE)
+
+plot(sim_dharma, quantreg = TRUE)
+plotResiduals(sim_dharma, stanData$circumference_m, quantreg = TRUE)
+plotResiduals(sim_dharma, stanData$height, quantreg = TRUE)
+
+plot(log(stanData$circumference_m), log(stanData$taper_volume_m3))
+
+
+
+
+si = interp(x = forest_dt_heatmap2[current_sp, log(circumference_m)], y = forest_dt_heatmap2[current_sp, log(height)],
+		z = forest_dt_heatmap2[current_sp, log(bole_volume_m3)], method = "linear", duplicate = "mean")
+
+filled.contour(si,
+	plot.axes = {
+		axis(1)
+		axis(2, las = 1)
+		contour(si, add = TRUE, lwd = 2, axes = NULL)
+	}, xlab = "Circumference", ylab = "Height", main = current_sp, frame.plot = FALSE,
+	color.palette = colorRampPalette(met.brewer("Hiroshige", direction = -1))
+)
+
+met.brewer("Egypt")[1:4]
+[1] "#dd5129" "#0f7ba2" "#43b284" "#fab255"
+
 
 ```
 
