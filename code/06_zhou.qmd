@@ -93,8 +93,8 @@ library(loo)
 ## Tool function
 source("./toolFunctions.R")
 
-plot_sp = function(fit, sp, count, stanData, fun, args, forest = forest_dt[.(sp)],
-	pred = FALSE, n_subsample = 10, folder = NULL, add = TRUE)
+plot_sp = function(fit, sp, count, stanData, fun, args, forest = forest_dt[.(sp)], pred = FALSE,
+	n_subsample = 10, folder = NULL, add = TRUE, n_bins = 12, pal = "Hiroshige", selected_variable = NULL)
 {
 	# Get parameters
 	start = stanData[["start"]][count]
@@ -108,11 +108,29 @@ plot_sp = function(fit, sp, count, stanData, fun, args, forest = forest_dt[.(sp)
 		n_chains = nrow(fit$metadata()$time)
 	}
 
+	# Add colour to the measured points according to selected variable
+	if (!is.null(selected_variable))
+	{
+		if (!(selected_variable %in% colnames(forest)))
+			stop(paste0("'", selected_variable, "' is not a column of forest"))
+		
+		colours = MetBrewer::met.brewer(pal, n_bins)[1:n_bins]
+		forest[, colour_ind := as.numeric(cut(.SD[[selected_variable]], breaks = n_bins))] # Indices per category
+		forest[, colour := colours[colour_ind]] # Map selected variable to colour using indices
+	} else {
+		forest[, colour := "#3355AA33"] # Default colour
+	}
+
 	# Plot figure
 	if (!is.null(folder))
 		png(paste0("./", folder, "/", sp, ".png"))
-	plot(forest[, bole_volume_m3], forest[, total_ratio], pch = 19, col = "#3355AA33", axes = FALSE,
-		xlab = "Bole volume", ylab = "Ratio bole/tot volumes", main = sp)
+	
+	plot(forest[, bole_volume_m3], forest[, total_ratio], pch = 19, col = forest[, colour], axes = FALSE,
+		xlab = "Bole volume", ylab = "Ratio bole/tot volumes", lwd = 0, cex = 0.75,
+		main = ifelse(is.null(selected_variable), "", selected_variable))
+	if (!is.null(selected_variable))
+		legend("topright", legend = levels(forest[, cut(.SD[[selected_variable]], breaks = n_bins)]),
+			fill = colours, title = paste(selected_variable, "classes"))
 	axis(1)
 	axis(2, las = 1)
 
@@ -400,11 +418,11 @@ It seems that this function is not flexible enough (see results in @fig-results_
 $$
 \mu(x; \alpha, \beta, \gamma, b) = \alpha \exp[-\beta x] (x - b/\alpha) + \gamma x + b.
 $$ {#eq-flexible}
-However, 4 parameters seems to be impossible to fit (too many degrees of freedom I think). Indeed, this parameter is involved in the maximum height of the $\mu$, reached for:
+However, 4 parameters seems to be impossible to fit (too many degrees of freedom I think) and I set $\alpha = 1$. Indeed, this parameter is involved in the maximum height of the $\mu$, reached for:
 $$
 x^{*} = \frac{b}{\alpha} + \frac{1}{\beta} \left( 1 - W_p \left[ -\frac{\gamma}{\alpha} e^{\beta b/\alpha + 1} \right] \right),
 $$
-where $W_p$ is the positive branch of the Lambert function, and is then also involved in the curvature. Thus, I fix $\alpha = 1$.
+where $W_p$ is the positive branch of the Lambert function, and is then also involved in the curvature.
 
 ::: {.callout-note }
 
@@ -562,10 +580,15 @@ if (!file.exists("./fit_zhou_beta_flexible.rds"))
 
 count = 0
 
+# forest_dt[, hdn := sqrt(circumference_m)/height]
+# forest_dt[, slenderness := height/circumference_m]
+
 for (sp in ls_species)
 {
 	count = count + 1
 	plot_sp(fit, sp, count, stanData, fun = ff, args = c("beta_", "gamma","b"), pred = TRUE, n_subsample = 1)
+	# plot_sp(fit, sp, count, stanData, fun = ff, args = c("beta_", "gamma","b"), pred = TRUE, n_subsample = 10,
+	# 	selected_variable = "hdn", n_bins = 4, pal = "Egypt")
 }
 ```
 
@@ -1063,37 +1086,8 @@ for (current_sp in sp_dt[, speciesName_sci])
 	axis(1)
 	axis(2, las = 1)
 	abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
-	# Arrows(x0 = sp_dt[current_sp, min_v], y0 = 0.1, x1 = sp_dt[current_sp, max_v], y1 = 0.1,
-	# 	arr.type = "triangle", code = 3, arr.adj = 1) # A bit useless given pred vs obs!
 	legend(x = "topleft", legend = c("Mine", "TarEmerge", "Vallet"),
 		fill = c("#FAB255", "#0F7BA2", "#43B284"), bty = "n")
-}
-```
-
-```{r}
-#| label: fig-me_vs_vallet
-#| fig-cap: My model *vs* @Vallet2006
-#| fig-subcap:
-#|   - "Abies alba"
-#|   - "Fagus sylvatica"
-#|   - "Picea abies"
-#|   - "Pinus pinaster"
-#|   - "Pinus sylvestris"
-#|   - "Pseudotsuga menziesii"
-#|   - "Quercus petraea"
-#| fig-asp: 1
-#| out-width: 95%
-#| fig-width: 4
-#| layout-ncol: 2
-
-# Mine vs Vallet
-for (current_sp in sp_dt[, speciesName_sci])
-{
-	plot(forest_dt[current_sp, vallet_predVolume], forest_dt[current_sp, my_predVolume], pch = 19,
-		axes = FALSE, xlab = "Vallet", ylab = "Mine")
-	axis(1)
-	axis(2, las = 1)
-	abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
 }
 ```
 
@@ -1207,21 +1201,21 @@ setkey(data_trees, sp_code)
 
 ```{r}
 #| label: fig-comparisons
-#| fig-cap: Comparison of my model, @Vallet2006, and Emerge from `inventR`
+#| fig-cap: Total volume predicted by my model, `inventR::TarEmerge`, and @Vallet2006 on the French NFI data. The arrows depict the parametrisation range
 #| fig-subcap:
-#|   - "Abies alba, Emerge and mine vs @Vallet2006"
 #|   - "Abies alba"
-#|   - "Fagus sylvatica, Emerge and mine vs @Vallet2006"
+#|   - "Abies alba"
 #|   - "Fagus sylvatica"
-#|   - "Picea abies, Emerge and mine vs @Vallet2006"
+#|   - "Fagus sylvatica"
 #|   - "Picea abies"
-#|   - "Pinus pinaster, Emerge and mine vs @Vallet2006"
+#|   - "Picea abies"
 #|   - "Pinus pinaster"
-#|   - "Pinus sylvestris, Emerge and mine vs @Vallet2006"
+#|   - "Pinus pinaster"
 #|   - "Pinus sylvestris"
-#|   - "Pseudotsuga menziesii, Emerge and mine vs @Vallet2006"
+#|   - "Pinus sylvestris"
 #|   - "Pseudotsuga menziesii"
-#|   - "Quercus petraea, Emerge and mine vs @Vallet2006"
+#|   - "Pseudotsuga menziesii"
+#|   - "Quercus petraea"
 #|   - "Quercus petraea"
 #| fig-asp: 1
 #| out-width: 95%
@@ -1290,115 +1284,22 @@ for (sp_ind in sp_dt[, sp_index])
 		data_trees[sp_dt[sp_index == sp_ind, emerge], my_predVolume],
 		pch = 20, lwd = 0, cex = 0.6, col = "#FAB25544")
 	axis(1)
-	axis(2, las = 1)
+	axis(2, las 1= 1)
+	Arrows(x0 = sp_dt[sp_index == sp_ind, min_v], y0 = 0.1, x1 = sp_dt[sp_index == sp_ind, max_v],
+		y1 = 0.1, arr.type = "triangle", code = 3, arr.adj = 1) # A bit useless given pred vs obs!
 	abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
 	legend(x = "topleft", legend = c("Mine", "Emerge", "Vallet"), fill = c("#FAB255", "#0F7BA2", "#43B284"), bty = "n")
 }
 ```
 
-## Heatmap
-
-```{r}
-#| label: fig-heatmaps
-#| fig-cap: Heatmaps in the circumference/height space of my model, @Vallet2006, and Emerge from `inventR`
-#| fig-subcap:
-#|   - "Abies alba, my model"
-#|   - "Abies alba, @Vallet2006"
-#|   - "Abies alba, Emerge"
-#|   - "Fagus sylvatica, my model"
-#|   - "Fagus sylvatica, @Vallet2006"
-#|   - "Fagus sylvatica, Emerge"
-#|   - "Picea abies, my model"
-#|   - "Picea abies, @Vallet2006"
-#|   - "Picea abies, Emerge"
-#|   - "Pinus pinaster, my model"
-#|   - "Pinus pinaster, @Vallet2006"
-#|   - "Pinus pinaster, Emerge"
-#|   - "Pinus sylvestris, my model"
-#|   - "Pinus sylvestris, @Vallet2006"
-#|   - "Pinus sylvestris, Emerge"
-#|   - "Pseudotsuga menziesii, my model"
-#|   - "Pseudotsuga menziesii, @Vallet2006"
-#|   - "Pseudotsuga menziesii, Emerge"
-#|   - "Quercus petraea, my model"
-#|   - "Quercus petraea, @Vallet2006"
-#|   - "Quercus petraea, Emerge"
-#| fig-asp: 1
-#| out-width: 95%
-#| fig-width: 4
-#| layout-ncol: 3
-
-## Species-specific heatmaps
-for (sp_ind in sp_dt[, sp_index])
-{
-	aa = data_trees[sp_dt[sp_index == sp_ind, emerge]][!is.na(emerge_predVolume)][
-		sample(x = seq_len(.N), size = min(4000, .N), replace = FALSE)]
-
-	# Heatmap of my model
-	si = interp(x = aa[, circumference_m], y = aa[, height], z = aa[, my_predVolume],
-		method = "linear", duplicate = "mean")
-
-	filled.contour(si,
-		plot.axes = {
-			axis(1)
-			axis(2, las = 1)
-			contour(si, add = TRUE, lwd = 2, axes = NULL)
-		}, xlab = "Circumference", ylab = "Height", frame.plot = FALSE,
-		color.palette = colorRampPalette(met.brewer("Hiroshige", direction = -1))
-	)
-
-	# Heatmap of Vallet 2006
-	si = interp(x = aa[, circumference_m], y = aa[, height], z = aa[, total_volume_m3],
-		method = "linear", duplicate = "mean")
-
-	filled.contour(si,
-		plot.axes = {
-			axis(1)
-			axis(2, las = 1)
-			contour(si, add = TRUE, lwd = 2, axes = NULL)
-		}, xlab = "Circumference", ylab = "Height", frame.plot = FALSE,
-		color.palette = colorRampPalette(met.brewer("Hiroshige", direction = -1))
-	)
-
-	# Heatmap of Emerge
-	si = interp(x = aa[, circumference_m], y = aa[, height], z = aa[, emerge_predVolume],
-		method = "linear", duplicate = "mean")
-
-	filled.contour(si,
-		plot.axes = {
-			axis(1)
-			axis(2, las = 1)
-			contour(si, add = TRUE, lwd = 2, axes = NULL)
-		}, xlab = "Circumference", ylab = "Height", frame.plot = FALSE,
-		color.palette = colorRampPalette(met.brewer("Hiroshige", direction = -1))
-	)
-}
-```
-
-Range of parameterisation:
-
-::: {#tbl-table_1 .borderless .hover}
-
-| species           | max circumference (m) | max height (m) | max $V_{\text{BFT}}$ |
-|------------------:|:------------------|:-----------|:-----------------|
-| *Abies alba* | `{r} forest_dt["Abies alba", max(circumference_m)]` |  `{r} forest_dt["Abies alba", max(height)]` | `{r} forest_dt["Abies alba", format(max(bole_volume_m3), 2)]` |
-| *Fagus sylvatica* | `{r} forest_dt["Fagus sylvatica", max(circumference_m)]` |  `{r} forest_dt["Fagus sylvatica", max(height)]` | `{r} forest_dt["Fagus sylvatica", format(max(bole_volume_m3), 2)]` |
-| *Picea abies* | `{r} forest_dt["Picea abies", max(circumference_m)]` |  `{r} forest_dt["Picea abies", max(height)]` | `{r} forest_dt["Picea abies", format(max(bole_volume_m3), 2)]` |
-| *Pinus pinaster* | `{r} forest_dt["Pinus pinaster", max(circumference_m)]` |  `{r} forest_dt["Pinus pinaster", max(height)]` | `{r} forest_dt["Pinus pinaster", format(max(bole_volume_m3), 2)]` |
-| *Pinus sylvestris* | `{r} forest_dt["Pinus sylvestris", max(circumference_m)]` |  `{r} forest_dt["Pinus sylvestris", max(height)]` | `{r} forest_dt["Pinus sylvestris", format(max(bole_volume_m3), 2)]` |
-| *Pseudotsuga menziesii* | `{r} forest_dt["Pseudotsuga menziesii", max(circumference_m)]` |  `{r} forest_dt["Pseudotsuga menziesii", max(height)]` | `{r} forest_dt["Pseudotsuga menziesii", format(max(bole_volume_m3), 2)]` |
-| *Quercus petraea* | `{r} forest_dt["Quercus petraea", max(circumference_m)]` |  `{r} forest_dt["Quercus petraea", max(height)]` | `{r} forest_dt["Quercus petraea", format(max(bole_volume_m3), 2)]` |
-
-Species-specific range of parameterisation
-
-:::
-
 ### Comparison on the independent dataset
 I use data collected in 2009 in Bure (France), and in 2010 (unknown location). The preparation of the data is detailed in the document `01_prepare_data.qmd`. I want to compare my model with @Vallet2006 using PSIS-LOO [@Vehtari2017]. However, that requires to refit @Vallet2006 in a Bayesian framework. His dataset was a subsample of Emerge which I cannot recreate. Therefore, I am going to use the same dataset as my model.
 
-#### Recreate the study of @Vallet2006
+#### Recreate the study of @Vallet2006 (Bayesian version)
 
 ```{stan output.var = "vallet_bayesian", cache = TRUE}
+//| echo: true
+
 functions {
 	vector vallet(vector circumference, vector hdn, vector params, int N_params)
 	{
@@ -1456,16 +1357,16 @@ forest_dt[, circumference_cm := 100*circumference_m]
 n_chains = 4
 
 ## Table 5 from Vallet2006
-vallet_dt = data.table(speciesName_sci = c("Fagus sylvatica", "Quercus petraea"),
-	alpha = c(0.395, 0.471),
-	sd_alpha = c(0.01, 0.014),
-	beta = c(2.66e-4, -3.45e-4),
-	sd_beta = c(4.9e-5, 1.3e-5),
-	gamma = c(0.421, 0.377),
-	sd_gamma = c(0.025, 0.031),
-	delta = c(45.4, NA),
-	sd_delta = c(4, NA),
-	var_res = c(0.0036, 0.004), key = "speciesName_sci")
+vallet_dt = data.table(speciesName_sci = c("Abies alba", "Fagus sylvatica", "Picea abies", "Pinus pinaster", "Pinus sylvestris", "Pseudotsuga menziesii", "Quercus petraea"),
+	alpha = c(0.550, 0.395, 0.631, 0.235, 0.297, 0.534, 0.471),
+	sd_alpha = c(0.015, 0.01, 0.007, 0.041, 0.025, 0.01, 0.014),
+	beta = c(7.49e-4, 2.66e-4, -9.46e-4, 9.7e-4, 3.18e-4, -5.3e-4, -3.45e-4),
+	sd_beta = c(3.9e-5, 4.9e-5, 7.2e-5, 4.06e-4, 1.4e-4, 9.7e-5, 1.3e-5),
+	gamma = c(0.277, 0.421, NA, 0.396, 0.384, NA, 0.377),
+	sd_gamma = c(0.034, 0.025, NA, 0.057, 0.058, NA, 0.031),
+	delta = c(NA, 45.4, NA, 198.8, 204.0, 56.6, NA),
+	sd_delta = c(NA, 4, NA, 40, 26.6, 13.8, NA),
+	var_res = c(0.0031, 0.0036, 0.0023, 0.0079, 0.0028, 0.0041 , 0.004), key = "speciesName_sci")
 
 form_vallet = function(circumference_cm, height, alpha, beta, gamma, delta)
 {
@@ -1530,6 +1431,49 @@ for (current_sp in c("Fagus sylvatica", "Quercus petraea")) # The only two speci
 	legend(x = "topleft", legend = c("Vallet", "Vallet Bayes"), fill = c("#0F7BA2", "#FAB255"), bty = "n")
 }
 ```
+
+#### Create simulations based on @Vallet2006 (and **not** on the Bayesian version)
+It is possible to create simulations on new data based on @Vallet2006, as the following table is provided:
+
+::: {#tbl-table_1 .borderless .hover}
+
+| species                 | $\alpha$ | $\beta$ | $\gamma$ | $\delta$ | residuals |
+|------------------------:|:---------|:--------|:---------|:---------|:----------|
+| *Abies alba*            | 0.550    | 
+| *Fagus sylvatica*       | 0.395    | 
+| *Picea abies*           | 0.631    | 
+| *Pinus pinaster*        | 0.235    | 
+| *Pinus sylvestris*      | 0.297    | 
+| *Pseudotsuga menziesii* | 0.534    | 
+| *Quercus petraea*       | 0.471    | 
+
+Species-specific parameters with std. dev between parentheses [@Vallet2006]. 
+
+
+
+
+
+
+
+
+
+vallet_dt = data.table(speciesName_sci = c("Abies alba", "Fagus sylvatica", "Picea abies", "Pinus pinaster", "Pinus sylvestris", "Pseudotsuga menziesii", "Quercus petraea"),
+	alpha = c(0.550, 0.395, 0.631, 0.235, 0.297, 0.534, 0.471),
+	beta = c(7.49e-4, 2.66e-4, -9.46e-4, 9.7e-4, 3.18e-4, -5.3e-4, -3.45e-4),
+	gamma = c(0.277, 0.421, NA, 0.396, 0.384, NA, 0.377),
+	delta = c(NA, 45.4, NA, 198.8, 204.0, 56.6, NA),
+	sd_alpha = c(0.015, 0.01, 0.007, 0.041, 0.025, 0.01, 0.014),
+	sd_beta = c(3.9e-5, 4.9e-5, 7.2e-5, 4.06e-4, 1.4e-4, 9.7e-5, 1.3e-5),
+	sd_gamma = c(0.034, 0.025, NA, 0.057, 0.058, NA, 0.031),
+	sd_delta = c(NA, 4, NA, 40, 26.6, 13.8, NA),
+	var_res = c(0.0031, 0.0036, 0.0023, 0.0079, 0.0028, 0.0041 , 0.004), key = "speciesName_sci")
+
+:::
+
+
+
+
+
 
 #### Compute the PSIS-LOO and compare both models
 
@@ -1757,6 +1701,103 @@ for (current_sp in c("Fagus sylvatica", "Quercus petraea")) # The only two speci
 
 ## Conclusion
 
-It seems that the best model so far, in terms of parameters uncertainty and residuals, is the the flexible model in @sec-flexible. Of course, properly selectioning a model requires PSIS-Leave-One-Out [@Vehtari2017].
+It seems that the best model so far, in terms of parameters uncertainty, residuals and PSIS-Leave-One-Out [@Vehtari2017], is the the flexible model in @sec-flexible.
 
-So now it is time to try a multivariate model, with both $\Vbft$ and $\Vtot$ as output variables. Indeed, with the above method, $\Vtot$ completely relies on $\Vbft$, which therefore must be as 'clean' as possible. Therefore it worth trying some models on $\Vbft$. I already started investigating multivariate models on simple examples in `04_test_multivariate.qmd`.
+So now it is time to try a multivariate model, with both $\Vbft$ and $\Vtot$ as output variables. Indeed, with the above method, $\Vtot$ completely relies on $\Vbft$, which therefore must be as 'clean' as possible. Therefore it worth trying some models on $\Vbft$. I already started investigating multivariate models on simple examples in `04_test_multivariate.qmd`. As a first step, I will actually start by a model where I fit both volumes, but without correlations in the parameters.
+
+## Heatmap {.appendix}
+
+```{r}
+#| label: fig-heatmaps
+#| fig-cap: Heatmaps in the circumference/height space of my model, @Vallet2006, and Emerge from `inventR`
+#| fig-subcap:
+#|   - "Abies alba, my model"
+#|   - "Abies alba, @Vallet2006"
+#|   - "Abies alba, Emerge"
+#|   - "Fagus sylvatica, my model"
+#|   - "Fagus sylvatica, @Vallet2006"
+#|   - "Fagus sylvatica, Emerge"
+#|   - "Picea abies, my model"
+#|   - "Picea abies, @Vallet2006"
+#|   - "Picea abies, Emerge"
+#|   - "Pinus pinaster, my model"
+#|   - "Pinus pinaster, @Vallet2006"
+#|   - "Pinus pinaster, Emerge"
+#|   - "Pinus sylvestris, my model"
+#|   - "Pinus sylvestris, @Vallet2006"
+#|   - "Pinus sylvestris, Emerge"
+#|   - "Pseudotsuga menziesii, my model"
+#|   - "Pseudotsuga menziesii, @Vallet2006"
+#|   - "Pseudotsuga menziesii, Emerge"
+#|   - "Quercus petraea, my model"
+#|   - "Quercus petraea, @Vallet2006"
+#|   - "Quercus petraea, Emerge"
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 4
+#| layout-ncol: 3
+
+## Species-specific heatmaps
+for (sp_ind in sp_dt[, sp_index])
+{
+	aa = data_trees[sp_dt[sp_index == sp_ind, emerge]][!is.na(emerge_predVolume)][
+		sample(x = seq_len(.N), size = min(4000, .N), replace = FALSE)]
+
+	# Heatmap of my model
+	si = interp(x = aa[, circumference_m], y = aa[, height], z = aa[, my_predVolume],
+		method = "linear", duplicate = "mean")
+
+	filled.contour(si,
+		plot.axes = {
+			axis(1)
+			axis(2, las = 1)
+			contour(si, add = TRUE, lwd = 2, axes = NULL)
+		}, xlab = "Circumference", ylab = "Height", frame.plot = FALSE,
+		color.palette = colorRampPalette(met.brewer("Hiroshige", direction = -1))
+	)
+
+	# Heatmap of Vallet 2006
+	si = interp(x = aa[, circumference_m], y = aa[, height], z = aa[, total_volume_m3],
+		method = "linear", duplicate = "mean")
+
+	filled.contour(si,
+		plot.axes = {
+			axis(1)
+			axis(2, las = 1)
+			contour(si, add = TRUE, lwd = 2, axes = NULL)
+		}, xlab = "Circumference", ylab = "Height", frame.plot = FALSE,
+		color.palette = colorRampPalette(met.brewer("Hiroshige", direction = -1))
+	)
+
+	# Heatmap of Emerge
+	si = interp(x = aa[, circumference_m], y = aa[, height], z = aa[, emerge_predVolume],
+		method = "linear", duplicate = "mean")
+
+	filled.contour(si,
+		plot.axes = {
+			axis(1)
+			axis(2, las = 1)
+			contour(si, add = TRUE, lwd = 2, axes = NULL)
+		}, xlab = "Circumference", ylab = "Height", frame.plot = FALSE,
+		color.palette = colorRampPalette(met.brewer("Hiroshige", direction = -1))
+	)
+}
+```
+
+## Range of parameterisation {.appendix}
+
+::: {#tbl-table_1 .borderless .hover}
+
+| species           | max circumference (m) | max height (m) | max $V_{\text{BFT}}$ |
+|------------------:|:------------------|:-----------|:-----------------|
+| *Abies alba* | `{r} forest_dt["Abies alba", max(circumference_m)]` |  `{r} forest_dt["Abies alba", max(height)]` | `{r} forest_dt["Abies alba", format(max(bole_volume_m3), 2)]` |
+| *Fagus sylvatica* | `{r} forest_dt["Fagus sylvatica", max(circumference_m)]` |  `{r} forest_dt["Fagus sylvatica", max(height)]` | `{r} forest_dt["Fagus sylvatica", format(max(bole_volume_m3), 2)]` |
+| *Picea abies* | `{r} forest_dt["Picea abies", max(circumference_m)]` |  `{r} forest_dt["Picea abies", max(height)]` | `{r} forest_dt["Picea abies", format(max(bole_volume_m3), 2)]` |
+| *Pinus pinaster* | `{r} forest_dt["Pinus pinaster", max(circumference_m)]` |  `{r} forest_dt["Pinus pinaster", max(height)]` | `{r} forest_dt["Pinus pinaster", format(max(bole_volume_m3), 2)]` |
+| *Pinus sylvestris* | `{r} forest_dt["Pinus sylvestris", max(circumference_m)]` |  `{r} forest_dt["Pinus sylvestris", max(height)]` | `{r} forest_dt["Pinus sylvestris", format(max(bole_volume_m3), 2)]` |
+| *Pseudotsuga menziesii* | `{r} forest_dt["Pseudotsuga menziesii", max(circumference_m)]` |  `{r} forest_dt["Pseudotsuga menziesii", max(height)]` | `{r} forest_dt["Pseudotsuga menziesii", format(max(bole_volume_m3), 2)]` |
+| *Quercus petraea* | `{r} forest_dt["Quercus petraea", max(circumference_m)]` |  `{r} forest_dt["Quercus petraea", max(height)]` | `{r} forest_dt["Quercus petraea", format(max(bole_volume_m3), 2)]` |
+
+Species-specific range of parameterisation
+
+:::

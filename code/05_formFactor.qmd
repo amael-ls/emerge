@@ -10,7 +10,7 @@ pdf-engine: lualatex
 keep-tex: true
 execute:
   error: true
-bibliography: references.bib
+bibliography: /home/ALe-Squin/work/library/bib_file/references.bib
 lightbox:
   match: auto
 css: style.css
@@ -164,7 +164,7 @@ Dans ce document, je regarde s'il est vraiment plus adapté et plus facile à ma
 
 ## Plot
 plot(100*forest_dt[.("Fagus sylvatica"), circumference_m], forest_dt[.("Fagus sylvatica"), formTot_vallet],
-	xlab = "Circonférence en cm", ylab = "Facteur de forme tot", axes = FALSE, pch = 3, cex = 0.5)
+	xlab = "Circonférence en cm", ylab = "Facteur de forme tot Vallet", axes = FALSE, pch = 3, cex = 0.5)
 abline(h = c(0.4, 0.6, 0.8, 1), lty = "dotted", col = "#2233FFAA")
 axis(1)
 axis(2, las = 1)
@@ -343,6 +343,35 @@ for (sp in species_vallet)
 {
 	plot(forest_dt[sp, hdn], forest_dt[sp, formTot_vallet], pch = 19, cex = 0.25,
 		axes = FALSE, xlab = "hdn", ylab = "Form factor")
+	axis(1)
+	axis(2, las = 1)
+}
+```
+
+```{r}
+#| echo: false
+#| label: fig-circumference
+#| fig-cap: "Facteur de forme *vs.* robustesse"
+#| fig-subcap: 
+#|   - "*Abies alba*"
+#|   - "*Fagus sylvatica*"
+#|   - "*Picea abies*"
+#|   - "*Pinus pinaster*"
+#|   - "*Pinus sylvestris*"
+#|   - "*Pseudotsuga menziesii*"
+#|   - "*Quercus petraea*"
+#| lightbox: 
+#|   group: linear_reg_comp
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 8
+#| layout-ncol: 1
+
+## Fagus sylvatica
+for (sp in species_vallet)
+{
+	plot(forest_dt[sp, circumference_m], forest_dt[sp, formTot_vallet], pch = 19, cex = 0.25,
+		axes = FALSE, xlab = "Circonférence", ylab = "Form factor")
 	axis(1)
 	axis(2, las = 1)
 }

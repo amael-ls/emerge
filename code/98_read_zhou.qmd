@@ -534,4 +534,3 @@ for (i in seq_along(stanData[["start"]]))
 	plotResiduals(sim_dharma, forest_dt[start:end, sb], quantreg = TRUE, xlab = "Stand biomass")
 }
 ```
-

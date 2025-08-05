@@ -884,6 +884,46 @@ où $i$ est l'indice de l'espèce, et $\hpdec = \hdec$ s'il y a une découpe et 
 
 Ces nouveaux tarifs produisent des volumes bois-fort tige très similaires aux tarifs utilisés actuellement, avec en général une diminution de 0 à 3% pour les espèces les plus communes [@Gohon2023, Fig. 15] et ont l'avantage de n'utiliser qu'une formule pour toutes les espèces (contrairement aux cinq formules de la @sec-tarifs_ifn). Ces tarifs sont applicables tant que $\hdec$ est disponible (\ie depuis 2014).
 
+```{r}
+factor_gohon = function(c, h, hdec, params, species = NULL, speciesCol = "speciesName_sci", isVol = TRUE)
+{
+	if (!is.null(species))
+	{
+		if (is.data.table(params) & key(params)[1] == speciesCol)
+		{
+			if (params[.(species), .N,  nomatch = 0] == 0)
+				stop(paste0("Species <", species, "> not found"))
+			if (params[.(species), .N] == 1)
+			{
+				params = as.numeric(params[.(species), .(alpha, beta, gamma, delta, eta)])
+				names(params) = c("alpha", "beta", "gamma", "delta", "eta")
+			} else {
+				stop(paste0(params[.(species), .N], " set of parameters found for species <", species, ">"))
+			}
+		} else {
+			stop(paste0("Species != null: params must be a data table with <", speciesCol, "> col as the first key"))
+		}
+	}
+
+	formFactor = params["alpha"] + params["beta"]*c + params["gamma"]*sqrt(c)/hdec +
+		params["delta"]*sqrt(hdec)/(c^2*h) + params["eta"]*(1 - hdec/h) # Formula checked in F. Gohon's rmd file.
+
+	if (isVol)
+		return (c^2*h/(4*pi*(1 - 1.3/h)^2) * formFactor)
+
+	return(formFactor)		
+}
+
+params = fread("../data/gohon_3.csv")
+setkey(params, sp_code)
+dt_interp = forest_dt_full["Quercus petraea"][origin_data == "nfi", .(circumference_m, height, taper_height)]
+
+dt_interp[, pred_vol := factor_gohon(circumference_m, height, taper_height, params,
+	species = "02", speciesCol = "sp_code")]
+
+
+```
+
 ## Pistes explorables {#sec-pistes}
 
 ### Modèle d'Emerge {#sec-emerge}
@@ -899,11 +939,16 @@ Je reprend ici le modèle d'Emerge [@Deleuze2014]:
 \end{equation}
 où $\alpha_i$ et $\delta_i$ sont les 'interceptes de groupes' (une valeur pour les conifères et une valeur feuillus). Je tente de reproduire leur modèle en version Bayésienne en utilisant le langage Stan qui communique avec R via le package `cmdstanr`.
 
-La version bayésienne fonctionne bien, et est capable de prédire de nouvelles données (\eg prédiction sur des *Quercus robur/petraea*, @fig-bayesEmerge). En revanche, je trouve des valeurs de paramètres complètement différentes de @Deleuze2014 qui utilise le package `nlme`. Dans les 2 cas, les prédictions sur de nouvelles données sont bonnes, ce qui montre qu'il n'y a pas unicité du jeu de paramètre qui fonctionne. Cette intuition de corrélation entre paramètres est confirmée avec la heatmap du log likelihood posterieur dans l'espace de paramètre $b$ et $d$ (réponse à la robustesse et élancement, respectivement).
+La version bayésienne fonctionne bien, et est capable de prédire de nouvelles données (\eg prédiction sur des *Quercus robur/petraea*, @fig-bayesEmerge). En revanche, je trouve des valeurs de paramètres complètement différentes de @Deleuze2014 qui utilise le package `nlme`. Dans les 2 cas, les prédictions sur de nouvelles données sont bonnes, ce qui montre qu'il n'y a pas unicité du jeu de paramètre qui fonctionne. Cette intuition de corrélation entre paramètres est confirmée avec la heatmap du log likelihood posterieur dans l'espace de paramètre $b$ et $d$ (réponse à la robustesse et élancement, respectivement). Je ne partirais donc pas vers ce modèle.
 
 ![Prédictions sur des *Quercus robur/petraea* cubés en 2010 lors du projet Emerge](./testEmerge_files/figure-pdf/fig-posteriorPred-1.png){#fig-bayesEmerge width=80%}
 
 ![Heatmap du log likelihood dans l'espace des paramètres suspectés d'être corrélés](./heatmap.pdf){#fig-heatmap}
+
+### Exploration du modèle de @Zhou2021
+
+@Zhou2021 propose un coefficient d'expansion 'dynamique' entre le volume du tronc et le volume du houppier. Par dynamique, ils entendent un coefficient qui change selon la circonférence et la hauteur par exemple. Une partie de leur modèle est basé sur le facteur de forme de @Vallet2006.
+
 
 ## References
 
