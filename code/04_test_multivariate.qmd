@@ -19,7 +19,7 @@ pdf-engine: lualatex
 keep-tex: true
 execute:
   error: true
-bibliography: references.bib
+bibliography: /home/ALe-Squin/work/library/bib_file/references.bib
 lightbox:
   match: auto
 css: style.css
@@ -81,7 +81,7 @@ Let a robot visit cafes and order a coffee. The robot measures each time how lon
 1. Between the cafes (partial pooling)
 2. Between the parameters (covariance)
 
-The @sec-create_data is dedicated to simulate data, which are fit in @#sec-fit by jointly modelling slopes and intercepts. The results are analysed in @sec-results.
+The @sec-create_data is dedicated to simulate data, which are fit in @sec-fit by jointly modelling slopes and intercepts. The results are analysed in @sec-results.
 
 ### Chimpanzees example
 The chimpanzee experiment is fully described in @McElreath2020 (chap. XI). Basically, there is a table with two dishes and a lever on the left and right side, respectively. Pulling a lever moves a dish towards you, and move the other dish towards the other side of the table. On one side, only one dish contains food, which comes to you if you pull the corresponding lever, and on the other side both dishes contains food. The aim is to see if a chimpanzees behave differently when there is a congener at the other end of table or not. Humans, for instance, would pull the lever that provides food to both, which is called the *prosocial* option.
@@ -97,18 +97,21 @@ The data are described in @sec-data_chimp and are fit in @sec-fit_chimp. The res
 ```{r}
 #| output: false
 #### Clear space and load packages
-rm(list = ls())
+# rm(list = ls())
 graphics.off()
 
 options(max.print = 500)
 
 library(data.table)
 library(rethinking)
+# library(WorldFlora)
 library(MetBrewer)
 library(cmdstanr)
 	register_knitr_engine(override = TRUE)
 library(stringi)
 library(ellipse)
+library(DHARMa)
+# library(taxize)
 library(terra)
 library(MASS)
 library(gt)
@@ -127,6 +130,7 @@ sigma_b = 0.5 # Variance change morning/afternoon (improvement if < 0, worsen ot
 sigma_cafe = 0.15 # Variance within cafe
 
 rho = -0.7 # Covariance between intercepts and slopes
+# (i.e., the more you wait in the morning, the more it improves in the afternoon)
 
 #### Var-Cov matrix
 sigma_mat = diag(c(sigma_a, sigma_b))
@@ -932,7 +936,8 @@ forest_dt[fct_type == "conifer", fct_colour := colours["conifer"]]
 forest_dt[origin_data == "inra", origin_colour := colours["inra"]]
 forest_dt[origin_data == "nfi", origin_colour := colours["nfi"]]
 
-# forest_dt = forest_dt[speciesName_sci == "Quercus robur"]
+## Add vernacular english names
+# vernacularNames = sci2comm(sci = forest_dt[, unique(speciesName_sci)], db = "itis")
 ```
 
 I have about \num{10000} felled trees, on which the bole volume, $V_b$, and crown volume, $V_c$, have been measured. The two volumes have a correlation of `{r} round(cor(forest_dt["broadleaf"][origin_data == "inra", bole_volume_m3], forest_dt["broadleaf"][origin_data == "inra", crown_volume_m3]), 3)` for broadleaves and of `{r} round(cor(forest_dt["conifer"][origin_data == "inra", bole_volume_m3], forest_dt["conifer"][origin_data == "inra", crown_volume_m3]), 3)` for conifers(see @fig-correl):
@@ -1003,52 +1008,485 @@ adjustmentSets(dag, exposure = "V_b", outcome = "V_c")
 impliedConditionalIndependencies(dag)
 ```
 
+This lead to the investigation and discussion on the form coefficient (see `05_formFactor.qmd`) as it is supposed to reduce heteroscedasticity.
+
 ### Form ratio (Facteur de forme)
 
 ```{r}
+#| echo: false
+#| output: false
 
-forest_dt[, formFactor := 4*pi*bole_volume_m3/(height*circumference_m^2)*(1 - 1.3/height)^2]
-forest_dt[origin_data == "nfi", origin_colour := paste0(origin_colour, "22")]
-forest_dt[origin_data == "nfi", pt_size := 0.5]
-forest_dt[origin_data == "inra", pt_size := 1]
+# forest_dt[, formFactor := 4*pi*bole_volume_m3/(height*circumference_m^2)*(1 - 1.3/height)^2]
+# forest_dt[origin_data == "nfi", origin_colour := paste0(origin_colour, "22")]
+# forest_dt[origin_data == "nfi", pt_size := 0.5]
+# forest_dt[origin_data == "inra", pt_size := 1]
 
-for (sp in unique(forest_dt[, speciesName_sci]))
-{
-	png(paste0("output/", sp, ".png"), width = 1080, height = 1080)
-	layout(matrix(c(1:4), ncol = 2, nrow = 2))
-	plot(forest_dt[speciesName_sci == sp, height], forest_dt[speciesName_sci == sp, formFactor],
-		xlab = "Height", ylab = "Form factor", axes = FALSE, pch = 3,
-		cex = forest_dt[speciesName_sci == sp, pt_size],
-		col = forest_dt[speciesName_sci == sp, origin_colour])
-	axis(1)
-	axis(2, las = 1)
+# for (sp in unique(forest_dt[, speciesName_sci]))
+# {
+# 	png(paste0("output/", sp, ".png"), width = 1080, height = 1080)
+# 	layout(matrix(c(1:4), ncol = 2, nrow = 2))
+# 	plot(forest_dt[speciesName_sci == sp, height], forest_dt[speciesName_sci == sp, formFactor],
+# 		xlab = "Height", ylab = "Form factor", axes = FALSE, pch = 3,
+# 		cex = forest_dt[speciesName_sci == sp, pt_size],
+# 		col = forest_dt[speciesName_sci == sp, origin_colour])
+# 	axis(1)
+# 	axis(2, las = 1)
 
-	plot(forest_dt[speciesName_sci == sp, circumference_m], forest_dt[speciesName_sci == sp, formFactor],
-		xlab = "Circumference", ylab = "Form factor", axes = FALSE, pch = 3,
-		cex = forest_dt[speciesName_sci == sp, pt_size],
-		col = forest_dt[speciesName_sci == sp, origin_colour])
-	axis(1)
-	axis(2, las = 1)
+# 	plot(forest_dt[speciesName_sci == sp, circumference_m], forest_dt[speciesName_sci == sp, formFactor],
+# 		xlab = "Circumference", ylab = "Form factor", axes = FALSE, pch = 3,
+# 		cex = forest_dt[speciesName_sci == sp, pt_size],
+# 		col = forest_dt[speciesName_sci == sp, origin_colour])
+# 	axis(1)
+# 	axis(2, las = 1)
 
-	plot(forest_dt[speciesName_sci == sp, height], forest_dt[speciesName_sci == sp, bole_volume_m3],
-		xlab = "Height", ylab = "Form factor", axes = FALSE, pch = 3,
-		cex = forest_dt[speciesName_sci == sp, pt_size],
-		col = forest_dt[speciesName_sci == sp, origin_colour])
-	axis(1)
-	axis(2, las = 1)
+# 	plot(forest_dt[speciesName_sci == sp, height], forest_dt[speciesName_sci == sp, bole_volume_m3],
+# 		xlab = "Height", ylab = "Form factor", axes = FALSE, pch = 3,
+# 		cex = forest_dt[speciesName_sci == sp, pt_size],
+# 		col = forest_dt[speciesName_sci == sp, origin_colour])
+# 	axis(1)
+# 	axis(2, las = 1)
 
-	plot(forest_dt[speciesName_sci == sp, circumference_m], forest_dt[speciesName_sci == sp, bole_volume_m3],
-		xlab = "Circumference", ylab = "Form factor", axes = FALSE, pch = 3,
-		cex = forest_dt[speciesName_sci == sp, pt_size],
-		col = forest_dt[speciesName_sci == sp, origin_colour])
-	axis(1)
-	axis(2, las = 1)
-	dev.off()
-}
+# 	plot(forest_dt[speciesName_sci == sp, circumference_m], forest_dt[speciesName_sci == sp, bole_volume_m3],
+# 		xlab = "Circumference", ylab = "Form factor", axes = FALSE, pch = 3,
+# 		cex = forest_dt[speciesName_sci == sp, pt_size],
+# 		col = forest_dt[speciesName_sci == sp, origin_colour])
+# 	axis(1)
+# 	axis(2, las = 1)
+# 	dev.off()
+# }
 
-aa = forest_dt[speciesName_sci == "Quercus pubescens"]
+# aa = forest_dt[speciesName_sci == "Quercus pubescens"]
 
-cor(aa$formFactor, aa$height)
-cor(aa$formFactor, aa$circumference_m)
+# cor(aa$formFactor, aa$height)
+# cor(aa$formFactor, aa$circumference_m)
 
 ```
+
+## Exploration of the model from @Zhou2021
+
+@Zhou2021 relates the above-ground biomass (defined as branches, bark, leaves, and fruits), AGB, to the stem biomass (main trunk, from ground to tip I think), SB. They developed the following formula for indvidual trees (equation 4 in @Zhou2021):
+\begin{align*}
+	y &= \frac{L \phi^2 h}{m - d \exp[-k x]} \\
+	L &= \frac{\pi}{4}w f,
+\end{align*}
+where $y$ is the AGB, $\phi$ and $h$ are the dbh and height, $m$, $d$, and $k$ are estimated parameters, $w$ is the wood density, and $f$ the form factor defined as:
+$$
+f = \frac{4V}{\pi \phi^2 h},
+$$
+with $V$ the total volume of the stem. Then, we get another expression of $y$:
+\begin{align*}
+	y &= \frac{4 V}{\pi(m - d \exp[-k x])} \\
+		&= \frac{V}{m' - d' \exp[-k x]}
+\end{align*}
+where $m' = \pi m/4$ and $d' = \pi d/4$. Let us try this on the Emerge data!
+
+### Test of the formula from @Zhou2021 on Emerge data
+
+```{r}
+#| echo: false
+#| output: false
+
+## Subset
+forest_dt = forest_dt[origin_data == "inra"]
+species_vallet = c("Abies alba", "Fagus sylvatica", "Picea abies", "Pinus pinaster", "Pinus sylvestris",
+	"Pseudotsuga menziesii", "Quercus petraea")
+forest_dt = forest_dt[speciesName_sci %in% species_vallet]
+
+## New variables
+forest_dt[, hdn := sqrt(circumference_m)/height]
+forest_dt[, slenderness := pi*height/circumference_m] # height/diameter
+forest_dt[, formBFT := 4*pi*bole_volume_m3/(height*circumference_m^2)*(1 - 1.3/height)^2]
+forest_dt[, formTot_vallet := 4*pi*total_volume_m3/(height*circumference_m^2)]
+forest_dt[, form_zhou := 4*pi*bole_volume_m3/(height*circumference_m^2)]
+
+## Add wood density
+wood_dens = fread("../data/xylo-dens-map/xdm_species_density_data.csv")[, .(Species, Mean)]
+setnames(wood_dens, new = c("speciesName_sci", "w"))
+forest_dt = merge.data.table(forest_dt, wood_dens, by = "speciesName_sci")
+
+## Set keys
+setkey(forest_dt, speciesName_sci)
+n_sp = length(forest_dt[, unique(speciesName_sci)])
+
+## Picea and abies
+m = 0.893
+d = 0.378
+k = -0.0027 # Use the version for equation 4 and not 5
+
+range(forest_dt[genus %in% c("Picea", "Abies"), form_zhou])
+plot(density(forest_dt[genus %in% c("Picea", "Abies"), form_zhou]), lwd = 3, main = "", xlab = "Form factor (Zhou)", axes = FALSE)
+axis(1)
+axis(2, las = 1)
+
+forest_dt[genus %in% c("Picea", "Abies"), zhou_vol := bole_volume_m3/(m - d*exp(-k*circumference_m^2*height/pi^2))]
+
+# ## Log, degree 2
+# plot(forest_dt[genus %in% c("Picea", "Abies"), log(zhou_vol)],
+# 	forest_dt[genus %in% c("Picea", "Abies"), log(total_volume_m3)],
+# 	pch = 19, cex = 0.5, xlab = "Log est. total volume (Zhou)", ylab = "Log measured total volume",
+# 	xlim = c(min(forest_dt[genus %in% c("Picea", "Abies"), .(log(zhou_vol), log(total_volume_m3))]),
+# 		max(forest_dt[genus %in% c("Picea", "Abies"), .(log(zhou_vol), log(total_volume_m3))])),
+# 	ylim = c(min(forest_dt[genus %in% c("Picea", "Abies"), .(log(zhou_vol), log(total_volume_m3))]),
+# 		max(forest_dt[genus %in% c("Picea", "Abies"), .(log(zhou_vol), log(total_volume_m3))])))
+
+# tt = lm(formula = log(total_volume_m3) ~ 1 + log(zhou_vol) + I(log(zhou_vol)^2), data = forest_dt[genus %in% c("Picea", "Abies")])
+
+# cof = coef(tt)
+# ff = function(x) {return(cof[1] + cof[2]*x + cof[3]*x^2)}
+# curve(ff, lwd = 3, col = "#CD211A", add = TRUE)
+# curve(ff, lwd = 3, col = "#3355AA", add = TRUE)
+
+# sim = simulateResiduals(fittedModel = tt, plot = FALSE)
+# plotResiduals(sim, quantreg = TRUE)
+# plotResiduals(sim, form = forest_dt[genus %in% c("Picea", "Abies"), log(zhou_vol)])
+
+## Log, degree 4 #dd5129 #0f7ba2 #43b284 #fab255 
+forest_dt[genus == "Picea", col_sp := "#FAB255"]
+forest_dt[genus == "Abies", col_sp := "#43B284"]
+plot(forest_dt[genus %in% c("Picea", "Abies"), log(zhou_vol)],
+	forest_dt[genus %in% c("Picea", "Abies"), log(total_volume_m3)], pch = 19, cex = 0.5,
+	xlab = "Est. total volume (Zhou)", ylab = "Measured total volume",
+	col = forest_dt[genus %in% c("Picea", "Abies"), col_sp])
+
+# points(forest_dt[genus %in% c("Picea", "Abies"), log(zhou_vol)],
+# 	forest_dt[genus %in% c("Picea", "Abies"), log(bole_volume_m3)], pch = 19, cex = 0.5, col = "#FAB255")
+abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
+tt2 = lm(formula = log(total_volume_m3) ~ speciesName_sci + (log(zhou_vol) + I(log(zhou_vol)^2) +
+	I(log(zhou_vol)^3) + I(log(zhou_vol)^4)):speciesName_sci,
+	data = forest_dt[genus %in% c("Picea", "Abies")])
+cof_abies = coef(tt2)[seq(1, 9, 2)]
+cof_picea = c(sum(coef(tt2)[1:2]), coef(tt2)[seq(4, 10, 2)])
+ff = function(x, cof) {return(cof[1] + cof[2]*x + cof[3]*x^2 + cof[4]*x^3 + cof[5]*x^4)}
+curve(ff(x, cof_abies), lwd = 3, col = "#3355AA", add = TRUE)
+curve(ff(x, cof_picea), lwd = 3, col = "#AA5533", add = TRUE)
+
+sim = simulateResiduals(fittedModel = tt2, plot = FALSE)
+plotResiduals(sim, quantreg = TRUE)
+plot(sim)
+
+## Non-log, degree 4
+plot(forest_dt[genus %in% c("Picea", "Abies"), zhou_vol],
+	forest_dt[genus %in% c("Picea", "Abies"), total_volume_m3], pch = 19, cex = 0.5,
+	xlab = "Est. total volume (Zhou)", ylab = "Measured total volume")
+
+# # Deg 4
+# tt2 = lm(formula = total_volume_m3 ~ 0 + zhou_vol + I(zhou_vol^2) + I(zhou_vol^3) + I(zhou_vol^4),
+# 	data = forest_dt[genus %in% c("Picea", "Abies")])
+# cof = coef(tt2)
+# ff = function(x) {return(cof[1]*x + cof[2]*x^2 + cof[3]*x^3 + cof[4]*x^4)}
+# curve(ff, lwd = 3, col = "#3355AA", add = TRUE)
+
+# # Deg 2
+# tt2 = lm(formula = total_volume_m3 ~ 0 + zhou_vol + I(zhou_vol^2),
+# 	data = forest_dt[genus %in% c("Picea", "Abies")])
+# cof = coef(tt2)
+# ff = function(x) {return(cof[1]*x + cof[2]*x^2)}
+# curve(ff, lwd = 2, col = "#CD212A", add = TRUE)
+
+# # Deg 1
+# tt2 = lm(formula = total_volume_m3 ~ 0 + zhou_vol, data = forest_dt[genus %in% c("Picea", "Abies")])
+# abline(tt2, lwd = 2, col = "#FAB255")
+
+# sim = simulateResiduals(fittedModel = tt2, plot = FALSE)
+# plotResiduals(sim, quantreg = TRUE)
+
+# ## Volume houppier
+# forest_dt[, v_h := total_volume_m3 - bole_volume_m3]
+# plot(forest_dt[, bole_volume_m3],forest_dt[, v_h], pch = 19, cex = 0.5)
+# abline(a = 0, b = 1)
+
+# ## Ratio bole volume et c^2h (prop to cylindre vol)
+# forest_dt[, ratio := bole_volume_m3/(circumference_m^2*height)]
+# plot(forest_dt[, log(ratio)], forest_dt[, log(total_volume_m3)], pch = 19, cex = 0.5)
+
+# ## Plot Zhou's ratio
+# plot(forest_dt[, bole_volume_m3], forest_dt[, 1/(m - d*exp(-k*circumference_m^2*height/pi^2))], pch = 19, cex = 0.5)
+
+# WFO.remember(WFO.file = "~/work/database/worldFlora/classification.csv")
+# WFO.match(spec.data = "Larix decidua", WFO.data = WFO.data)
+# comm2sci(com = "Norway spruce", db = "itis")
+
+
+aa_log = 0.8 + 1.2*log(3) + 2.8*log(9)
+exp(aa_log) - (exp(0.8)*3^1.2*3^5.6)
+exp(aa_log) - (exp(0.8)*3^6.8)
+```
+
+### Create the model
+#### Prior check
+```{r}
+set.seed(1969 - 08 - 18) # Woodstock seed
+
+n_draws = 200
+n_trees = 1e3
+
+dt = forest_dt[sample(x = 1:.N, size = n_trees, replace = FALSE),
+	.(circumference_m, height, bole_volume_m3, total_volume_m3)]
+ll = vector(mode = "list", length = n_draws)
+params = vector(mode = "list", length = n_draws)
+
+for (i in seq_len(n_draws))
+{
+	m = rnorm(1, mean = 0.9, sd = 0.05);
+	d = rnorm(1, mean = 0.3, sd = 0.05);
+	k = rnorm(1, mean = 0,  sd =0.01);
+
+	sigma = rgamma(1, shape = 2.5, rate = 7);
+
+	ll[[i]] = rnorm(n_trees, mean = dt[, log(bole_volume_m3)]/(m - d*exp(k*dt[, circumference_m]^2*dt[, height])), sigma);
+	params[[i]] = data.table(m = m, d = d, k = k, sigma = sigma)
+}
+
+params = rbindlist(params)
+# tt = rbindlist(ll)
+
+params[k < 0][which.max(sigma)]
+qq = params[, which((-0.01044 < k) & (k < -0.01043))]
+
+plot(dt[, bole_volume_m3], exp(ll[[qq]]), pch = 19, cex = 0.5, xlab = "bole volume", ylab = "pred tot volume") # Show that sigma should be small
+
+plot(dt[, bole_volume_m3], exp(ll[[198]]), pch = 19, cex = 0.5, xlab = "bole volume", ylab = "pred tot volume") # Shos that  k > 0 lead to big values
+
+plot(dt[, log(bole_volume_m3)], ll[[200]], pch = 19, cex = 0.5, xlab = "log(bole volume)", ylab = "log(pred tot volume)") # Show a coherent result
+
+plot(dt[, bole_volume_m3], dt[, total_volume_m3], col = "#CD212A", pch = 19, cex = 0.3)
+abline(a = 0, b = 1, lwd = 2)
+plot(dt[, log(bole_volume_m3)], dt[, log(total_volume_m3)], col = "#CD212A", pch = 19, cex = 0.3)
+abline(a = 0, b = 1, lwd = 2)
+```
+
+#### model
+```{r}
+#### Fit the model
+## Compile model
+model = cmdstan_model("./04_zhou.stan")
+
+## Stan data
+stanData = list(
+	N = forest_dt[genus %in% c("Picea", "Abies"), .N],
+	S = forest_dt[genus %in% c("Picea", "Abies"), length(unique(speciesName_sci))],
+	start = forest_dt[genus %in% c("Picea", "Abies")][, .(start = .I[1]), by = .(speciesName_sci)][, start],
+	end = forest_dt[genus %in% c("Picea", "Abies")][, .(end = .I[.N]), by = .(speciesName_sci)][, end],
+
+	circumference = forest_dt[genus %in% c("Picea", "Abies"), circumference_m],
+	height = forest_dt[genus %in% c("Picea", "Abies"), height],
+	bole_volume = forest_dt[genus %in% c("Picea", "Abies"), bole_volume_m3],
+
+	tot_volume = forest_dt[genus %in% c("Picea", "Abies"), total_volume_m3]
+)
+
+## Common variables
+n_chains = 4
+
+iter_warmup = 250
+iter_sampling = 250
+```
+
+### Run the model
+```{r}
+#| output: false
+#| fold: false
+## Run
+fit = model$sample(data = stanData, chains = n_chains, parallel_chains = ifelse(n_chains < 4, n_chains, 4),
+	seed = NULL, refresh = 50, max_treedepth = 12, save_warmup = TRUE,
+	iter_sampling = iter_sampling, iter_warmup = iter_warmup, adapt_delta = 0.8)
+
+fit$save_output_files(dir = "./", basename = paste0("fit_zhou"), random = FALSE)
+saveRDS(fit, "./fit_zhou.rds")
+```
+
+### Posterior check
+#### Check some values
+```{r}
+apply(X = fit$draws("beta0"), MARGIN = 3, FUN = mean)
+apply(X = fit$draws("beta1"), MARGIN = 3, FUN = mean)
+
+round(apply(X = fit$draws("m"), MARGIN = 3, FUN = mean), 3)
+round(apply(X = fit$draws("k"), MARGIN = 3, FUN = mean), 3)
+round(apply(X = fit$draws("d"), MARGIN = 3, FUN = mean), 3)
+
+round(apply(X = fit$draws("sigma"), MARGIN = 3, FUN = mean), 3)
+```
+
+#### Generate posterior simulations
+```{r}
+genQ = cmdstan_model("./04_zhou_gq.stan")
+
+stanData_new = stanData
+
+stanData_new[["selected_species"]] = seq_along(species_vallet)
+selected_species = species_vallet[stanData_new[["selected_species"]]]
+new_forest = forest_dt[.(selected_species)]
+
+stanData_new[["S_new"]] = length(stanData_new[["selected_species"]])
+stanData_new[["N_new"]] = new_forest[, .N]
+stanData_new[["start_new"]] = new_forest[, .(start = .I[1]), by = .(speciesName_sci)][, start]
+stanData_new[["end_new"]] = new_forest[, .(end = .I[.N]), by = .(speciesName_sci)][, end]
+
+stanData_new[["circumference_new"]] = new_forest[, circumference_m]
+stanData_new[["height_new"]] = new_forest[, height]
+stanData_new[["bole_volume_new"]] = new_forest[, bole_volume_m3]
+
+sim = genQ$generate_quantities(fit$draws(inc_warmup = FALSE), data = stanData_new)
+```
+
+```{r}
+mean_pred = apply(X = sim$draws("mean_pred"), MARGIN = 3, FUN = mean)
+ratio = apply(X = sim$draws("ratio"), MARGIN = 3, FUN = mean)
+rm(sim)
+
+plot(new_forest[, total_volume_m3], ratio, pch = 19, cex = 0.5)
+
+## Plot prediction vs measured
+plot(new_forest[, total_volume_m3], exp(mean_pred), pch = 19, cex = 0.5,
+	xlab = "Measured tot. vol.", ylab = "Pred. tot. vol.")
+abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
+
+## Plot prediction vs measured in log space
+plot(new_forest[, log(total_volume_m3)], mean_pred, pch = 19, cex = 0.5,
+	xlab = "log(measured tot. vol.)", ylab = "log(pred. tot. vol.)")
+abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
+
+# ## Plot simple residuals
+# plot(new_forest[, total_volume_m3] - exp(mean_pred), ylab = "Residuals (real space)", pch = 19, cex = 0.5)
+
+# ## Plot simple residuals in log space
+# plot(new_forest[, log(total_volume_m3)] - mean_pred, ylab = "Residuals (log space)", pch = 19, cex = 0.5)
+
+## Standardised residuals
+plot(mean_pred, sqrt(abs(new_forest[, log(total_volume_m3)] - mean_pred)), pch = 19, cex = 0.5,
+	ylab = "sqrt(std. res.)")
+
+## Residuals vs observations
+plot(new_forest[, total_volume_m3], new_forest[, total_volume_m3] - exp(mean_pred), pch = 19, cex = 0.5,
+	xlab = "Obs. tot. vol", ylab = "Residuals")
+```
+
+#### Residuals using DHARMa
+```{r}
+library(DHARMa)
+
+n_sampling = fit$metadata()$iter_sampling
+
+simResp = sim$draws("pred_tot_volume")
+dim(simResp)
+
+# Reshape simResp as a matrix nobs x n_repetition
+simResp_matrix = matrix(data = 0, nrow = new_forest[, .N], ncol = n_sampling*n_chains)
+for (obs in seq_len(new_forest[, .N]))
+{
+	col_start = 1
+	for (chain in 1:n_chains)
+	{
+		col_end = chain*n_sampling
+		simResp_matrix[obs, col_start:col_end] = simResp[, chain, obs]
+		col_start = col_end + 1
+	}
+}
+
+## Simulated residuals
+sim_dharma = createDHARMa(simulatedResponse = simResp_matrix,
+	observedResponse = new_forest[, total_volume_m3],
+	fittedPredictedResponse = apply(sim$draws("mean_pred"), MARGIN = 3, median),
+	integerResponse = FALSE)
+
+plot(sim_dharma, quantreg = TRUE)
+plotResiduals(sim_dharma, new_forest[, bole_volume_m3], quantreg = TRUE)
+
+ind_min = which.min(new_forest[, bole_volume_m3])
+ind_max = which.max(new_forest[, bole_volume_m3])
+
+dd = density(simResp[, , ind_min])
+plot(dd, xlab = "Simulated volume (min predictor)", xlim = c(0, max(dd$x, new_forest[ind_min, total_volume_m3])),
+	main = paste("Real value:", round(new_forest[ind_min, total_volume_m3], 3)))
+abline(v = new_forest[ind_min, total_volume_m3], lwd = 3, col = "#CD212A")
+
+dd = density(simResp[, , 9])
+plot(dd, xlab = "Simulated volume (min predictor)", xlim = c(0, max(dd$x, new_forest[9, total_volume_m3])),
+	main = paste("Real value:", round(new_forest[9, total_volume_m3], 3)))
+abline(v = new_forest[9, total_volume_m3], lwd = 3, col = "#CD212A")
+
+zz = (new_forest[, bole_volume_m3] - new_forest[, min(bole_volume_m3)])/diff(range(new_forest[, bole_volume_m3]))
+zz[5630]
+```
+
+
+```{r}
+aa = forest_dt[genus %in% c("Picea", "Abies")]
+
+plot(aa[, circumference_m], aa[, total_volume_m3], pch = 19, cex = 0.5)
+plot(aa[, circumference_m], aa[, bole_volume_m3], pch = 19, cex = 0.5)
+plot(aa[, height], aa[, bole_volume_m3], pch = 19, cex = 0.5)
+plot(aa[, hdn], aa[, bole_volume_m3], pch = 19, cex = 0.5)
+plot(aa[, circumference_m^2*height/(4*pi)], aa[, total_volume_m3], pch = 19, cex = 0.5)
+plot(aa[, circumference_m^2*height/(4*pi)], aa[, total_volume_m3], pch = 19, cex = 0.5)
+
+
+
+library(interp)
+
+aa <- aa[!duplicated(cbind(aa$circumference_m, aa$height))]
+aa = aa[sample(x = seq_len(.N), size = 500, replace = FALSE)]
+
+
+si <- interp(x = aa[, circumference_m], y = aa[, height], z = aa[, bole_volume_m3],
+	method = "linear", duplicate = "mean")
+
+filled.contour(si,
+	plot.axes = {
+		axis(1)
+		axis(2, las = 1)
+		contour(si, add = TRUE, lwd = 2, axes = NULL)
+	}
+)
+
+
+
+
+si <- interp(x = aa[, circumference_m], y = aa[, height], z = aa[, bole_volume_m3],
+	method = "linear", duplicate = "mean")
+
+filled.contour(si,
+	plot.axes = {
+		axis(1)
+		axis(2, las = 1)
+		contour(si, add = TRUE, lwd = 2, axes = NULL)
+	}
+)
+```
+
+## Exercises from @McElreath2020
+
+### 6M2, p. 189
+
+```{r}
+# Consider the DAG X → Z → Y. Simulate data from this DAG so that the correlation between X and Z is very large.
+# 	Then include both in a model prediction Y. Do you observe any multicollinearity? Why or why not? What is different
+# 	from the legs example in the chapter?
+
+set.seed(1969 - 08 - 18) # Woodstock seed
+n = 1e3
+
+X = runif(n = n, min = 0, max = 100)
+Z = rnorm(n = n, mean = 2.5 + 0.4*X, sd = 0.1) # Higly correlated to X
+Y = rnorm(n = n, mean = 1.24 + 0.87*Z)
+
+stanData = list(
+	N = n,
+	X = X,
+	Y = Y,
+	Z = Z
+)
+
+model = cmdstan_model("./temp.stan")
+test = model$sample(data = stanData, chains = 4, parallel_chains = 4)
+
+lazyTrace(draws = test$draws("a0"), val1 = 1.24)
+lazyTrace(draws = test$draws("a1"), val1 = 0)
+lazyTrace(draws = test$draws("a2"), val1 = 0.87)
+lazyTrace(draws = test$draws("sigma"), val1 = 1)
+
+# Observations: There is no multicollinearity
+# Why: This is a pipe X -> Z -> Y, adding Z to the model just cut the path from X to Y
+```
+

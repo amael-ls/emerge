@@ -30,25 +30,23 @@ transformed data {
 
 parameters {
 	// Parameters of Zhou2021 (Dynamic allometric scaling of tree biomass and size)
-	vector [S] m;
-	vector [S] d;
-	vector [S] k;
+	real m;
+	real d;
+	real k;
 
 	// Regression parameters around Zhou's volume
-	vector[S] beta0;
-	vector[S] beta1;
-	vector[S] beta2;
-	vector[S] beta3;
-	vector[S] beta4;
+	real beta0;
+	real beta1;
+	real beta2;
+	real beta3;
+	real beta4;
 
 	real <lower = 0> sigma;
 }
 
 model{
 	// Define variables
-	vector [N] zhou_ratio;
-	for (i in 1:S)
-		zhou_ratio[start[i]:end[i]] = bole_volume[start[i]:end[i]] ./ exp(m[i] - d[i]*exp(k[i]*D2H[start[i]:end[i]]));
+	vector [N] zhou_ratio = bole_volume ./ exp(m - d*exp(k*D2H));
 
 	// Prior linear regression
 	target += normal_lpdf(beta0 | 0, 1);
@@ -67,11 +65,11 @@ model{
 	// Likelihood
 	for (i in 1:S)
 	{
-		target += normal_lpdf(log_tot_volume[start[i]:end[i]] | beta0[i] +
-			beta1[i]*log(zhou_ratio[start[i]:end[i]]) +
-			beta2[i]*log(zhou_ratio[start[i]:end[i]].^2) +
-			beta3[i]*log(zhou_ratio[start[i]:end[i]].^3) +
-			beta4[i]*log(zhou_ratio[start[i]:end[i]].^4), sigma);
+		target += normal_lpdf(log_tot_volume | beta0 +
+			beta1*log(zhou_ratio) +
+			beta2*log(zhou_ratio.^2) +
+			beta3*log(zhou_ratio.^3) +
+			beta4*log(zhou_ratio.^4), sigma);
 	}
 }
 
