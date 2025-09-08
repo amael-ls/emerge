@@ -58,6 +58,8 @@ source("./toolFunctions.R")
 
 ## Introduction
 
+This is a summary of @Parresol2001 to test and understand the Nonlinear Seemingly Unrelated Rgression (NSUR). I first apply his 'naive' model, and then apply an NSUR model. The data are available in his paper, that I copied into a data table in R.
+
 ## Data
 ```{r}
 #| output: false
@@ -94,7 +96,7 @@ data = data.table(
 data[, all.equal(tree, wood + bark + crown)]
 ```
 
-::: {.callout-note}
+::: {.callout-note collapse="true"}
 
 ## Data of *Pinus elliottii*
 
@@ -125,8 +127,10 @@ data[, .(dbh, height, wood)] |>
 
 :::
 
-## Stan model
-### Model 1, equation 15
+## Model 1, equation 15
+
+### Heteroskedasticity ignored
+
 The basic model is:
 
 $$
@@ -139,7 +143,7 @@ $$
 
 which is the equation 15 in @Parresol2001, with a clarification on the parameters (he only uses $b_1$, $b_2$, and $b_3$ despite the $b_1$ of wood is not the same as $b_1$ bark). In this version, the heteroskedasticity is ignored.
 
-```{stan output.var = "97_eq15", cache = TRUE}
+```{stan output.var = "eq15", cache = TRUE}
 data {
 	// Dimensions
 	int<lower = 1> N; // Number of data
@@ -183,8 +187,9 @@ generated quantities {
 }
 ```
 
-#### First run, heteroskedasticity ignored
 ```{r}
+#| output: false
+
 ## Run stan model
 # Data
 stanData = list(
@@ -202,7 +207,7 @@ stanData = list(
 n_chains = 4
 
 # Running
-results = 97_eq15$sample(data = stanData, chains = n_chains, parallel_chains = n_chains)
+results = eq15$sample(data = stanData, chains = n_chains, parallel_chains = n_chains)
 
 ## Residuals
 n_sampling = results$metadata()$iter_sampling
@@ -230,13 +235,46 @@ sim_dharma = createDHARMa(simulatedResponse = simResp_matrix,
 	integerResponse = FALSE)
 ```
 
-As expected, heteroskedasticity is clearly visible on the residuals, with an increase of variance with diameter and height (combined here as a 'cylinder volume'---although cm mixed with metres).
+As expected, heteroskedasticity is clearly visible on the residuals (@fig-residuals_simple), with an increase of variance with diameter and height (combined here as a 'cylinder volume'---although cm mixed with metres).
 ```{r}
+#| label: fig-residuals_simple
+#| fig-cap: "Model check"
+#| fig-sucap:
+#|   - "Residuals of the 'naive' model"
+#|   - "Predictions"
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 4
+#| layout-ncol: 2
+
 plotResiduals(sim_dharma, data[, dbh^2*height], quantreg = TRUE, xlab = "D²h", main = "")
+
+## Prediction of trunk volume
+# Median volume predictions
+b1 = median(results$draws("b1[1]"))
+b2 = median(results$draws("b2[1]"))
+
+wood_sim = apply(X = results$draws("wood_sim"), MARGIN = 3, FUN = median)
+
+f = function(x, a, b)
+	return(a*x^b)
+
+## Credibility intervals for the smallest and largest tree
+smallest_cred = quantile(results$draws("wood_sim[1]"), c(0.05, 0.5, 0.95))
+largest_cred = quantile(results$draws("wood_sim[40]"), c(0.05, 0.5, 0.95))
+
+## Plot
+plot(data[, dbh^2*height], wood_sim, pch = 19, axes = FALSE, xlab = "D²h", ylab = "Wood biomass",
+	col = "#0F7BA2", ylim = c(0, max(data[, wood], wood_sim, largest_cred)))
+points(data[, dbh^2*height], data[, wood], pch = 15, col = "#FAB255", cex = 0.75)
+curve(f(x, b1, b2), lwd = 2, col = "#CD212A", add = TRUE)
+axis(1)
+axis(2, las = 1)
+segments(x0 = data[1, dbh^2*height], y0 = smallest_cred["5%"], y1 = smallest_cred["95%"])
+segments(x0 = data[40, dbh^2*height], y0 = largest_cred["5%"], y1 = largest_cred["95%"])
 ```
 
-
-#### First run, heteroskedasticity considered
+### Heteroskedasticity considered
 In this section, I consider heteroskedasticity, using the following equations (taken from the weight in Tab. 2, @Parresol2001), the other equations remaining the same:
 
 $$
@@ -247,28 +285,70 @@ $$
 \end{aligned}
 $$
 
-```{r}
-## Run stan model
-# Compile model
-model = cmdstan_model("./97_eq15_heterosked.stan")
+```{stan output.var = "eq15_heterosked", cache = TRUE}
+data {
+	// Dimensions
+	int<lower = 1> N; // Number of data
 
-# Data
-stanData = list(
-	N = data[, .N],
+	// Explanatory variables
+	vector[N] diameter;
+	vector[N] height;
 
-	diameter = data[, dbh],
-	height = data[, height],
+	// Observations
+	vector[N] wood;
+	vector[N] bark;
+	vector[N] crown;
+}
+
+parameters {
+	// Regression parameters (intercept and power)
+	array[3] real <lower = 0> b1; // Intercepts for each tree component
+	array[3] real b2; // Powers for each tree component
+	real b3; // Power
 	
-	wood = data[, wood],
-	bark = data[, bark],
-	crown = data[, crown]
-)
+	// Variance parameters
+	real c1;
+	real c2;
+	array[2] real c3;
 
-# Parameters
-n_chains = 4
+	// Std. dev.
+	array[3] real <lower = 0> sigma;
+}
 
+model {
+	target += gamma_lpdf(b1 | 1, 1); // 0.05^2/0.002, 0.05/0.002);
+	target += normal_lpdf(b2 | 0, 1);
+	target += normal_lpdf(b3 | 0, 1);
+
+	target += normal_lpdf(c1 | 0, 1);
+	target += normal_lpdf(c2 | 0, 1);
+	target += normal_lpdf(c3 | 0, 1);
+
+	target += gamma_lpdf(sigma | 0.001, 0.001);
+
+	target += normal_lpdf(wood | b1[1] * (diameter.^2 .* height).^b2[1],
+		sigma[1] * (diameter.^2 .* height).^c1);
+	target += normal_lpdf(bark | b1[2] * diameter.^b2[2],
+		sigma[2] * diameter .^ c2);
+	target += normal_lpdf(crown | b1[3] * diameter.^b2[3] .* height.^b3,
+		sigma[3] * diameter .^ c3[1] .* exp(c3[2] * height.^2));
+}
+
+generated quantities {
+	// Simulations (for wood only)
+	array [N] real wood_sim = normal_rng(b1[1] * (diameter.^2 .* height).^b2[1],
+		sigma[1] * (diameter.^2 .* height).^c1);
+	vector [N] mean_pred = b1[1] * (diameter.^2 .* height).^b2[1];
+	vector [N] var_pred = sigma[1] * (diameter.^2 .* height).^c1;
+}
+```
+
+```{r}
+#| output: false
+
+## Run stan model
 # Running
-results_heterosked = model$sample(data = stanData, chains = n_chains, parallel_chains = n_chains,
+results_heterosked = eq15_heterosked$sample(data = stanData, chains = n_chains, parallel_chains = n_chains,
 	max_treedepth = 12, iter_warmup = 1750, iter_sampling = 1500)
 
 ## Check results
@@ -280,23 +360,57 @@ apply(X = results$draws("b2"), MARGIN = 3, FUN = mean)
 
 mean(results_heterosked$draws("b3"))
 mean(results$draws("b3"))
+```
 
-## Few plots
-# Posteriors of predicted variance for tree 1 (smallest)  and 40 (largest)
-lazyPosterior(results_heterosked$draws("var_pred[1]"))
-lazyPosterior(results_heterosked$draws("var_pred[40]"))
+```{r}
+#| label: fig-posterior
+#| fig-cap: Few cheks of posteriors and predictions
+#| fig-subcap:
+#|   - "Posterior variance smallest tree"
+#|   - "Posterior variance largest tree"
+#|   - "Prediction of variance"
+#|   - "Prediction of trunk volume"
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 4
+#| layout-ncol: 2
+#| output: false
 
-# Fit of the variance (median computed, mean is off due to fat-tailed posterior sigma1)
+#### Few plots
+## Posteriors of predicted variance for tree 1 (smallest)  and 40 (largest)
+aa = lazyPosterior(results_heterosked$draws("var_pred[1]"))
+bb = lazyPosterior(results_heterosked$draws("var_pred[40]"))
+
+## Fit of the variance (median computed, mean is off due to fat-tailed posterior sigma1)
 y = apply(X = results_heterosked$draws("var_pred"), MARGIN = 3, FUN = median)
 sigma1 = median(results_heterosked$draws("sigma[1]"))
 c1 = median(results_heterosked$draws("c1"))
 
-plot(data[, dbh^2*height], y, pch = 19, axes = FALSE, xlab = "Diameter", ylab = "Variance")
-f = function(x, sigma1, c1)
-	return(sigma1*x^c1)
+plot(data[, dbh^2*height], y, pch = 19, axes = FALSE, xlab = "D²h", ylab = "Variance")
 curve(f(x, sigma1, c1), lwd = 2, col = "#CD212A", add = TRUE)
 axis(1)
 axis(2, las = 1)
+
+## Prediction of trunk volume
+# Median volume predictions
+b1 = median(results_heterosked$draws("b1[1]"))
+b2 = median(results_heterosked$draws("b2[1]"))
+
+wood_sim = apply(X = results_heterosked$draws("wood_sim"), MARGIN = 3, FUN = median)
+
+## Credibility intervals for the smallest and largest tree
+smallest_cred = quantile(results_heterosked$draws("wood_sim[1]"), c(0.05, 0.5, 0.95))
+largest_cred = quantile(results_heterosked$draws("wood_sim[40]"), c(0.05, 0.5, 0.95))
+
+## Plot
+plot(data[, dbh^2*height], wood_sim, pch = 19, axes = FALSE, xlab = "D²h", ylab = "Wood biomass",
+	col = "#0F7BA2", ylim = c(0, max(data[, wood], wood_sim, largest_cred)))
+points(data[, dbh^2*height], data[, wood], pch = 15, col = "#FAB255", cex = 0.75)
+curve(f(x, b1, b2), lwd = 2, col = "#CD212A", add = TRUE)
+axis(1)
+axis(2, las = 1)
+segments(x0 = data[1, dbh^2*height], y0 = smallest_cred["5%"], y1 = smallest_cred["95%"])
+segments(x0 = data[40, dbh^2*height], y0 = largest_cred["5%"], y1 = largest_cred["95%"])
 ```
 
 ```{r}
@@ -326,11 +440,18 @@ sim_dharma = createDHARMa(simulatedResponse = simResp_matrix,
 	integerResponse = FALSE)
 ```
 
-As can be seen, the residuals are good when heteroskedasticity is considered
+As can be seen, the residuals are good when heteroskedasticity is considered (see @fig-residuals_heterosked).
 ```{r}
-plot(sim_dharma, quantreg = TRUE)
-plotResiduals(sim_dharma, data[, dbh], quantreg = TRUE)
+#| label: fig-residuals_heterosked
+#| fig-cap: Residuals of the model accounting for heteroskedasticity
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 6
+
+plotResiduals(sim_dharma, data[, dbh^2*height], quantreg = TRUE)
 ```
+
+
 
 ## Bibliography {.unnumbered}
 
