@@ -386,6 +386,8 @@ As a conclusion, the two volumes are as 'stable' or messy as each other!
 
 ## A first not so simple joined model
 
+WHAT FOLLOWS IN THIS SECTION IS OUT OF DATE! I AM EVEN NOT DOING A JOINED MODEL HERE. GO TO NEXT SECTION FOR FIRST TRIAL.
+
 This model is based on the ratio developed in `06_zhou.qmd` for the total volume, $\Vtot$. For $\Vbft$, I explore few relations between the taper diametre, $\ddec$, and taper height, $\hdec$.
 
 ### Heatmaps $\ddec$, $\hdec$, and $\Vbft$
@@ -431,7 +433,11 @@ for (current_sp in forest_dt_heatmap[, unique(speciesName_sci)])
 rm(forest_dt_heatmap)
 ```
 
+THE NEXT PIECE OF CODE IS CURRENTLY NOT EVALUATED
+
 ```{r}
+#| eval: false
+
 model = cmdstan_model("./temp.stan")
 
 current_sp = "Fagus sylvatica" # "Pinus nigra"
@@ -589,11 +595,21 @@ filled.contour(si,
 	color.palette = colorRampPalette(met.brewer("Hiroshige", direction = -1))
 )
 
-met.brewer("Egypt")[1:4]
-[1] "#dd5129" "#0f7ba2" "#43b284" "#fab255"
+# met.brewer("Egypt")[1:4]
+# [1] "#dd5129" "#0f7ba2" "#43b284" "#fab255"
 
 
 ```
+
+## Joined model
+
+I here try a first joined model on $\Vtot$ and the ratio of $\Vbft$ over $\Vtot$, that is to say the proportion of trunk in the total volume. This was simulated in `06_zhou.qmd` with a rather flexible but complexe function and a beta distribution. I cannot do that here, except if I use copulas, as $\Vtot$ does not follow a beta distribution! I am therefore limited to multivariate normal, gamma, lognormal, and so on...
+
+I will use two transformations in order to be able to use a MVN distribution:
+
+- A `logit` on the proportion (as it is never 0 nor 1)
+- A log on $\Vtot$ to also put it on $\mathds{R}$ rather than $\mathds{R}^{+}$
+
 
 
 ## Bibliography {.unnumbered}
