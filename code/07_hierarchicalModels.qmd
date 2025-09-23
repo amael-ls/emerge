@@ -58,6 +58,7 @@ format:
 <!-- Math commands -->
 \newcommand{\Vbft}{V_{\text{BFT}}}
 \newcommand{\Fbft}{F_{\text{BFT}}}
+\newcommand{\Vcro}{V_{\text{crown}}}
 \newcommand{\Vtot}{V_{\text{tot}}}
 \newcommand{\hdec}{h_{\text{tap}}}
 \newcommand{\ddec}{\phi_{\text{tap}}}
@@ -75,10 +76,10 @@ library(data.table)
 library(MetBrewer)
 library(cmdstanr)
 	register_knitr_engine(override = TRUE)
-library(interp)
-library(gt)
 library(stringi)
 library(DHARMa)
+library(interp)
+library(gt)
 
 ## Tool function
 source("./toolFunctions.R")
@@ -309,10 +310,10 @@ a4 = alphahull::ahull(x = dt_hull[.("nfi", "conifer"), .(scaled_c, scaled_h)],
 
 plot(NA, NA, xlim = c(-3, 10), ylim = c(-3, 5), xlab = "Circumference (m)", ylab = "Height (m)", axes = FALSE)
 
-plot(a1, col = paste0(colours["nfi"], "55"), add = TRUE, wpoints = FALSE, lwd = 4)
-plot(a2, col = paste0(colours["inra"], "55"), add = TRUE, wpoints = FALSE, lwd = 4)
-plot(a3, col = paste0(colours["broadleaf"], "55"), add = TRUE, wpoints = FALSE, lwd = 4)
-plot(a4, col = paste0(colours["conifer"], "55"), add = TRUE, wpoints = FALSE, lwd = 4)
+plot(a1, col = colours["nfi"], add = TRUE, wpoints = FALSE, lwd = 4)
+plot(a2, col = colours["inra"], add = TRUE, wpoints = FALSE, lwd = 4)
+plot(a3, col = colours["broadleaf"], add = TRUE, wpoints = FALSE, lwd = 4)
+plot(a4, col = colours["conifer"], add = TRUE, wpoints = FALSE, lwd = 4)
 
 axis(1)
 axis(2, las = 1)
@@ -327,16 +328,17 @@ Finally, here are the variances of both bole and total volume per species and pe
 
 ::: {.callout-note collapse=true}
 
-## 
+## Overview of the data
 
 ```{r}
 inra[, class_circumference := as.numeric(cut(circumference_m, breaks = 4)), by = speciesName_sci]
-inra[, .(var_tot = var(total_volume_m3), var_bole = var(bole_volume_m3)),
+inra[, .(n_indiv = .N, var_tot = var(total_volume_m3), var_bole = var(bole_volume_m3)),
 	by = .(speciesName_sci, class_circumference)][order(speciesName_sci, class_circumference)] |>
 	gt() |>
 	cols_label(
 		speciesName_sci = "Species",
-		class_circumference = "Circumference class",
+		class_circumference = "Circ. class",
+		n_indiv = "N indiv.",
 		var_tot = "Var(tot vol)",
 		var_bole = "Var(bole vol)"
 	) |>
@@ -354,7 +356,7 @@ inra[, .(var_tot = var(total_volume_m3), var_bole = var(bole_volume_m3)),
 		locations = cells_body(columns = speciesName_sci)
 	) |>
 	tab_style(
-		style = list(cell_fill(color = "#FFFFFF"), cell_text(align = "left")),
+		style = list(cell_fill(color = "#FFFFFF"), cell_text(align = "right")),
 		locations = cells_body(columns = class_circumference)
 	) |>
 	fmt_number(
@@ -601,6 +603,23 @@ filled.contour(si,
 
 ```
 
+## Joined model with components
+
+I try here a first joined model on the taper volume, $\Vbft$, and the crown volume, $\Vcro$, which gathers small branches, large branches, and forks. I assume a lognormal distribution for both volumes, so I will transform both with a $\log$ and then use a multivariate normal distribution. As a simple test, I use an intercept only, no explanatory variables.
+
+::: {.callout-important}
+
+## How to retrieve the total volume?
+
+The total volume, $\Vtot$, is the sum of the trunk and crown:
+$$
+\Vtot = \Vbft + \Vcro.
+$$
+
+Because both 
+
+:::
+
 ## Joined model
 
 I here try a first joined model on $\Vtot$ and the ratio of $\Vbft$ over $\Vtot$, that is to say the proportion of trunk in the total volume. This was simulated in `06_zhou.qmd` with a rather flexible but complexe function and a beta distribution. I cannot do that here, except if I use copulas, as $\Vtot$ does not follow a beta distribution! I am therefore limited to multivariate normal, gamma, lognormal, and so on...
@@ -610,7 +629,16 @@ I will use two transformations in order to be able to use a MVN distribution:
 - A `logit` on the proportion (as it is never 0 nor 1)
 - A log on $\Vtot$ to also put it on $\mathds{R}$ rather than $\mathds{R}^{+}$
 
+```{r}
+plot(inra$total_volume_m3, inra$bole_volume_m3/inra$total_volume_m3, pch = 19, cex = 0.75)
 
+p = inra$bole_volume_m3/inra$total_volume_m3
+
+plot(log(inra$total_volume_m3), log(p/(1 - p)))
+
+model = cmdstan_model("./temp_joined.stan")
+fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4), max_treedepth = 12)
+```
 
 ## Bibliography {.unnumbered}
 
