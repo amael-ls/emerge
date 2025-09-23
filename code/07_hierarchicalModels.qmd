@@ -603,23 +603,6 @@ filled.contour(si,
 
 ```
 
-## Joined model with components
-
-I try here a first joined model on the taper volume, $\Vbft$, and the crown volume, $\Vcro$, which gathers small branches, large branches, and forks. I assume a lognormal distribution for both volumes, so I will transform both with a $\log$ and then use a multivariate normal distribution. As a simple test, I use an intercept only, no explanatory variables.
-
-::: {.callout-important}
-
-## How to retrieve the total volume?
-
-The total volume, $\Vtot$, is the sum of the trunk and crown:
-$$
-\Vtot = \Vbft + \Vcro.
-$$
-
-Because both 
-
-:::
-
 ## Joined model
 
 I here try a first joined model on $\Vtot$ and the ratio of $\Vbft$ over $\Vtot$, that is to say the proportion of trunk in the total volume. This was simulated in `06_zhou.qmd` with a rather flexible but complexe function and a beta distribution. I cannot do that here, except if I use copulas, as $\Vtot$ does not follow a beta distribution! I am therefore limited to multivariate normal, gamma, lognormal, and so on...
