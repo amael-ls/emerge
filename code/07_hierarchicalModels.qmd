@@ -63,6 +63,9 @@ format:
 \newcommand{\hdec}{h_{\text{tap}}}
 \newcommand{\ddec}{\phi_{\text{tap}}}
 
+\DeclareMathOperator{\Cov}{Cov}
+\DeclareMathOperator{\E}{\mathds{E}}
+
 ```{r}
 #| output: false
 
@@ -603,7 +606,69 @@ filled.contour(si,
 
 ```
 
-## Joined model
+## Joined model fake data
+
+In this section, I create a dataset and fit the joined model that I want to use later on real data. This way I can verify that the model is capturing what is desired.
+
+The parameters (to estimate later by our model) are defined as below:
+```{r}
+#### Parameters
+mu_logit_r = 1.386 # Mean logit(ratio)
+mu_log_v = -1.194 # Mean total volume
+
+sigma_logit_r = 0.5625 # Std. dev. logit(ratio)
+sigma_log_v = 1.25 # Std. dev. total volume. Not ideal but larger makes it too fat-tailed compared to real distrib
+
+rho = 0.22 # Covariance between logit(ratio) and log(total volume)
+
+#### Var-Cov matrix
+sigma_mat = diag(c(sigma_logit_r, sigma_log_v))
+rho_mat = matrix(c(1, rho, rho, 1), nrow = 2, ncol = 2)
+
+varCov_mat = sigma_mat %*% rho_mat %*% sigma_mat
+
+#### Other variables
+n_sim = 2e3
+```
+
+```{r}
+#### Create data following our model (intercepts only, with corrleation in the residuals)
+set.seed(1969 - 08 - 18) # Woodstock seed
+data = as.data.table(MASS::mvrnorm(n_sim, c(mu_logit_r, mu_log_v), varCov_mat))
+setnames(data, c("logit_r", "log_v"))
+
+inv_logit = function(x)
+	return (1 / (1 + exp(-x)))
+
+stanData = list(
+	N = data[, .N],
+	p = data[, inv_logit(logit_r)],
+	total_volume_m3 = data[, exp(log_v)]
+)
+
+model = cmdstan_model("./temp_joined.stan")
+
+n_chains = 4
+
+fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4), max_treedepth = 12)
+
+mean(fit$draws("mu_p"))
+mean(fit$draws("mu_v"))
+
+lazyPosterior(fit$draws("mu_p"), val1 = mu_logit_r)
+lazyPosterior(fit$draws("mu_v"), val1 = mu_log_v)
+lazyPosterior(fit$draws("rho"), val1 = rho)
+
+lazyPosterior(fit$draws("sigma_p"), val1 = sigma_logit_r)
+lazyPosterior(fit$draws("sigma_v"), val1 = sigma_log_v)
+
+varCov_mat_est = matrix(data = apply(X = fit$draws("Sigma"), FUN = mean, MARGIN = 3), nrow = 2, byrow = 2)
+
+round(varCov_mat, 2)
+round(varCov_mat_est, 2)
+```
+
+## Joined model ratio and total volume
 
 I here try a first joined model on $\Vtot$ and the ratio of $\Vbft$ over $\Vtot$, that is to say the proportion of trunk in the total volume. This was simulated in `06_zhou.qmd` with a rather flexible but complexe function and a beta distribution. I cannot do that here, except if I use copulas, as $\Vtot$ does not follow a beta distribution! I am therefore limited to multivariate normal, gamma, lognormal, and so on...
 
@@ -612,16 +677,64 @@ I will use two transformations in order to be able to use a MVN distribution:
 - A `logit` on the proportion (as it is never 0 nor 1)
 - A log on $\Vtot$ to also put it on $\mathds{R}$ rather than $\mathds{R}^{+}$
 
+::: {.callout-note}
+
+## Intractibility
+
+Note that whatever I try to model, there will always be intractibility somewhere! Either I model both components, trunk and crown, with a multivariate lognormal, and the total volume is untractable (sum of two lognormals), or I model the trunk volume, $\Vtot$ and the ratio, $r$, and $\Vbft$ is untractable. Indeed:
+
+$$
+\begin{aligned}
+	\E[\Vbft] &= \E[r \Vtot] \\
+	\E[\Vbft] &= \E[r] \E[\Vtot] + \Cov[r, \Vtot]
+\end{aligned}
+$$
+
+and similar stuff for the variance. In any case, I will not have the distribution...
+
+:::
+
 ```{r}
-plot(inra$total_volume_m3, inra$bole_volume_m3/inra$total_volume_m3, pch = 19, cex = 0.75)
+# plot(inra$total_volume_m3, inra$bole_volume_m3/inra$total_volume_m3, pch = 19, cex = 0.75)
 
-p = inra$bole_volume_m3/inra$total_volume_m3
+p = inra["Fagus sylvatica", bole_volume_m3]/inra["Fagus sylvatica", total_volume_m3]
 
-plot(log(inra$total_volume_m3), log(p/(1 - p)))
+plot(inra["Fagus sylvatica", circumference_m], log(p/(1 - p)), pch = 19, cex = 0.75, axes = FALSE,
+	xlab = "Circumference (m)", ylab = "logit(p)")
+axis(1)
+axis(2, las = 1)
 
-model = cmdstan_model("./temp_joined.stan")
-fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4), max_treedepth = 12)
+plot(inra["Fagus sylvatica", class_circumference], log(p/(1 - p)), pch = 19, cex = 0.75, axes = FALSE,
+	xlab = "Class circumference", ylab = "logit(p)")
+axis(1)
+axis(2, las = 1)
+
+plot(inra["Fagus sylvatica", circumference_m^2*height], log(p/(1 - p)), pch = 19, cex = 0.75, axes = FALSE,
+	xlab = "Cylinder volume", ylab = "logit(p)")
+axis(1)
+axis(2, las = 1)
 ```
+
+```{r}
+model = cmdstan_model("./temp_joined.stan")
+
+stanData = list(
+	N = inra["Fagus sylvatica", .N],
+	p = inra["Fagus sylvatica", ratio],
+	total_volume_m3 = inra["Fagus sylvatica", total_volume_m3]
+)
+
+n_chains = 4
+
+fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4), max_treedepth = 12)
+
+mean(fit$draws("rho"))
+
+lazyPosterior(fit$draws("rho"))
+```
+
+## Joined model taper and crown volumes
+
 
 ## Bibliography {.unnumbered}
 
