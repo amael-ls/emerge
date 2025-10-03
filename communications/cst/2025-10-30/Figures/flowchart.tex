@@ -1,0 +1,29 @@
+\begin{tikzpicture}
+	%% Level 0
+	\node (orig) at (0, 0) {Whole tree};
+	
+	%% Level 1
+	\node[below right = of orig] (belowground) {Below-ground};
+	\node[above right = of orig] (aboveground) {Above-ground};
+	
+	%% Level 2
+	\node[above right = of aboveground] (stem) {Main stem};
+	\node[right = of aboveground] (lat) {Lateral};
+	\node[below right = of aboveground] (fol) {Foliage};
+	
+	\node[right = of belowground] (root) {Root};
+
+	%% Level 3
+	\node[above right = of stem] (stemtop) {Stem top};
+	\node[right = of stem] (bole) {Bole};
+	\node[below right = of stem] (stump) {Stump};
+
+	\node[below right = of lat] (lbranch) {Large branches};
+	\node[above right = of lat] (sbranch) {Small branches};
+
+	\begin{scope}[on background layer] % From background library
+		% \fill[lightGrey] (2.735294,0) rectangle (6,6);
+		\node[fit=(belowground)(aboveground), fill = lightGrey, inner sep=5mm] {};
+	\end{scope}
+
+\end{tikzpicture}

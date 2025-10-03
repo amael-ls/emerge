@@ -1,0 +1,20 @@
+\begin{tikzpicture}
+	\node (vol) at (0, 0) {Volume};
+	\node[below = of vol.mid east, anchor = mid east] (dens) {Density};
+
+	\path (vol.mid east) -- (dens.mid east) node[midway, right = 0.8cm, anchor = mid west] (bio) {Biomass};
+	\draw[->, arrow, out = 0, in = 180] (vol.mid east) to (bio.mid west);
+	\draw[->, arrow, out = 0, in = 180] (dens.mid east) to (bio.mid west);
+
+	\node[right = 0.8cm of bio.mid east, anchor = mid west] (C) {Carbon};
+	\draw[->, arrow] (bio.mid east) to (C.mid west);
+
+	\node[database, above left = 0.3cm of vol, label = above:Emerge, database radius = 0.3cm,
+		database segment height = 0.15cm] (emerge) {};
+
+	\node[database, below left = 0.3cm of dens, label = below:XyloDensMap, database radius = 0.3cm,
+		database segment height = 0.15cm] (xdm) {};
+
+	\draw[->, arrow, dashed, out = -90, in = 180] (emerge.south) to (vol.mid west);
+	\draw[->, arrow, dashed, out = 90, in = 180] (xdm.north) to (dens.mid west);
+\end{tikzpicture}

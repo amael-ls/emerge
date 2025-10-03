@@ -1,0 +1,19 @@
+\chapter{Context\label{chap::context}}
+
+The French National Forest Inventory (\NFI) publishes statistics annually, such as basal area or wood resources, on both private and public forest. These statistics are derived from a sampling scheme in which about \num{6000} new plots are surveyed each year, along with \num{6000} plots that were first visited five years earlier. The published statistics are calculated using a moving five-year average; for instance, the published results for 2024 are based on campaigns spanning from 2020 to 2024. \\
+
+Initially designed to assess forest area and produce estimates of standing timber stock, the French \NFI{} is gradually evolving into more comprehensive tools for forest monitoring, incorporating a variety of indicators. Among this new information, the estimation of forest biomass and carbon is crucial, as it makes it possible to monitor biomass production and its use by different sectors, to estimate the contribution of forests to mitigating the effects of climate change as part of climate commitments monitoring (Citepa), and to develop forest strategies adapted to contemporary environmental and societal challenges \parencite{Commission2018}. \\
+
+% Check \sidecite, and maybe tweak it to put only the author and title in the margin
+
+The European Union developed a \href{https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:52021DC0572}{New EU Forest Strategy for 2030} as part of the plan to adapt to and fight against climate change and make Europe a climate neutral continent by 2050. This strategy relies on improved monitoring of European forests to better understand their condition and respond accordingly. Specifically, it calls for assessing carbon sequestration in forests to evaluate whether or not Eu\-ro\-pe reached carbon neutrality. One bottleneck is the harmonisation of the forest monitoring methods between European member states, if not within them. The \href{https://pathfinder-heu.eu/#top}{PathFinder project} supports member states in implementing a European Forest Monitoring System in order to standardise or harmonise forest data collection and reporting across the EU. This prompted the French \NFI{} to update its methods for assessing forest carbon storage. \\
+
+Three steps are necessary to estimate carbon storage from field data (see Fig. \ref{fig::scheme}): (\textit{i}) the total aerial volume is estimated from diameter at breast height (dbh) and height \parencite{Vallet2006}, (\textit{ii}) biomass is then derived by using a coefficient for wood density, and (\textit{iii}) a factor is applied to convert the biomass into carbon content. \\
+
+\begin{figure}[h]
+    \centering
+	\input{Figures/scheme.tex}
+	\caption{Computation chain for biomass and carbon content.\label{fig::scheme}}
+\end{figure}
+
+In this technical note, we explain the methods we foresee to estimate the two volumes computed at the French \NFI{} for each tree: the bole volume (volume bois-fort tige), which is the reference volume since the creation of the French \NFI{} (1958), and the total aerial volume. In the section \nameref{chap::def}, we define the different tree components and explain the origins of the data. Then, in the section \nameref{chap::bole_v}, we expose the method to compute the individual bole volume, and lastly we describe the model for total volume in the section \nameref{chap::total_v}.
