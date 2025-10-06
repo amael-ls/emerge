@@ -3,7 +3,10 @@
 %%%%%%%%%%%%%%%%%%%    PACKAGES    %%%%%%%%%%%%%%%%%%%
 %% Font
 \usepackage{fontspec}
-\setmainfont{TexGyrePagella}
+	\setmainfont{TexGyrePagella}
+
+\usepackage{unicode-math}
+	\setmathfont{TexGyrePagella-math}
 
 %% Languages
 \usepackage{polyglossia}
@@ -73,14 +76,11 @@
 \usepackage[backend=biber,style=philosophy-classic]{biblatex}
 \addbibresource{./centralised_bibliography/references.bib}
 
-
-
+%% Mathematics
 \usepackage{amsmath}
 \usepackage{siunitx}
 
 \usepackage{booktabs}
-
-
 
 % Information about the book
 % to be put on the title page
@@ -100,8 +100,13 @@
 \newcommand{\eg}{\textit{e.g., }}
 
 %% Maths
+% Shortcuts
 \newcommand{\Vtot}{V_{\text{tot}}}
 \newcommand{\Vbole}{V_{\text{bole}}}
+
+% Operators
+\DeclareMathOperator{\logit}{logit}
+\DeclareMathOperator{\MVN}{MVN}
 
 \begin{document}
 % no page numbering in front matter
