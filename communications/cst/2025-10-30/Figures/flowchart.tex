@@ -1,29 +1,51 @@
-\begin{tikzpicture}
+\begin{tikzpicture}[block/.style = {rectangle, draw = egyptBlue, thick, fill = egyptBlue!20, rounded corners, minimum height = 2em}]
 	%% Level 0
-	\node (orig) at (0, 0) {Whole tree};
+	\node[block] (orig) at (0, 0) {Whole tree};
 	
 	%% Level 1
-	\node[below right = of orig] (belowground) {Below-ground};
-	\node[above right = of orig] (aboveground) {Above-ground};
-	
-	%% Level 2
-	\node[above right = of aboveground] (stem) {Main stem};
-	\node[right = of aboveground] (lat) {Lateral};
-	\node[below right = of aboveground] (fol) {Foliage};
-	
-	\node[right = of belowground] (root) {Root};
-
-	%% Level 3
-	\node[above right = of stem] (stemtop) {Stem top};
-	\node[right = of stem] (bole) {Bole};
-	\node[below right = of stem] (stump) {Stump};
-
-	\node[below right = of lat] (lbranch) {Large branches};
-	\node[above right = of lat] (sbranch) {Small branches};
+	\node[block, above right = 0.85cm of orig] (aboveground) {Above-ground};
+	\node[block, below right = 0.85cm of orig] (belowground) {Below-ground};
 
 	\begin{scope}[on background layer] % From background library
-		% \fill[lightGrey] (2.735294,0) rectangle (6,6);
-		\node[fit=(belowground)(aboveground), fill = lightGrey, inner sep=5mm] {};
+		\node[fit=(belowground)(aboveground), fill = lightGrey, inner sep=2mm] {};
+	\end{scope}
+	
+	%% Level 2
+	\node[block, above right = 2.75cm and 0.85cm of aboveground] (stem) {Main stem};
+	\node[block, right = 0.85cm of aboveground] (lat) {Lateral};
+	\node[block, below right = 0.85cm of aboveground] (fol) {Foliage};
+	
+	\node[block, right = 0.85cm of belowground] (root) {\dots};
+
+	%% Level 3
+	\node[block, above right = 0.85cm of stem] (stemtop) {Stem top};
+	\node[block, right = 0.85cm of stem] (bole) {Bole};
+	\node[block, below right = 0.85cm of stem] (stump) {Stump};
+
+	\node[block, draw, above right = 0.3cm and 0.85cm of lat] (lbranch) {Large branches};
+	\node[block, draw, below right = 0.3cm and 0.85cm of lat] (sbranch) {Small branches};
+	
+	\begin{scope}[on background layer] % From background library
+		\node[fit=(sbranch)(stemtop), fill = lightGrey, inner sep=2mm] {};
 	\end{scope}
 
+	%% Arrows...
+	% ... 0 to 1
+	\draw[->, arrow] (orig.north) to[out = 90, in = 180] (aboveground.west);
+	\draw[->, arrow] (orig.south) to[out = -90, in = 180] (belowground.west);
+
+	% ... 1 to 2
+	\draw[->, arrow] (aboveground.north) to[out = 90, in = 180] (stem.west);
+	\draw[->, arrow] (aboveground.east) -- (lat.west);
+	\draw[->, arrow] (aboveground.south) to[out = -90, in = 180] (fol.west);
+	
+	\draw[->, arrow] (belowground.east) -- (root.west);
+
+	% ... 2 to 3
+	\draw[->, arrow] (stem.north) to[out = 90, in = 180] (stemtop.west);
+	\draw[->, arrow] (stem) -- (bole.west);
+	\draw[->, arrow] (stem.south) to[out = -90, in = 180] (stump.west);
+
+	\draw[->, arrow] (lat.north) to[out = 90, in = 180] (lbranch.west);
+	\draw[->, arrow] (lat.south) to[out = -90, in = 180] (sbranch.west);
 \end{tikzpicture}
