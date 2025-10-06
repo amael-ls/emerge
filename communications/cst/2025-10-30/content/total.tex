@@ -1,2 +1,27 @@
 \chapter{Total aerial volume\label{chap::total_v}}
 
+In this section, I explore two possible paths to estimate the total aerial volume, \( \Vtot \). The first option, based on \cite{Longuetaud2013}, uses the ratio:
+\begin{equation}
+	r = \frac{\Vbole}{\Vtot} \label{eq::r_boletot}
+\end{equation}
+and is comprised between 0 and 1 by construction. Therefore, a Beta-distribution is a good fit. The second option is to fit a multivariate normal distribution, \( \MVN \), to the \textit{transformed} ratio, \( \logit(r) \), jointly with the log-transformed total volume, \( \log(\Vtot) \):
+\begin{equation}
+	\begin{pmatrix}
+		\logit(r) \\
+		\log(\Vtot)
+	\end{pmatrix}
+	\sim
+	\MVN\left\{ \begin{pmatrix}
+		f(c, \, h; \symbfup{\theta}) \\
+		g(c, \, h; \symbfup{\theta}) \\
+	\end{pmatrix}, \symbfup{\Sigma} \right\},
+	\label{eq::mvn}
+\end{equation}
+where \( f \) and \( g \) are functions to tailor for our specific needs, \( c \) is circumference at breast height, \( h \), is tree height, and \( \theta \) is a vector of parameters to estimate.
+
+\section{Ratio approach}
+
+\section{Multivariate approach}
+
+\subsection{Simulated data}
+In order to demonstrate the relevance of multivariate methods, I simulate two correlated random variables and then recover the generating parameters.
