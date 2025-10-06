@@ -16,8 +16,9 @@ In our case, the tree data come from different institutes, different periods of 
 \end{marginfigure}
 
 \begin{enumerate}
-	\item `Protocole Oudin', dataset preserved by INRAE, ranging from 1930 to 1980 (in red on Fig. \ref{fig::map}). Recorded, the bole volume, and the large and small branches.
+	\item `Protocole Oudin', dataset preserved by INRAE, ranging from 1930 to 1980 (in red on Fig. \ref{fig::map}). Recorded the bole volume, and the large and small branches. Hereafter, we name this dataset `Emerge', which was the name of the project that digitalised this dataset in 2008 \parencite{Deleuze2013}.
 	\item The French \NFI (in blue on the Fig. \ref{fig::map}). Data range from 1988 to 2007 (data before 1988 record diameter rather than circumference). Recorded the bole volume.
+	\item Experimental Forest Management project dataset \parencite[in yello on Fig. \ref{fig::map}]{Didion2024}. Data range from 1888 to 1974, and bole volume, large branches, and small branches were recorded.
 	\item The `Office National des Forêts (ONF)', with protocols from 1972 and from 1983 (not used as there is no coordinates)
 	\item Institut Technologique Forêt, Cellulose, Bois-construction, Ameublement (FCBA), not used so far for the aerial volume
 	\item L'Institut pour le développement forestier (IDF) which is the R\&D of the Centre National de la Propriété Forestière and the Institut national de recherche en sciences et technologies pour l'environnement et l'agriculture (IRSTEA, currently INRAE)
@@ -43,3 +44,17 @@ We decided to use the definitions from \cite{Gschwantner2009} (see Figs. \ref{fi
 		\item Large branches: portion of the above-ground lateral parts with a diameter of less than \qty{7}{\centi\metre} (French \NFI)
 	\end{itemize}
 \end{itemize}
+
+A total of \num{594616} individuals were measured, with 98\% coming from the \NFI{} (bole volume only), 6\% from the Swiss dataset (bole, large and small branches), and 2\% from Emerge (same components as the Swiss dataset; see Fig. \ref{fig::compo}). The difficulties in fitting the data are twofold: first, the data show high heteroskedasticity (see Fig \ref{fig::fagSyl}), and second, the datasets are unbalanced.
+
+\begin{figure}
+	\centering
+	\input{Figures/compo.tex}
+	\caption{Composition of the used dataset for the bole volume and total aerial volume.\label{fig::compo}}
+\end{figure}
+
+\begin{figure}
+	\centering
+	\includegraphics[scale = 0.5]{Figures/resp_fagus.pdf}
+	\caption{Typical response of bole volume to circumference (here displayed for \textit{Fagus sylvatica}). We can see that both the Emerge and Swiss datasets \parencite{Deleuze2013,Didion2024} are quite similar and covers elongated trees, while the French \NFI{} covers less regular trees. \label{fig::fagSyl}}
+\end{figure}
