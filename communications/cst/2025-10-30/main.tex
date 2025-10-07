@@ -80,13 +80,20 @@
 \usepackage{amsmath}
 \usepackage{siunitx}
 
+%% Tables
 \usepackage{booktabs}
+
+%% Info box
+\usepackage[most]{tcolorbox}
+% \newtcolorbox{infobox}{}{%
+
+% }%
 
 % Information about the book
 % to be put on the title page
-\title{Technical note on total and bole volumes to the Conseil Scientifique et Technique de l'IGN}
+\title{Technical note on total and bole volumes, and on wood density to the Conseil Scientifique et Technique de l'IGN}
 
-\author{Amaël Le Squin, Florence Gohon}
+\author{Amaël Le Squin, Florence Gohon, Henri Cuny}
 
 \publisher{}
 
@@ -107,6 +114,8 @@
 % Operators
 \DeclareMathOperator{\logit}{logit}
 \DeclareMathOperator{\MVN}{MVN}
+\DeclareMathOperator{\Cov}{Cov}
+\DeclareMathOperator{\E}{\mathbb{E}}
 
 \begin{document}
 % no page numbering in front matter
@@ -122,6 +131,7 @@
 \input{content/def.tex}
 \input{content/bole.tex}
 \input{content/total.tex}
+\input{content/wood_density.tex}
 
 \printbibliography
 
