@@ -17,11 +17,26 @@ and is comprised between 0 and 1 by construction. Therefore, a Beta-distribution
 	\end{pmatrix}, \symbfup{\Sigma} \right\},
 	\label{eq::mvn}
 \end{equation}
-where \( f \) and \( g \) are functions to tailor for our specific needs, \( c \) is circumference at breast height, \( h \), is tree height, and \( \theta \) is a vector of parameters to estimate.
+where \( f \) and \( g \) are functions tailored to our specific needs, \( c \) is circumference at breast height, \( h \), is tree height, and \( \theta \) is a vector of parameters to estimate.
 
 \section{Ratio approach}
 
 \section{Multivariate approach}
 
+Multivariate models allow pulling information across components, \ie they describe the variation within and covariation among tree components. I chose to model jointly \( r \) and \( \Vtot \) but the alternative modelling bole and crown could also be considered.
+
+\begin{tcolorbox}[breakable, title = Intractability]
+Note that whatever I try to model, there will always be intractability somewhere. If I model both components -- trunk and crown -- with a multivariate lognormal, the distribution of the total volume becomes untractable (sum of two lognormals has no closed form distribution). Alternatively, if I model the total volume and the ratio \( r \), then \( \Vbole \) becomes untractable. Indeed:
+\begin{align*}
+	\E[\Vbole] &= \E[r \Vtot] \\
+	\E[\Vbole] &= \E[r] \E[\Vtot] + \Cov[r, \Vtot]
+\end{align*}
+and similarly for the variance. In any case, I do not have a closed-form distribution.
+\end{tcolorbox}
+
 \subsection{Simulated data}
 In order to demonstrate the relevance of multivariate methods, I simulate two correlated random variables and then recover the generating parameters.
+
+\subsection{Perspectives}
+
+Use copulas?
