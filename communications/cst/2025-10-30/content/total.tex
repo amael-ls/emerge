@@ -29,9 +29,10 @@ I modelled the ratio \( r \) (see equation \eqref{eq::r_boletot}), which quantif
 
 Employing the mean and variance is not advisable, since it introduces the interacting constraint \( \sigma^2 < \mu (1 - \mu) \), while the precision lies between 0 and \( + \infty \). The ratio approach has been tested on the 17\textup{th} most common species in the Emerge dataset. The mean \( \mu \) is a function of three parameters to estimate (see equation \eqref{eq::mu-ratio}) and \( \Vbole \), the \textit{predictive variable}:
 \begin{equation}
-	\mu(\Vbole; \alpha, \beta, \gamma) = \exp[-\beta \Vbole] (\Vbole - \alpha) + \gamma \Vbole + \alpha.
+	\mu(\Vbole; \alpha, \beta, \gamma) = \exp[-\beta \Vbole] (\Vbole - \alpha) + \gamma \Vbole + \alpha,
 	\label{eq::mu-ratio}
 \end{equation}
+where \( \alpha, \, \beta\) and \( \gamma \) are parameters to estimate. The results are displayed for \textit{Abies alba} and \textit{Fagus sylvatica}, to represent both conifers and broadleaves (see Fig. \ref{fig::res-mu-ratio}).
 
 \begin{figure}[htb]
 	\centering
@@ -49,9 +50,8 @@ Employing the mean and variance is not advisable, since it introduces the intera
 	\label{fig::res-mu-ratio}
 \end{figure}
 
-The equation \eqref{eq::mu-ratio} gives similar predictions (see \ref{fig::pred-ratio}) to \cite{Vallet2006} (currently in use at the \NFI) or Emerge\sidenote{In addition to digitalise the dataset related to the `protocol Oudin', the project Emerge aimed at developing a unique allometry for all tree species in the French forest. They arrived at the allometry \[ \Vtot = \frac{c^2 h}{4 \pi (1 - \sfrac{1.3}{h})} \left( \alpha + \beta \frac{\sqrt{c}}{h} + \gamma \frac{h}{c} \right)\]} \parencite[allometry not used officially by the French \NFI]{Deleuze2014}.
-
-\begin{figure}[htb]
+The equation \eqref{eq::mu-ratio} gives similar predictions (see \ref{fig::pred-ratio}) to \cite{Vallet2006} (currently in use at the \NFI) or Emerge\sidenote{In addition to digitising the dataset related to the `Protocole Oudin', the Emerge project aimed to develop a unified allometry for all tree species in French forests. They arrived at the allometry \[ \Vtot = \frac{c^2 h}{4 \pi (1 - \sfrac{1.3}{h})} \left( \alpha + \beta \frac{\sqrt{c}}{h} + \gamma \frac{h}{c} \right).\]This allometry is not used officially by the French \NFI} \parencite{Deleuze2014}. Responses for the non-displayed species are similar to \textit{Abies alba} and \textit{Fagus sylvatica} results.
+\begin{figure}[h]
 	\centering
 	\setkeys{Gin}{width=\linewidth}
 	\begin{subfigure}{0.4\textwidth}
@@ -63,7 +63,7 @@ The equation \eqref{eq::mu-ratio} gives similar predictions (see \ref{fig::pred-
 		\includegraphics{./Figures/fagSyl-pred.png}
 		\caption{\textit{Fagus sylvatica}}
 	\end{subfigure}
-	\caption{Predictions of total aerial volume in function of bole volume (the explanatory variable) with my model (equation \eqref{eq::mu-ratio}), the current model used at the French \NFI \parencite{Vallet2006}, and the allometry developed during the project Emerge \parencite{Deleuze2014}.}
+	\caption{Predictions of total aerial volume in function of bole volume (the explanatory variable) with my model (equation \eqref{eq::mu-ratio}), the current model used at the French \NFI \parencite{Vallet2006}, and the allometry developed during the project Emerge.}
 	\label{fig::pred-ratio}
 \end{figure}
 
@@ -116,7 +116,7 @@ In this simulated case, the principal drawback of employing a \textit{classical}
 		\includegraphics{./Figures/alpha_uncorr.pdf}
 		\caption{Uncorrelated model}
 	\end{subfigure}
-	\caption{Posterior predictions of the product \( Y_1 Y_2 \) for a value sitting around the 15\textup{th} percentile}
+	\caption{Posterior of the intercept parameter \( \alpha \), with the real value displayed in red. As can be seen, both model can recover the intercept (and same for the other parameters)}
 	\label{fig::res-params}
 \end{figure}
 
