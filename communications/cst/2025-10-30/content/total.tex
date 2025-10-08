@@ -66,13 +66,11 @@ In this simulated case, the principal drawback of employing a \textit{classical}
 	\begin{subfigure}{0.4\textwidth}
 		\includegraphics{./Figures/alpha_corr.pdf}
 		\caption{Multivariate model}
-		\label{fig:capparatus}
 	\end{subfigure}
 	\hfil
 	\begin{subfigure}{0.4\textwidth}
 		\includegraphics{./Figures/alpha_uncorr.pdf}
 		\caption{Uncorrelated model}
-		\label{fig:cdiagram}
 	\end{subfigure}
 	\caption{Posterior predictions of the product \( Y_1 Y_2 \) for a value sitting around the 15\textup{th} percentile}
 	\label{fig::res-params}
@@ -85,13 +83,11 @@ In this simulated case, the principal drawback of employing a \textit{classical}
 	\begin{subfigure}{0.4\textwidth}
 		\includegraphics{./Figures/15th-percentile_corr.pdf}
 		\caption{Multivariate model}
-		\label{fig:capparatus}
 	\end{subfigure}
 	\hfil
 	\begin{subfigure}{0.4\textwidth}
 		\includegraphics{./Figures/15th-percentile_uncorr.pdf}
 		\caption{Uncorrelated model}
-		\label{fig:cdiagram}
 	\end{subfigure}
 	\caption{Posterior predictions of the product \( Y_1 Y_2 \) for a value sitting around the 15\textup{th} percentile}
 	\label{fig::res-15}
@@ -103,16 +99,14 @@ In this simulated case, the principal drawback of employing a \textit{classical}
 	\begin{subfigure}{0.4\textwidth}
 		\includegraphics{./Figures/50th-percentile_corr.pdf}
 		\caption{Multivariate model}
-		\label{fig:capparatus}
 	\end{subfigure}
 	\hfil
 	\begin{subfigure}{0.4\textwidth}
 		\includegraphics{./Figures/50th-percentile_uncorr.pdf}
 		\caption{Uncorrelated model}
-		\label{fig:cdiagram}
 	\end{subfigure}
 	\caption{Posterior predictions of the product \( Y_1 Y_2 \) for a value sitting around the 50\textup{th} percentile (\ie median)}
-	\label{fig::res-15}
+	\label{fig::res-50}
 \end{figure}
 
 \begin{figure}[htb]
@@ -121,18 +115,16 @@ In this simulated case, the principal drawback of employing a \textit{classical}
 	\begin{subfigure}{0.4\textwidth}
 		\includegraphics{./Figures/85th-percentile_corr.pdf}
 		\caption{Multivariate model}
-		\label{fig:capparatus}
 	\end{subfigure}
 	\hfil
 	\begin{subfigure}{0.4\textwidth}
 		\includegraphics{./Figures/85th-percentile_uncorr.pdf}
 		\caption{Uncorrelated model}
-		\label{fig:cdiagram}
 	\end{subfigure}
 	\caption{Posterior predictions of the product \( Y_1 Y_2 \) for a value sitting around the 85\textup{th} percentile}
-	\label{fig::res-15}
+	\label{fig::res-85}
 \end{figure}
 
 \subsection{Real case study}
 
-I tested a simple multivariate model on \( \logit(r) \) and \( \log(\Vtot) \) with only two intercepts and \( \Sigmabf \) to estimate. I found a positive correlation of 0.27 for \textit{Fagus sylvatica} between the two, suggesting that larger total volumes are predominantly concentrated in the bole.
+I tested a simple multivariate model on \( \logit(r) \) and \( \log(\Vtot) \) with only two intercepts and \( \Sigmabf \) to estimate. I found a positive correlation of 0.28 (0.24 -- 0.31) for \textit{Fagus sylvatica} between the two, suggesting that larger total volumes are predominantly concentrated in the bole.
