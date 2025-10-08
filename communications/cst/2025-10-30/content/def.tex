@@ -8,7 +8,7 @@ Trees are partitioned into hierarchical elements with definitions that may vary 
 	\caption{Hierarchical elements of trees, figure inspired by \cite{Gschwantner2009} \label{fig::partition}}
 \end{figure*}
 
-In our case, the tree data come from different institutes, different periods of time, and do not all have the same tree components recorded:
+In our case, the tree data were collected from several institutions, at different periods, and with varying levels of detail regarding recorded tree components:
 
 \begin{marginfigure}%
 	\includegraphics[width=\marginparwidth]{./Figures/map.png}
@@ -16,15 +16,15 @@ In our case, the tree data come from different institutes, different periods of 
 \end{marginfigure}
 
 \begin{enumerate}
-	\item `Protocole Oudin', dataset preserved by INRAE, ranging from 1930 to 1980 (in red on Fig. \ref{fig::map}). Recorded the bole volume, and the large and small branches. Hereafter, we name this dataset `Emerge', which was the name of the project that digitalised this dataset in 2008 \parencite{Deleuze2013}.
-	\item The French \NFI (in blue on the Fig. \ref{fig::map}). Data range from 1988 to 2007 (data before 1988 record diameter rather than circumference). Recorded the bole volume.
-	\item Experimental Forest Management project dataset \parencite[in yello on Fig. \ref{fig::map}]{Didion2024}. Data range from 1888 to 1974, and bole volume, large branches, and small branches were recorded.
-	\item The `Office National des Forêts (ONF)', with protocols from 1972 and from 1983 (not used as there is no coordinates)
-	\item Institut Technologique Forêt, Cellulose, Bois-construction, Ameublement (FCBA), not used so far for the aerial volume
-	\item L'Institut pour le développement forestier (IDF) which is the R\&D of the Centre National de la Propriété Forestière and the Institut national de recherche en sciences et technologies pour l'environnement et l'agriculture (IRSTEA, currently INRAE)
+	\item `Protocole Oudin' dataset -- Preserved by INRAE and covering the period 1930--1980 (shown in red in Fig. \ref{fig::map}). This dataset includes measurements of bole volume, large branches, and small branches. Hereafter, it is referred to as `Emerge', after the 2008 digitisation project of the same name \parencite{Deleuze2013}.
+	\item Experimental Forest Management Project dataset (EFM) -- Described by Didion et al. (2024) and covering the period 1888--1974 (shown in yellow in Fig. \ref{fig::map}). It includes measurements of bole volume, large branches, and small branches.
+	\item French National Forest Inventory (\NFI) -- Data collected between 1988 and 2007 (shown in blue in Fig. \ref{fig::map}). Earlier data (before 1988) recorded diameter instead of circumference and are discarded in this study. This dataset contains measurements of bole volume, following the \NFI{} protocol (less detailed than Emerge and EFM).
+	\item `Office National des Forêts (ONF)' -- Data collected with protocols from 1972 and from 1983. So far, these data are not used due to the absence of geographic coordinates.
+	\item Institut Technologique Forêt, Cellulose, Bois-construction, Ameublement (FCBA) -- Data available but not yet used for aerial volume estimation.
+	\item Institut pour le Développement Forestier (IDF) -- The R\&D branch of the Centre National de la Propriété Forestière (CNPF) and the Institut National de Recherche en Sciences et Technologies pour l'Environnement et l'Agriculture (IRSTEA, now INRAE). Data not used.
 \end{enumerate}
 
-We decided to use the definitions from \cite{Gschwantner2009} (see Figs. \ref{fig::partition} and \ref{fig::ign_tree}):
+The terminology follows that of \cite{Gschwantner2009} (see Figs. \ref{fig::partition} and \ref{fig::ign_tree}) to ensure consistency in wording across the different datasets:
 
 \begin{marginfigure}%
 	\input{Figures/tree.tex}
@@ -45,7 +45,7 @@ We decided to use the definitions from \cite{Gschwantner2009} (see Figs. \ref{fi
 	\end{itemize}
 \end{itemize}
 
-A total of \num{594616} individuals were measured, with 98\% coming from the \NFI{} (bole volume only), 6\% from the Swiss dataset (bole, large and small branches), and 2\% from Emerge (same components as the Swiss dataset; see Fig. \ref{fig::compo}). The difficulties in fitting the data are twofold: first, the data show high heteroskedasticity (see Fig \ref{fig::fagSyl}), and second, the datasets are unbalanced.
+The combination of the Emerge, EFM, and \NFI{} datasets provides a total of \num{594616} individuals, with 98\% coming from the \NFI{} (bole volume only), 6\% from the EFM (bole, large and small branches), and 2\% from Emerge (same components as EFM; see Fig. \ref{fig::compo}). The challenges in fitting the data are threefold: (\textit{i}) the data exhibit strong heteroskedasticity (see Fig. \ref{fig::fagSyl}); (\textit{ii}) the datasets are unbalanced; and (\textit{iii}) the trees from the Emerge and EFM datasets do not provide exhaustive forest coverage, implying that total volume estimates for the \NFI{} are often based on extrapolation.
 
 \begin{figure}
 	\centering
