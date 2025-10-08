@@ -10,7 +10,7 @@ Trees are partitioned into hierarchical elements with definitions that may vary 
 
 In our case, the tree data were collected from several institutions, at different periods, and with varying levels of detail regarding recorded tree components:
 
-\begin{marginfigure}%
+\begin{marginfigure}
 	\includegraphics[width=\marginparwidth]{./Figures/map.png}
 	\caption{Plot location for French \NFI, Emerge, and Swiss dataset.\label{fig::map}}
 \end{marginfigure}
@@ -20,13 +20,13 @@ In our case, the tree data were collected from several institutions, at differen
 	\item Experimental Forest Management Project dataset (EFM) -- Described by Didion et al. (2024) and covering the period 1888--1974 (shown in yellow in Fig. \ref{fig::map}). It includes measurements of bole volume, large branches, and small branches.
 	\item French National Forest Inventory (\NFI) -- Data collected between 1988 and 2007 (shown in blue in Fig. \ref{fig::map}). Earlier data (before 1988) recorded diameter instead of circumference and are discarded in this study. This dataset contains measurements of bole volume, following the \NFI{} protocol (less detailed than Emerge and EFM).
 	\item `Office National des Forêts (ONF)' -- Data collected with protocols from 1972 and from 1983. So far, these data are not used due to the absence of geographic coordinates.
-	\item Institut Technologique Forêt, Cellulose, Bois-construction, Ameublement (FCBA) -- Data available but not yet used for aerial volume estimation.
+	\item Institut Technologique Forêt, Cellulose, Bois-construction, Ameublement (FCBA) -- Data available but not yet used for above-ground volume estimation.
 	\item Institut pour le Développement Forestier (IDF) -- The R\&D branch of the Centre National de la Propriété Forestière (CNPF) and the Institut National de Recherche en Sciences et Technologies pour l'Environnement et l'Agriculture (IRSTEA, now INRAE). Data not used.
 \end{enumerate}
 
 The terminology follows that of \cite{Gschwantner2009} (see Figs. \ref{fig::partition} and \ref{fig::ign_tree}) to ensure consistency in wording across the different datasets:
 
-\begin{marginfigure}%
+\begin{marginfigure}
 	\input{Figures/tree.tex}
 	\caption{Scheme of tree components.\label{fig::ign_tree}}
 \end{marginfigure}
@@ -45,20 +45,48 @@ The terminology follows that of \cite{Gschwantner2009} (see Figs. \ref{fig::part
 	\end{itemize}
 \end{itemize}
 
-The combination of the Emerge, EFM, and \NFI{} datasets provides a total of \num{594616} individuals, with 98\% coming from the \NFI{} (bole volume only), 6\% from the EFM (bole, large and small branches), and 2\% from Emerge (same components as EFM; see Fig. \ref{fig::compo}). The challenges in fitting the data are threefold: (\textit{i}) the data exhibit strong heteroskedasticity (see Fig. \ref{fig::fagSyl}); (\textit{ii}) the datasets are unbalanced; and (\textit{iii}) the trees from the Emerge and EFM datasets do not provide exhaustive forest coverage, implying that total volume estimates for the \NFI{} are often based on extrapolation.
-
-\begin{figure}
+\begin{marginfigure}
 	\centering
 	\input{Figures/compo.tex}
-	\caption{Composition of the used dataset for the bole volume and total aerial volume.\label{fig::compo}}
-\end{figure}
+	\caption{Composition of the used dataset for the bole volume and total above-ground volume.\label{fig::compo}}
+\end{marginfigure}
+The combination of the Emerge, EFM, and \NFI{} datasets provides a total of \num{594616} individuals, with 98\% coming from the \NFI{} (bole volume only), 6\% from the EFM (bole, large and small branches), and 2\% from Emerge (same components as EFM; see Fig. \ref{fig::compo}). The challenges in fitting the data are threefold: (\textit{i}) the data exhibit strong heteroskedasticity (see Fig. \ref{fig::fagSyl}); (\textit{ii}) the datasets are unbalanced; and (\textit{iii}) the trees from the Emerge and EFM datasets do not provide exhaustive forest coverage, implying that total volume estimates for the \NFI{} are often based on extrapolation.
 
-\begin{figure}
+\begin{figure}[h]
 	\centering
-	\includegraphics[scale = 0.5]{Figures/resp_fagus.pdf}
+	\includegraphics[scale = 0.4]{Figures/resp_fagus.pdf}
 	\caption{Typical response of bole volume to circumference (here displayed for \textit{Fagus sylvatica}). We can see that both the Emerge and Swiss datasets \parencite{Deleuze2013,Didion2024} are quite similar and covers elongated trees, while the French \NFI{} covers less regular trees. \label{fig::fagSyl}}
 \end{figure}
 
 \begin{tcolorbox}[breakable, title = Bole volume (volume bois-fort tige)]
 	The bole volume is the `reference' volume since the creation of the French \NFI{} (1958). Its definition is largely driven by the requirements of the wood industry, for which the estimation of standing timber volume is an essential tool for resource management and planning.
 \end{tcolorbox}
+
+\section{Notations}
+
+We gather in the table \ref{tab::notations} the notations and acronyms used in this document.
+\begin{table*}[h]
+	\centering
+	\begin{tabular}{@{}rp{10cm}l@{}}
+		\toprule
+		\multicolumn{1}{c}{\textbf{Symbol}} & \multicolumn{1}{c}{\textbf{Definition}} & \multicolumn{1}{c}{\textbf{Unit}} \\
+		\( c \) & Circumference at breast height & \si{\centi\metre} \\
+		\( h \) & Total tree height & \si{\metre} \\
+		\( \E[] \) & Expected value operator & diverse \\
+		\EFM & Experimental Forest Monitoring \parencite{Didion2024} & - \\
+		Emerge & Emerge project or dataset \parencite{Deleuze2013} & - \\
+		\NFI & (French) National Forest Inventory & - \\
+		\( r \) & Ratio of bole volume over total above-ground volume & - \\
+		\( X, \, Y \) & Explanatory and dependent variables, \textit{resp.} & - \\
+		\( \Vbole \) & Bole volume & \si{\cubic\metre} \\
+		\( \Vtot \) & Total above-ground volume & \si{\cubic\metre} \\
+		\( \alpha, \, \beta, \' \gamma \) & Parameters & diverse \\
+		\( symbfup{\theta} \) & Vector of parameters & diverse \\
+		\( \mu \) & Mean parameter (often a function of explanatory variables and parameters) & - \\
+		\( \phi \) & Precision of the beta distribution & - \\
+		\( \rho \) & Correlation parameter (between \num{-1} and \num{1}) & - \\
+		\( \Sigmabf \) & Variance-covariance matrix for the multivariate model & diverse \\
+		\bottomrule
+	\end{tabular}
+	\caption{Used notations, sorted by alphabetical order with Latin symbols first.\label{tab::notations}}
+\end{table*}
