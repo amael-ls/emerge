@@ -72,12 +72,7 @@ The equation \eqref{eq::mu-ratio} gives similar predictions (see \ref{fig::pred-
 Multivariate models allow pulling information across components, \ie they describe the variation within and covariation among tree components. I chose to model jointly \( r \) and \( \Vtot \) but the alternative modelling bole and crown could also be considered.
 
 \begin{tcolorbox}[breakable, title = Intractability]
-Note that whatever I try to model, there will always be intractability somewhere. If I model both components -- trunk and crown -- with a multivariate lognormal, the distribution of the total volume becomes untractable (sum of two lognormals has no closed form distribution). Alternatively, if I model the total volume and the ratio \( r \), then \( \Vbole \) becomes untractable. Indeed:
-\begin{align*}
-	\E[\Vbole] &= \E[r \Vtot] \\
-	\E[\Vbole] &= \E[r] \E[\Vtot] + \Cov[r, \Vtot]
-\end{align*}
-and similarly for the variance. In any case, I do not have a closed-form distribution.
+Note that whatever I try to model, there will always be intractability somewhere. If I model both components -- trunk and crown -- with a multivariate lognormal, the distribution of the total volume becomes intractable (sum of two lognormals has no closed form distribution). Alternatively, if I model the total volume and the ratio \( r \) with transformations, then \( \Vbole \) has no closed-form expression. Indeed, to know the product \( \Vbole = r\Vtot \) requires to know the joined distribution of \( r \) and \( \Vtot \).
 \end{tcolorbox}
 
 \subsection{Simulated data}
@@ -100,7 +95,7 @@ where \( \alpha \) and \( \beta \) are regression parameters to estimate, and \(
 	\end{bmatrix}. \\
 \]
 
-I am able to recover the parameters \( \alpha \), \( \beta \) and the variance-covariance matrix \( \Sigmabf \) with both a multivariate normal or two separated linear regression as shown in Fig \ref{fig::res-params}. However, when multiplying both variables \( Y_1 \) and \( Y_2 \), as we would do to compute the bole volume from the total volume and the ratio \( r \), we see that the two separated linear models give a biased result with a smaller credibility interval (see Figs. \ref{fig::res-15} -- \ref{fig::res-85}). This is because the real expected value for the product is \( \E[Y_1 Y_2] = \E[Y_1] \E[Y_2] + \Cov[Y_1, Y_2] \) in the correlated case, while for the uncorrelated case it assumes \( \E[Y_1 Y_2] = \E[Y_1] \E[Y_2] \) (\ie a covariance of \num{0}). The R code is available on \href{https://github.com/amael-ls/emerge/tree/main/communications/cst/2025-10-30/code}{\faIcon{github} Github}. \\
+I am able to recover the parameters \( \alpha \), \( \beta \) and the variance-covariance matrix \( \Sigmabf \) with both a multivariate normal or two separated linear regression as shown in Fig \ref{fig::res-params}. However, when multiplying both variables \( Y_1 \) and \( Y_2 \), as we would do to compute the bole volume from the total volume and the ratio \( r \), we see that the two separated linear models give a biased result with a smaller credibility interval (see Figs. \ref{fig::res-15} -- \ref{fig::res-85}). This is because the real expected value for the product is \( \E[Y_1 Y_2] = \E[Y_1] \E[Y_2] + \Cov[Y_1, Y_2] \) in the correlated case, while for the uncorrelated case it assumes \( \E[Y_1 Y_2] = \E[Y_1] \E[Y_2] \) (since the covariance is \num{0} in this case). The R code is available on \href{https://github.com/amael-ls/emerge/tree/main/communications/cst/2025-10-30/code}{\faIcon{github} Github}. \\
 
 In this simulated case, the principal drawback of employing a \textit{classical} rather than a \textit{multivariate} model is that it produces narrower credibility intervals and apparently consistent parameter estimates, yet leads to a biased output product \( Y_1 Y_2\).
 
