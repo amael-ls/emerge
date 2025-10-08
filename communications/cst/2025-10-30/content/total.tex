@@ -1,10 +1,10 @@
-\chapter{Total aerial volume\label{chap::total_v}}
+\chapter{Total above-ground volume\label{chap::total_v}}
 
-In this section, I explore two possible paths to estimate the total aerial volume, \( \Vtot \). The first option, based on \cite{Longuetaud2013}, uses the ratio:
+In this section, I explore two possible paths to estimate the total above-ground volume, \( \Vtot \). The first option, based on \cite{Longuetaud2013}, uses the ratio:
 \begin{equation}
 	r = \frac{\Vbole}{\Vtot} \label{eq::r_boletot}
 \end{equation}
-and is comprised between 0 and 1 by construction. Therefore, a Beta-distribution is a good fit. The second option is to fit a multivariate normal distribution, \( \MVN \), to the \textit{transformed} ratio, \( \logit(r) \), jointly with the log-transformed total volume, \( \log(\Vtot) \):
+and is comprised between 0 and 1 by construction. The second option is to fit a multivariate normal distribution, \( \MVN \), to the \textit{transformed} ratio, \( \logit(r) \), jointly with the log-transformed total volume, \( \log(\Vtot) \):
 \begin{equation}
 	\begin{pmatrix}
 		\logit(r) \\
@@ -21,7 +21,51 @@ where \( f \) and \( g \) are functions tailored to our specific needs, \( c \) 
 
 \section{Ratio approach}
 
-Put here the results to compare
+I modelled the ratio \( r \) (see equation \eqref{eq::r_boletot}), which quantifies the percentage of volume represented by the bole, by a Beta-distribution. This distribution respects the bounds and accounts for heteroskedasticity, but its parameters \( \text{shape}_1 \) and \( \text{shape}_2 \) are not intuitive. Hence, I reparametrised the Beta-distribution in function of its mean, \( \mu \) and precision, \( \phi \):
+\begin{align*}
+	\text{shape}_1 &= \phi \mu \\
+	\text{shape}_2 &= \phi (1 - \mu)
+\end{align*}
+
+Employing the mean and variance is not advisable, since it introduces the interacting constraint \( \sigma^2 < \mu (1 - \mu) \), while the precision lies between 0 and \( + \infty \). The ratio approach has been tested on the 17\textup{th} most common species in the Emerge dataset. The mean \( \mu \) is a function of three parameters to estimate (see equation \eqref{eq::mu-ratio}) and \( \Vbole \), the \textit{predictive variable}:
+\begin{equation}
+	\mu(\Vbole; \alpha, \beta, \gamma) = \exp[-\beta \Vbole] (\Vbole - \alpha) + \gamma \Vbole + \alpha.
+	\label{eq::mu-ratio}
+\end{equation}
+
+\begin{figure}[htb]
+	\centering
+	\setkeys{Gin}{width=\linewidth}
+	\begin{subfigure}{0.4\textwidth}
+		\includegraphics{./Figures/abiesAlba.png}
+		\caption{\textit{Abies alba}}
+	\end{subfigure}
+	\hfil
+	\begin{subfigure}{0.4\textwidth}
+		\includegraphics{./Figures/fagSyl.png}
+		\caption{\textit{Fagus sylvatica}}
+	\end{subfigure}
+	\caption{Fit of the ratio data from Emerge only (circles). The dots are posterior predictions, which are in the range of the observations, although residuals show under-dispersion for small values of \( \Vbole \) (see appendix \ref{app::residuals}). The red curve is the fitted equation \eqref{eq::mu-ratio}}
+	\label{fig::res-mu-ratio}
+\end{figure}
+
+The equation \eqref{eq::mu-ratio} gives similar predictions (see \ref{fig::pred-ratio}) to \cite{Vallet2006} (currently in use at the \NFI) or Emerge\sidenote{In addition to digitalise the dataset related to the `protocol Oudin', the project Emerge aimed at developing a unique allometry for all tree species in the French forest. They arrived at the allometry \[ \Vtot = \frac{c^2 h}{4 \pi (1 - \sfrac{1.3}{h})} \left( \alpha + \beta \frac{\sqrt{c}}{h} + \gamma \frac{h}{c} \right)\]} \parencite[allometry not used officially by the French \NFI]{Deleuze2014}.
+
+\begin{figure}[htb]
+	\centering
+	\setkeys{Gin}{width=\linewidth}
+	\begin{subfigure}{0.4\textwidth}
+		\includegraphics{./Figures/abiesAlba-pred.png}
+		\caption{\textit{Abies alba}}
+	\end{subfigure}
+	\hfil
+	\begin{subfigure}{0.4\textwidth}
+		\includegraphics{./Figures/fagSyl-pred.png}
+		\caption{\textit{Fagus sylvatica}}
+	\end{subfigure}
+	\caption{Predictions of total aerial volume in function of bole volume (the explanatory variable) with my model (equation \eqref{eq::mu-ratio}), the current model used at the French \NFI \parencite{Vallet2006}, and the allometry developed during the project Emerge \parencite{Deleuze2014}.}
+	\label{fig::pred-ratio}
+\end{figure}
 
 \section{Multivariate approach}
 
