@@ -75,34 +75,20 @@ stanData = list(
 ## Compile model
 model = cmdstan_model("./temp_joined.stan")
 
+## Run
 fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4), max_treedepth = 12)
 
-## Check posteriors
-# lazyPosterior(fit$draws("mu_p"), val1 = mu_logit_r)
-# lazyPosterior(fit$draws("mu_v"), val1 = mu_log_v)
-# lazyPosterior(fit$draws("b_p"), val1 = b_logit_r)
-# lazyPosterior(fit$draws("b_v"), val1 = b_log_v)
-# lazyPosterior(fit$draws("rho"), val1 = rho)
-
-# lazyPosterior(fit$draws("sigma_p"), val1 = sigma_logit_r)
-# lazyPosterior(fit$draws("sigma_v"), val1 = sigma_log_v)
-
-# varCov_mat_est = matrix(data = apply(X = fit$draws("Sigma"), FUN = mean, MARGIN = 3), nrow = 2, byrow = 2)
-
-# round(varCov_mat, 2)
-# round(varCov_mat_est, 2)
-
-## Fit the model assuming uncorrelated random variables
+#### Fit a second model assuming uncorrelated random variables
 model2 = cmdstan_model("./temp.stan")
 fit2 = model2$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4), max_treedepth = 12)
 
-# lazyPosterior(fit2$draws("mu_p"), val1 = mu_logit_r)
-# lazyPosterior(fit2$draws("mu_v"), val1 = mu_log_v)
-# lazyPosterior(fit2$draws("b_p"), val1 = b_logit_r)
-# lazyPosterior(fit2$draws("b_v"), val1 = b_log_v)
+#### Check posteriors
+## Posterior of intercept parameters
+lazyPosterior(fit$draws("mu_p"), val1 = mu_logit_r, filename = "../Figures/alpha_corr")
+lazyPosterior(fit2$draws("mu_p"), val1 = mu_logit_r, filename = "../Figures/alpha_uncorr")
 
-# lazyPosterior(fit2$draws("sigma_p"), val1 = sigma_logit_r)
-# lazyPosterior(fit2$draws("sigma_v"), val1 = sigma_log_v)
+lazyPosterior(fit$draws("sigma_v"), val1 = sigma_log_v, filename = "../Figures/sigma_2_corr")
+lazyPosterior(fit2$draws("sigma_v"), val1 = sigma_log_v, filename = "../Figures/sigma_2_uncorr")
 
 #### Plot posterior product
 pred_1 = fit$draws("pred_Vbole")
@@ -110,13 +96,42 @@ quant_1 = apply(X = pred_1, MARGIN = 3, FUN = quantile, probs = c(0.05, 0.95))
 pred_2 = fit2$draws("pred_Vbole")
 quant_2 = apply(X = pred_2, MARGIN = 3, FUN = quantile, probs = c(0.05, 0.95))
 
-k = 38
+## For a 'small' value of Vbole (around 15th percentile)
+quantile(data[, Vbole], c(0.15, 0.5, 0.85))
+which(data[, Vbole > 0.05] & data[, Vbole < 0.055])
+k = 42
 if (k > data[, .N])
 	stop("k must be smaller than N")
 
 lazyPosterior(pred_1[, , paste0("pred_Vbole[", k, "]")], val1 = data[k, Vbole],
-	max_x = quant_1["95%", paste0("pred_Vbole[", k, "]")])
+	max_x = quant_1["95%", paste0("pred_Vbole[", k, "]")], n = 4096,
+	filename = "../Figures/15th-percentile_corr")
 lazyPosterior(pred_2[, , paste0("pred_Vbole[", k, "]")], val1 = data[k, Vbole],
-	max_x = quant_1["95%", paste0("pred_Vbole[", k, "]")])
+	max_x = quant_1["95%", paste0("pred_Vbole[", k, "]")], n = 4096,
+	filename = "../Figures/15th-percentile_uncorr")
 
-data[k, Vbole]
+## For a 'medium' value of Vbole (around 50th percentile)
+which(data[, Vbole > 1.78] & data[, Vbole < 1.79])
+k = 177
+if (k > data[, .N])
+	stop("k must be smaller than N")
+
+lazyPosterior(pred_1[, , paste0("pred_Vbole[", k, "]")], val1 = data[k, Vbole],
+	max_x = quant_1["95%", paste0("pred_Vbole[", k, "]")], n = 4096,
+	filename = "../Figures/50th-percentile_corr")
+lazyPosterior(pred_2[, , paste0("pred_Vbole[", k, "]")], val1 = data[k, Vbole],
+	max_x = quant_1["95%", paste0("pred_Vbole[", k, "]")], n = 4096,
+	filename = "../Figures/50th-percentile_corr")
+
+## For a 'large' value of Vbole (around 85 percentile)
+which(data[, Vbole > 39] & data[, Vbole < 40])
+k = 695
+if (k > data[, .N])
+	stop("k must be smaller than N")
+
+lazyPosterior(pred_1[, , paste0("pred_Vbole[", k, "]")], val1 = data[k, Vbole],
+	max_x = quant_1["95%", paste0("pred_Vbole[", k, "]")], n = 4096,
+	filename = "../Figures/85th-percentile_corr")
+lazyPosterior(pred_2[, , paste0("pred_Vbole[", k, "]")], val1 = data[k, Vbole],
+	max_x = quant_1["95%", paste0("pred_Vbole[", k, "]")], n = 4096,
+	filename = "../Figures/85th-percentile_corr")
