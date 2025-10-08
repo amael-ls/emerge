@@ -14,12 +14,14 @@ and is comprised between 0 and 1 by construction. Therefore, a Beta-distribution
 	\MVN\left\{ \begin{pmatrix}
 		f(c, \, h; \symbfup{\theta}) \\
 		g(c, \, h; \symbfup{\theta}) \\
-	\end{pmatrix}, \symbfup{\Sigma} \right\},
+	\end{pmatrix}, \Sigmabf \right\},
 	\label{eq::mvn}
 \end{equation}
 where \( f \) and \( g \) are functions tailored to our specific needs, \( c \) is circumference at breast height, \( h \), is tree height, and \( \theta \) is a vector of parameters to estimate.
 
 \section{Ratio approach}
+
+Put here the results to compare
 
 \section{Multivariate approach}
 
@@ -35,8 +37,102 @@ and similarly for the variance. In any case, I do not have a closed-form distrib
 \end{tcolorbox}
 
 \subsection{Simulated data}
-In order to demonstrate the relevance of multivariate methods, I simulate two correlated random variables and then recover the generating parameters.
+In order to demonstrate the relevance of multivariate methods, I simulate two correlated random variables and then recover the generating parameters. Let \( X \) be an explanatory variable, and \( \mathbf{Y} = (Y_1, \, Y_2) \) be the dependant variable, such that:
+\[
+	\begin{pmatrix}
+		Y_1 \\
+		Y_2
+	\end{pmatrix} \sim
+	\MVN\left\{ \begin{pmatrix}
+		\alpha_1 + \beta_1 X \\
+		\alpha_2 + \beta_2 X \\
+	\end{pmatrix}, \Sigmabf \right\},
+\]
+where \( \alpha \) and \( \beta \) are regression parameters to estimate, and \( \Sigmabf \) is the variance-covariance matrix defined by:
+\[
+	\Sigmabf = \begin{bmatrix}
+		\sigma_1^2 & \rho \sigma_1 \sigma_2 \\
+		\rho \sigma_1 \sigma_2 & \sigma_2^2
+	\end{bmatrix}. \\
+\]
 
-\subsection{Perspectives}
+I am able to recover the parameters \( \alpha \), \( \beta \) and the variance-covariance matrix \( \Sigmabf \) with both a multivariate normal or two separated linear regression as shown in Fig \ref{fig::res-params}. However, when multiplying both variables \( Y_1 \) and \( Y_2 \), as we would do to compute the bole volume from the total volume and the ratio \( r \), we see that the two separated linear models give a biased result with a smaller credibility interval (see Figs. \ref{fig::res-15} -- \ref{fig::res-85}). This is because the real expected value for the product is \( \E[Y_1 Y_2] = \E[Y_1] \E[Y_2] + \Cov[Y_1, Y_2] \) in the correlated case, while for the uncorrelated case it assumes \( \E[Y_1 Y_2] = \E[Y_1] \E[Y_2] \) (\ie a covariance of \num{0}). The R code is available on \href{https://github.com/amael-ls/emerge/tree/main/communications/cst/2025-10-30/code}{\faIcon{github} Github}. \\
 
-Use copulas?
+In this simulated case, the principal drawback of employing a \textit{classical} rather than a \textit{multivariate} model is that it produces narrower credibility intervals and apparently consistent parameter estimates, yet leads to a biased output product \( Y_1 Y_2\).
+
+\begin{figure}[htb]
+	\centering
+	\setkeys{Gin}{width=\linewidth}
+	\begin{subfigure}{0.4\textwidth}
+		\includegraphics{./Figures/alpha_corr.pdf}
+		\caption{Multivariate model}
+		\label{fig:capparatus}
+	\end{subfigure}
+	\hfil
+	\begin{subfigure}{0.4\textwidth}
+		\includegraphics{./Figures/alpha_uncorr.pdf}
+		\caption{Uncorrelated model}
+		\label{fig:cdiagram}
+	\end{subfigure}
+	\caption{Posterior predictions of the product \( Y_1 Y_2 \) for a value sitting around the 15\textup{th} percentile}
+	\label{fig::res-params}
+\end{figure}
+
+
+\begin{figure}[htb]
+	\centering
+	\setkeys{Gin}{width=\linewidth}
+	\begin{subfigure}{0.4\textwidth}
+		\includegraphics{./Figures/15th-percentile_corr.pdf}
+		\caption{Multivariate model}
+		\label{fig:capparatus}
+	\end{subfigure}
+	\hfil
+	\begin{subfigure}{0.4\textwidth}
+		\includegraphics{./Figures/15th-percentile_uncorr.pdf}
+		\caption{Uncorrelated model}
+		\label{fig:cdiagram}
+	\end{subfigure}
+	\caption{Posterior predictions of the product \( Y_1 Y_2 \) for a value sitting around the 15\textup{th} percentile}
+	\label{fig::res-15}
+\end{figure}
+
+\begin{figure}[htb]
+	\centering
+	\setkeys{Gin}{width=\linewidth}
+	\begin{subfigure}{0.4\textwidth}
+		\includegraphics{./Figures/50th-percentile_corr.pdf}
+		\caption{Multivariate model}
+		\label{fig:capparatus}
+	\end{subfigure}
+	\hfil
+	\begin{subfigure}{0.4\textwidth}
+		\includegraphics{./Figures/50th-percentile_uncorr.pdf}
+		\caption{Uncorrelated model}
+		\label{fig:cdiagram}
+	\end{subfigure}
+	\caption{Posterior predictions of the product \( Y_1 Y_2 \) for a value sitting around the 50\textup{th} percentile (\ie median)}
+	\label{fig::res-15}
+\end{figure}
+
+\begin{figure}[htb]
+	\centering
+	\setkeys{Gin}{width=\linewidth}
+	\begin{subfigure}{0.4\textwidth}
+		\includegraphics{./Figures/85th-percentile_corr.pdf}
+		\caption{Multivariate model}
+		\label{fig:capparatus}
+	\end{subfigure}
+	\hfil
+	\begin{subfigure}{0.4\textwidth}
+		\includegraphics{./Figures/85th-percentile_uncorr.pdf}
+		\caption{Uncorrelated model}
+		\label{fig:cdiagram}
+	\end{subfigure}
+	\caption{Posterior predictions of the product \( Y_1 Y_2 \) for a value sitting around the 85\textup{th} percentile}
+	\label{fig::res-15}
+\end{figure}
+
+\subsection{Real case study}
+
+I tested a simple multivariate model on \( \logit(r) \) and \( \log(\Vtot) \) with only two intercepts and \( \Sigmabf \) to estimate. I found a positive correlation of 0.27 for \textit{Fagus sylvatica} between the two, suggesting that larger total volumes are predominantly concentrated in the bole.
