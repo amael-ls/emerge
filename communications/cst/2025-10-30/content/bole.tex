@@ -11,11 +11,11 @@ In what follows, we sum up the equations currently used in the ``\nameref{sec::o
 
 The annual living tree sample surveyed by the French \NFI{} is divided into two subsets:
 \begin{description}
-	\item [Complete trees] where girth (at breast height), \( c \), total height, \( h \), and taper height, \( \hdec \), are measured. These trees are randomly designated, ensuring that there is one individual per girth class, per species, and per plot.
+	\item [Complete trees] where girth (at breast height), \( c \), total height, \( h \), and taper height, \( \hdec \), are measured. These trees are randomly designated, ensuring that there is at least one individual per girth class, per species, and per plot.
 	\item [Simplified trees] where only girth is measured.
 \end{description}
 
-This leads to two sets of equation, one per subset. For the so-called `complete trees', the bole volume is predicted using an allometric equation with three input variables (see equation \eqref{eq::fnew}), as described in \cite{Morneau2016}:
+For the so-called `complete trees', the bole volume is predicted using an allometric equation with three input variables (see equation \eqref{eq::fnew}), as described in \cite{Morneau2016}:
 \begin{fullwidth}
 	\begin{equation}
 		\left\{
@@ -32,11 +32,11 @@ where \( f \) is a function of \( \hdec \) among the following:
 f(\hdec) & = f_{\text{max}}\!\left( \frac{\hdec}{\hdec + k} \right)^{1 + \rho} && \qquad f(\hdec) = \eta \ln\!\left( \frac{\hdec}{h} \right) \\
 f(\hdec) & = \eta \ln(\hdec) && \qquad f(\hdec) = \eta \hdec
 \end{alignat*}
-The coefficients \( \alpha \) \dots, \( b \), and the function \( f \) are species-specific. Some of these coefficients also depend on the kind of terminal cut of the tree, either the stem top (\textit{regular cut}, \ie \( \hdec = h \)) or a sudden decrease in stem diameter (\textit{shape cut}, \( \hdec < h\)). \\
+The coefficients \( \alpha \) \dots, \( b \), and the function \( f \) are species-specific. Some of these coefficients also depend on the kind of terminal cut of the tree, either the stem top (\textit{regular cut}) or a sudden decrease in stem diameter (\textit{shape cut}). \\
 
 For simplified trees, the bole volume is based on the predicted volume of a neighbouring complete tree. A one-variable allometric equation is used to adjust for the girth difference between the reference tree and the simplified tree when assigning bole volume.
 \begin{tcolorbox}[breakable, title = Volume imputation]
-We associate each simplified tree \( i \) with a complete tree \( j \) that belongs to the same species, sample plot, and same girth class and adjust the bole volume of \( i \) using a ratio relative to its reference tree:
+We associate each simplified tree \( i \) with a complete tree \( j \) that belongs to the same plot, same species and same girth class and adjust the bole volume of \( i \) using a ratio relative to its reference tree:
 	\begin{equation}
 		\hat{V}_{\text{bole}}^{\text{imp}}(i) = \hat{V}_{\text{bole}}(j) \frac{V_{I}(i)}{V_{I}(j)},
 		\label{eq::imputation}
@@ -44,7 +44,7 @@ We associate each simplified tree \( i \) with a complete tree \( j \) that belo
 	where \( \hat{V}_{\text{bole}} \) is the three variable equation \eqref{eq::fnew}, and \( V_{I} \) is a species-specific allometric equation that takes only \( c \) as an input variable (see equation \eqref{eq::allom_1}).
 \end{tcolorbox}
 
-Current one-entry allometric equations are built on log transformation:
+Current one-variable allometric equations are built on log transformation:
 \begin{fullwidth}
 	\begin{equation}
 		V_{I} = \exp \left[ \alpha + \beta \ln(c) + \gamma \ln(c)^2 + \delta \ln(c)^3 + \zeta \ln(c)^4 + \eta f(g) + \frac{\sigma^2}{2} \right],
@@ -55,7 +55,7 @@ where \( f(g) \) is a function of local basal area. The coefficients \( \alpha \
 
 \section{Motivations for changes}
 
-Regarding the three-variable allometric equations (Eq. \eqref{eq::fnew}), the aim is to improve model parsimony so that future species models share the same formula and fitting no longer depends on the type of terminal cut. In this context, a decision was made to remove the \( \hdec \) term for trees with regular cuts, since \( \hdec \) has not been measured for such trees since 2020 and must now be estimated using a third-party model. This is achieved by defining \( \hdec' \) as:
+Regarding the three-variable allometric equations (Eq. \eqref{eq::fnew}), the aim is to improve model parsimony so that future species models share the same formula and fitting no longer depends on the type of terminal cut. Also, a decision was made to no longer rely on the \( \hdec \) term for trees with regular cuts, since \( \hdec \) has not been measured for such trees since 2020 and must now be estimated using a third-party model. This is achieved by defining \( \hdec' \) as:
 \[
 	\hdec' =
 	\begin{cases}
@@ -70,14 +70,14 @@ The approach of new allometric equations development is detailed in \cite{Gohon2
 
 \section{New bole models\label{sec::new_allom}}
 
-Like current equations, future three-entries models are fitted using French NFI data (see \ref{chap::def} 3.). It models a shape coefficient \( f_{\text{new}} \) (see \ref{eq::fnew}) an analogous way than \cite{Morneau2016}.  
+Like current equations, future three-variable models are fitted using French NFI data (see \ref{chap::def} 3.). It models a shape coefficient \( f_{\text{new}} \) (see \ref{eq::fnew}) an analogous way than \cite{Morneau2016}.  
 
 \[
 	\hat f_{\text{new}} = \alpha + \beta c + \gamma \frac{\sqrt{c}}{\hdec'} + \delta \frac{\sqrt{\hdec'}}{c^2 h} + \eta \left( 1 - \frac{\hdec'}{h} \right)
 \]
 where coefficients (\( \alpha \), \( \beta \), \( \gamma \), \( \delta \), \( \eta \)) only depend on the tree species.  
 
-New single-variable models are fitted to volume estimates of trees with height measurements from recent inventory campaigns.
+New single-variable models are fitted to volume estimates of complete trees from recent inventory campaigns.
 
 \[
 	V_{I} = \mathrm{e}^{\alpha + \beta \ln(c) + \gamma \ln(c)^2 + \frac{\sigma^2}{2}},
