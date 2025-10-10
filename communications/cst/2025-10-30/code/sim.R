@@ -100,8 +100,6 @@ quant_2 = apply(X = pred_2, MARGIN = 3, FUN = quantile, probs = c(0.05, 0.95))
 quantile(data[, Vbole], c(0.15, 0.5, 0.85))
 which(data[, Vbole > 0.05] & data[, Vbole < 0.055])
 k = 42
-if (k > data[, .N])
-	stop("k must be smaller than N")
 
 lazyPosterior(pred_1[, , paste0("pred_Vbole[", k, "]")], val1 = data[k, Vbole],
 	max_x = quant_1["95%", paste0("pred_Vbole[", k, "]")], n = 4096,
@@ -113,25 +111,21 @@ lazyPosterior(pred_2[, , paste0("pred_Vbole[", k, "]")], val1 = data[k, Vbole],
 ## For a 'medium' value of Vbole (around 50th percentile)
 which(data[, Vbole > 1.78] & data[, Vbole < 1.79])
 k = 177
-if (k > data[, .N])
-	stop("k must be smaller than N")
 
 lazyPosterior(pred_1[, , paste0("pred_Vbole[", k, "]")], val1 = data[k, Vbole],
 	max_x = quant_1["95%", paste0("pred_Vbole[", k, "]")], n = 4096,
 	filename = "../Figures/50th-percentile_corr")
 lazyPosterior(pred_2[, , paste0("pred_Vbole[", k, "]")], val1 = data[k, Vbole],
 	max_x = quant_1["95%", paste0("pred_Vbole[", k, "]")], n = 4096,
-	filename = "../Figures/50th-percentile_corr")
+	filename = "../Figures/50th-percentile_uncorr")
 
 ## For a 'large' value of Vbole (around 85 percentile)
 which(data[, Vbole > 39] & data[, Vbole < 40])
 k = 695
-if (k > data[, .N])
-	stop("k must be smaller than N")
 
 lazyPosterior(pred_1[, , paste0("pred_Vbole[", k, "]")], val1 = data[k, Vbole],
 	max_x = quant_1["95%", paste0("pred_Vbole[", k, "]")], n = 4096,
 	filename = "../Figures/85th-percentile_corr")
 lazyPosterior(pred_2[, , paste0("pred_Vbole[", k, "]")], val1 = data[k, Vbole],
 	max_x = quant_1["95%", paste0("pred_Vbole[", k, "]")], n = 4096,
-	filename = "../Figures/85th-percentile_corr")
+	filename = "../Figures/85th-percentile_uncorr")
