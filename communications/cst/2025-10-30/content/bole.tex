@@ -44,11 +44,13 @@ We associate each simplified tree \( i \) with a complete tree \( j \) that belo
 	where \( \hat{V}_{\text{bole}} \) is the three variable equation \eqref{eq::fnew}, and \( V_{I} \) is a species-specific allometric equation that takes only \( c \) as an input variable (see equation \eqref{eq::allom_1}).
 \end{tcolorbox}
 
-Current one-entry allometric equations are built on log transformation:  
-\begin{equation}
-	V_{I} = \exp \left[ \alpha + \beta \ln(c) + \gamma \ln(c)^2 + \delta \ln(c)^3 + \zeta \ln(c)^4 + \eta f(g) + \frac{\sigma^2}{2} \right],
-	\label{eq::allom_1}
-\end{equation}
+Current one-entry allometric equations are built on log transformation:
+\begin{fullwidth}
+	\begin{equation}
+		V_{I} = \exp \left[ \alpha + \beta \ln(c) + \gamma \ln(c)^2 + \delta \ln(c)^3 + \zeta \ln(c)^4 + \eta f(g) + \frac{\sigma^2}{2} \right],
+		\label{eq::allom_1}
+	\end{equation}
+\end{fullwidth}
 where \( f(g) \) is a function of local basal area. The coefficients \( \alpha \), \dots, \( \sigma \) depend on the tree species and contextual parameters (ecological area, altitude zone, property regime). 
 
 \section{Motivations for changes}
@@ -62,7 +64,7 @@ Regarding the three-variable allometric equations (Eq. \eqref{eq::fnew}), the ai
 	\end{cases}
 \]
 
-For monitoring stock variations over time, the new coming inventory method will assess tree sample data twice. Tree samples are surveyed a second time, but only tree girth is measured again. So, one-entry allometric equations shall be used to assess tree new volume at second survey given old and new girth, the same way than simplified trees (see \ref{eq::imputation}). For that purpose, one-entry volume equations have to be an increasing function of girth. In particular, an explanatory variable \( f(g) \) involving local basal area, conveying stand competition, has to be questioned.  
+For monitoring stock variations over time, the new coming inventory method will assess tree sample data twice. Tree samples are surveyed a second time, but only tree girth is measured again. So, one-variable allometric equations shall be used to assess tree new volume at second survey given old and new girth, the same way than simplified trees (see \ref{eq::imputation}). For that purpose, one-variable volume equations have to be an increasing function of girth. In particular, an explanatory variable \( f(g) \) involving local basal area, conveying stand competition, has to be questioned.  
 
 The approach of new allometric equations development is detailed in \cite{Gohon2024}.  
 
@@ -75,22 +77,24 @@ Like current equations, future three-entries models are fitted using French NFI 
 \]
 where coefficients (\( \alpha \), \( \beta \), \( \gamma \), \( \delta \), \( \eta \)) only depend on the tree species.  
 
-New one-entry models are fitted to volume estimates of trees with height measures from recent inventory campaigns.  
+New single-variable models are fitted to volume estimates of trees with height measurements from recent inventory campaigns.
 
 \[
-	V_{I} = \mathrm{e}^{\alpha + \beta \ln(c) + \gamma \ln(c)^2 + \frac{\sigma^2}{2}}
+	V_{I} = \mathrm{e}^{\alpha + \beta \ln(c) + \gamma \ln(c)^2 + \frac{\sigma^2}{2}},
 \]
-where (\( \alpha \), \( \beta \), \( \gamma \), \( \sigma \)) are still depending on the tree species and same contextual parameters (ecological area, altitude zone, property regime).  
+where (\( \alpha \), \( \beta \), \( \gamma \), \( \sigma \)) still depend on the tree species and on the same contextual parameters (ecological area, altitude zone, property regime).
 
-New and current models perform similarly.  
-Survey estimates (see for instance \ref{fig::estimate_vbole_bygirth} and \ref{fig::estimate_vbole} from \cite{Gohon2024}) are a go-to output to foresee the forthcoming effect of new allometric equations on NFI results. It shows lower volume estimates for small trees and slightly higher volume estimates for bigger trees, and consequently higher volume growth estimates. Differences never exceed confidence intervals.  
+New and current models perform similarly.
+Survey estimates (see for instance \ref{fig::estimate_vbole_bygirth} and \ref{fig::estimate_vbole} from \cite{Gohon2024}) are a go-to output to foresee the forthcoming effect of new allometric equations on \NFI{} results. It shows lower volume estimates for small trees and slightly higher volume estimates for bigger trees, and consequently higher volume growth estimates. Differences never exceed confidence intervals.
 
-\begin{figure*}
-	\includegraphics[scale = 0.7]{Figures/estimate_vbole_bygirth.pdf}
+\begin{figure}[h]
+	\centering
+	\includegraphics[scale = 0.6]{Figures/estimate_vbole_bygirth.pdf}
 	\caption{National bole volume estimates for trees with height measures, by rounded girth. \label{fig::estimate_vbole_bygirth}}
-\end{figure*}
+\end{figure}
 
-\begin{figure*}
-	\includegraphics[scale = 0.7]{Figures/estimate_vbole.pdf}
+\begin{figure}[h]
+	\centering
+	\includegraphics[scale = 0.6]{Figures/estimate_vbole.pdf}
 	\caption{National bole volume and growth estimates for all living trees and dead trees. \label{fig::estimate_vbole}}
-\end{figure*}
+\end{figure}
