@@ -393,7 +393,7 @@ As a conclusion, the two volumes are as 'stable' or messy as each other!
 
 WHAT FOLLOWS IN THIS SECTION IS OUT OF DATE! I AM EVEN NOT DOING A JOINED MODEL HERE. GO TO NEXT SECTION FOR FIRST TRIAL.
 
-This model is based on the ratio developed in `06_zhou.qmd` for the total volume, $\Vtot$. For $\Vbft$, I explore few relations between the taper diametre, $\ddec$, and taper height, $\hdec$.
+This model is based on the ratio developed in `06_zhou.qmd` for the total volume, $\Vtot$. For $\Vbft$, I explore few relations between the taper diameter, $\ddec$, and taper height, $\hdec$.
 
 ### Heatmaps $\ddec$, $\hdec$, and $\Vbft$
 
@@ -666,6 +666,16 @@ varCov_mat_est = matrix(data = apply(X = fit$draws("Sigma"), FUN = mean, MARGIN 
 
 round(varCov_mat, 2)
 round(varCov_mat_est, 2)
+
+## FIT 2 WITHOUT CORR IN MODEL
+model2 = cmdstan_model("./help.stan")
+fit2 = model2$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4), max_treedepth = 12)
+
+lazyPosterior(fit2$draws("mu_p"), val1 = mu_logit_r)
+lazyPosterior(fit2$draws("mu_v"), val1 = mu_log_v)
+
+lazyPosterior(fit2$draws("sigma_p"), val1 = sigma_logit_r)
+lazyPosterior(fit2$draws("sigma_v"), val1 = sigma_log_v)
 ```
 
 ## Joined model ratio and total volume
@@ -681,7 +691,7 @@ I will use two transformations in order to be able to use a MVN distribution:
 
 ## Intractibility
 
-Note that whatever I try to model, there will always be intractibility somewhere! Either I model both components, trunk and crown, with a multivariate lognormal, and the total volume is untractable (sum of two lognormals), or I model the trunk volume, $\Vtot$ and the ratio, $r$, and $\Vbft$ is untractable. Indeed:
+Note that whatever I try to model, there will always be intractability somewhere! Either I model both components, trunk and crown, with a multivariate lognormal, and the total volume is untractable (sum of two lognormals), or I model the trunk volume, $\Vtot$ and the ratio, $r$, and $\Vbft$ is untractable. Indeed:
 
 $$
 \begin{aligned}
@@ -735,6 +745,116 @@ lazyPosterior(fit$draws("rho"))
 
 ## Joined model taper and crown volumes
 
+### Fake data
+```{r}
+
+Vbft = inra["Fagus sylvatica", bole_volume_m3]
+Vtot = inra["Fagus sylvatica", total_volume_m3]
+Vcro = inra["Fagus sylvatica", crown_volume_m3]
+
+#### Parameters
+mu_tap = 0.54 # Mean taper vol
+mu_cro = 0.18 # Mean crown volume
+
+var_tap = 0.5 # Var taper volume
+var_cro = 0.12 # Var crown volume
+
+rho = 0.2 # Covariance between logit(ratio) and log(total volume)
+
+plot(density(Vbft))
+curve(dgamma(x, shape = mu_tap^2/var_tap, rate = mu_tap/var_tap), add = TRUE, col = "#CD212A", lwd = 2)
+
+plot(density(Vcro))
+curve(dgamma(x, shape = mu_cro^2/var_cro, rate = mu_cro/var_cro), add = TRUE, col = "#CD212A", lwd = 2)
+
+#### Var-Cov matrix
+sigma_mat = diag(c(sqrt(var_tap), sqrt(var_cro)))
+rho_mat = matrix(c(1, rho, rho, 1), nrow = 2, ncol = 2)
+
+varCov_mat = sigma_mat %*% rho_mat %*% sigma_mat
+
+#### Other variables
+n_sim = 2e3
+```
+
+```{r}
+#### Create data following our model (intercepts only, with corrleation in the residuals)
+set.seed(1969 - 08 - 18) # Woodstock seed
+data = as.data.table(MASS::mvrnorm(n_sim, c(mu_logit_r, mu_log_v), varCov_mat))
+setnames(data, c("logit_r", "log_v"))
+
+inv_logit = function(x)
+	return (1 / (1 + exp(-x)))
+
+stanData = list(
+	N = data[, .N],
+	p = data[, inv_logit(logit_r)],
+	total_volume_m3 = data[, exp(log_v)]
+)
+
+model = cmdstan_model("./temp_joined.stan")
+
+n_chains = 4
+
+fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4), max_treedepth = 12)
+```
+
+## Et continue le bordel! Faut réorganiser
+```{r}
+inra[, logit_ratio := log(ratio/(1 - ratio))]
+inra[, logit_ratio := log(ratio/(1 - ratio))]
+
+## Fagus sylvatica
+for (selectedSpecies in ls_species[c(1, 4, 11, 12, 15)])
+{
+	plot(inra[selectedSpecies, circumference_m], inra[selectedSpecies, ratio], pch = 19,
+		axes = FALSE, xlab = "Circumference", ylab = "ratio", main = selectedSpecies, col = "#0F7BA2")
+	axis(1)
+	axis(2, las = 1)
+
+	plot(inra[selectedSpecies, circumference_m], inra[selectedSpecies, logit_ratio], pch = 19,
+		axes = FALSE, xlab = "Circumference", ylab = "logit(ratio)", main = selectedSpecies, col = "#43B284")
+	axis(1)
+	axis(2, las = 1)
+
+	plot(inra[selectedSpecies, log(circumference_m)], inra[selectedSpecies, logit_ratio], pch = 19,
+		axes = FALSE, xlab = "log(Circumference)", ylab = "logit(ratio)", main = selectedSpecies, col = "#FAB255")
+	axis(1)
+	axis(2, las = 1)
+}
+
+model = cmdstan_model("./temp_joined_experience.stan")
+
+stanData = list(
+	N = inra["Fagus sylvatica"][, .N],
+	circumference_m = inra["Fagus sylvatica"][, circumference_m],
+	p = inra["Fagus sylvatica"][, ratio],
+	total_volume_m3 = inra["Fagus sylvatica"][, total_volume_m3]
+)
+
+n_chains = 4
+
+fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4), max_treedepth = 12)
+```
+
+```{r}
+mean(fit$draws("rho"))
+
+varCov_mat_est = matrix(data = apply(X = fit$draws("Sigma"), FUN = mean, MARGIN = 3), nrow = 2, byrow = 2)
+
+round(varCov_mat_est, 3)
+
+pred = fit$draws("pred_Vbole")
+quant = apply(X = pred, MARGIN = 3, FUN = quantile, probs = c(0.05, 0.95))
+
+pred_avg = apply(X = pred, MARGIN = 3, FUN = mean)
+
+plot(inra["Fagus sylvatica", bole_volume_m3], pred_avg, pch = 19, axes = FALSE,
+	xlab = "Observed", ylab = "Predicted")
+axis(1)
+axis(2, las = 1)
+abline(a = 0, b = 1, col = "#FAB255", lwd = 3)
+```
 
 ## Bibliography {.unnumbered}
 
