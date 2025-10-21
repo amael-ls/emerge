@@ -12,6 +12,7 @@ data {
 
 transformed data {
 	vector [N] log_circumference_m = log(circumference_m);
+	vector [N] log_circumference_min = log_circumference_m - min(log_circumference_m);
 	vector [N] log_b = log(bole_volume_m3);
 	vector [N] log_c = log(crown_volume_m3);
 }
@@ -25,6 +26,10 @@ parameters {
 	// ... slopes
 	real alpha_1;
 	real beta_1;
+	real <lower = 0> alpha_2;
+	real beta_2;
+	real beta_3;
+	real beta_4;
 
 	// Variances (in the variance-covariance matrices)
 	real <lower = 0> sigma_b; // Unexplained variance of log(bole volume)
@@ -41,6 +46,10 @@ model {
 	// ... slopes regressions
 	target += normal_lpdf(alpha_1 | 0, 2);
 	target += normal_lpdf(beta_1 | 0, 2);
+	target += exponential_lpdf(alpha_2 | 1);
+	target += normal_lpdf(beta_2 | 0, 2);
+	target += normal_lpdf(beta_3 | 0, 2);
+	target += normal_lpdf(beta_4 | 0, 2);
 
 	// ... variance
 	target +=  lkj_corr_cholesky_lpdf(L | 2); // It contains rho (non-diag)
@@ -54,7 +63,9 @@ model {
 	{
 		// print(mu_vec[i, :]);
 		target += multi_normal_cholesky_lpdf(to_vector({log_b[i], log_c[i]}) |
-			[alpha_0 + alpha_1*log_circumference_m[i], beta_0 + beta_1*log_circumference_m[i]],
+			[alpha_0 + alpha_1*log_circumference_min[i].^alpha_2,
+			beta_0 + beta_1*log_circumference_m[i] + beta_2*log_circumference_m[i].^2 +
+			beta_3*log_circumference_m[i].^3 + beta_4*log_circumference_m[i].^4],
 			diag_pre_multiply([sigma_b, sigma_c], L));
 	}
 }
@@ -74,7 +85,9 @@ generated quantities {
 		{
 			Sigma = multiply_lower_tri_self_transpose(diag_pre_multiply([sigma_b, sigma_c], L));
 			joined_pred = multi_normal_rng(
-				[alpha_0 + alpha_1*log_circumference_m[i], beta_0 + beta_1*log_circumference_m[i]],
+				[alpha_0 + alpha_1*log_circumference_min[i].^alpha_2,
+				beta_0 + beta_1*log_circumference_m[i] + beta_2*log_circumference_m[i].^2 +
+				beta_3*log_circumference_m[i].^3 + beta_4*log_circumference_m[i].^4],
 				Sigma);
 
 			pred_total_volume[i] = exp(joined_pred[1]) + exp(joined_pred[2]);
@@ -82,3 +95,4 @@ generated quantities {
 		}
 	}
 }
+
