@@ -58,9 +58,13 @@ format:
 <!-- Math commands -->
 \newcommand{\Vbft}{V_{\text{BFT}}}
 \newcommand{\Fbft}{F_{\text{BFT}}}
+
 \newcommand{\Vcro}{V_{\text{crown}}}
+
 \newcommand{\Vtot}{V_{\text{tot}}}
+
 \newcommand{\hdec}{h_{\text{tap}}}
+\newcommand{\htot}{h_{\text{tot}}}
 \newcommand{\ddec}{\phi_{\text{tap}}}
 
 \DeclareMathOperator{\Cov}{Cov}
@@ -86,6 +90,12 @@ library(gt)
 
 ## Tool function
 source("./toolFunctions.R")
+
+linReg = function(x, p1, p2, p3, p4, p5)
+	return(p1 + p2*x + p3*x^2 + p4*x^3 + p5*x^4)
+
+powReg = function(x, p1, p2, p3, shift)
+	return(p1 + p2*(x - shift)^p3)
 ```
 
 ```{r}
@@ -109,38 +119,128 @@ path_data = paste0(mnt_point, "/data/")
 if (!dir.exists(path_data))
 	stop(paste0("Folder <", path_data, "> does not exist! Did you run 01_prepare_data.qmd?"))
 
-opt = "_full"
+# opt = "_full"
+opt = "_inra"
 
 ## Loading
 stanData = readRDS(paste0(path_data, "stanData_nfi-inra", opt, ".rds"))
-forest_dt = readRDS(paste0(path_data, "nfi-inra_dt", opt, ".rds"))
-ind_species = readRDS(paste0(path_data, "ind_species_nfi-inra", opt, ".rds"))
-
-colours = paste0(met.brewer("Egypt")[1:4])
-names(colours) = c("conifer", "broadleaf", "inra", "nfi")
-
-forest_dt[fct_type == "broadleaf", fct_colour := colours["broadleaf"]]
-forest_dt[fct_type == "conifer", fct_colour := colours["conifer"]]
-forest_dt[origin_data == "inra", origin_colour := colours["inra"]]
-forest_dt[origin_data == "nfi", origin_colour := colours["nfi"]]
-
-setkey(forest_dt, origin_data, fct_type)
-
-forest_dt[.("inra", "broadleaf"), origin_fct_colour := paste0(colours["nfi"], "FF")]
-forest_dt[.("inra", "conifer"), origin_fct_colour := paste0(colours["inra"], "AA")]
-forest_dt[.("nfi", "broadleaf"), origin_fct_colour := paste0(colours["broadleaf"], "88")]
-forest_dt[.("nfi", "conifer"), origin_fct_colour := paste0(colours["conifer"], "55")]
+# forest_dt = readRDS(paste0(path_data, "nfi-inra_dt", opt, ".rds"))
+inra = readRDS(paste0(path_data, "nfi-inra_dt", opt, ".rds"))
 
 ## Subset data
-nfi = forest_dt["nfi"]
-nfi = nfi[, n_indiv := .N, by = speciesName_sci]
-nfi = nfi[n_indiv > 5000]
+# nfi = forest_dt["nfi"]
+# nfi = nfi[, n_indiv := .N, by = speciesName_sci]
+# nfi = nfi[n_indiv > 5000]
 
-rm(forest_dt)
+setkey(inra, speciesName_sci)
 ```
 
-## Fit model Florence
+## Intro
+
+The ratio model is dangerous! Check how steep is the curve for small value of $\Vbft$... That means a hypersensitive model for small trees!
+
+Therefore, I need to change the paradigm! In the @sec-univariate_BFT I recreate the model of Florence to estimate $\Vbft$ from three variables: $c$, $h$, and, $\hdec'$ (which is either $\hdec$ or $\htot$).
+
+## Fit model Florence{#sec-univariate_BFT}
+
+The model is described by @eq-flo_univariate:
+$$
+	\Fbft = \alpha_i + \beta_i c + \gamma_i \frac{\sqrt{c}}{\hdec'} + \delta_i \frac{\sqrt{\hdec'}}{c^2 h} + \eta_i \left( 1 - \frac{\hdec'}{h} \right)
+$${#eq-flo_univariate}
+
+For the code and equation, see `rapport_tarifs.Rmd`, line 638.
 
 ```{r}
+# model = cmdstan_model("./florence_univariate.stan")
+
+# stanData = list(
+# 	N = nfi["Fagus sylvatica", .N],
+
+# 	circumference_m = nfi["Fagus sylvatica", circumference_m],
+# 	height = nfi["Fagus sylvatica", height],
+# 	hdec = nfi["Fagus sylvatica", taper_height],
+
+# 	bole_volume_m3 = nfi["Fagus sylvatica", bole_volume_m3]
+# )
+
+# fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4), max_treedepth = 12)
+```
+
+
+## Simple test of trunk-crown model
+```{r}
+model = cmdstan_model("./trunk-crown.stan")
+
+stanData = list(
+	N = inra["Fagus sylvatica", .N],
+
+	circumference_m = inra["Fagus sylvatica", circumference_m],
+
+	bole_volume_m3 = inra["Fagus sylvatica", bole_volume_m3],
+	crown_volume_m3 = inra["Fagus sylvatica", crown_volume_m3]
+)
+
+n_chains = 4
+
+fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4), max_treedepth = 12)
+```
+
+```{r}
+#### Check results
+## Posteriors
+lazyTrace(fit$draws("rho"))
+lazyPosterior(fit$draws("rho"))
+
+## Predictions
+pred_total_volume = apply(X = fit$draws("pred_total_volume"), MARGIN = 3, FUN = mean)
+pred_Vb_Cr = apply(X = fit$draws("pred_Vb_Cr_joined"), MARGIN = 3, FUN = mean)
+
+pred_bole_volume = exp(pred_Vb_Cr[seq(1, length(pred_Vb_Cr) - 1, by = 2)])
+pred_crown_volume = exp(pred_Vb_Cr[seq(2, length(pred_Vb_Cr), by = 2)])
+
+## Bole volume
+plot(pred_bole_volume, inra["Fagus sylvatica", bole_volume_m3], pch = 19, cex = 0.75,
+	xlab = "Pred bole", ylab = "Obs bole", axes = FALSE)
+axis(1)
+axis(2, las = 1)
+abline(a = 0, b = 1, col = "#CD212A", lwd = 2)
+
+## Bole volume
+plot(pred_crown_volume, inra["Fagus sylvatica", crown_volume_m3], pch = 19, cex = 0.75,
+	xlab = "Pred crown", ylab = "Obs crown", axes = FALSE)
+axis(1)
+axis(2, las = 1)
+abline(a = 0, b = 1, col = "#CD212A", lwd = 2)
+
+## Total volume
+plot(pred_total_volume, inra["Fagus sylvatica", total_volume_m3], pch = 19, cex = 0.75,
+	xlab = "Pred tot.", ylab = "Obs tot", axes = FALSE)
+axis(1)
+axis(2, las = 1)
+abline(a = 0, b = 1, col = "#CD212A", lwd = 2)
+
+## Fit on the log scale
+# Extract parameters
+alpha_0 = apply(X = fit$draws("alpha_0"), FUN = mean, MARGIN = 3)
+beta_0 = apply(X = fit$draws("beta_0"), FUN = mean, MARGIN = 3)
+alpha_1 = apply(X = fit$draws("alpha_1"), FUN = mean, MARGIN = 3)
+beta_1 = apply(X = fit$draws("beta_1"), FUN = mean, MARGIN = 3)
+alpha_2 = apply(X = fit$draws("alpha_2"), FUN = mean, MARGIN = 3)
+beta_2 = apply(X = fit$draws("beta_2"), FUN = mean, MARGIN = 3)
+beta_3 = apply(X = fit$draws("beta_3"), FUN = mean, MARGIN = 3)
+beta_4 = apply(X = fit$draws("beta_4"), FUN = mean, MARGIN = 3)
+
+plot(log(stanData$circumference_m), log(stanData$bole_volume_m3), pch = 19, cex = 0.75,
+	xlab = "log(circum)", ylab = "log(bole)", axes = FALSE)
+axis(1)
+axis(2, las = 1)
+curve(powReg(x, alpha_0, alpha_1, alpha_2, min(log(stanData$circumference_m))), add = TRUE,
+	lwd = 2, col = "#FAB255")
+
+plot(log(stanData$circumference_m), log(stanData$crown_volume_m3), pch = 19, cex = 0.75,
+	xlab = "log(circum)", ylab = "log(crown)", axes = FALSE)
+axis(1)
+axis(2, las = 1)
+curve(linReg(x, beta_0, beta_1, beta_2, beta_3, beta_4), add = TRUE, lwd = 2, col = "#FAB255")
 
 ```
