@@ -1,1 +1,64 @@
-![Test image](../figures/map.png)
+\usepackage{cancel}
+
+## Single-variable and three-variable models
+
+In tree sample...
+
+\bigskip
+
+* trees $j$, where $c$, $h$, $h_{dec}$ are measured
+
+$$
+V_{bole}(j) = f_{III}(c, h, h_{dec})
+$$
+
+* *simplified* ou *remeasured* trees $i$, where $c$ is measured
+
+$$
+\cancel{ V_{bole}(i) = V_{bole}(j) }
+\to
+\cancel{ V_{bole}(i) = V_{bole}(j) \frac{c(i)}{c(j)} }
+\to
+V_{bole}(i) = V_{bole}(j) \frac{f_{I}(c(i))}{f_{I}(c(j))}
+$$
+
+## What we keep
+
+* Data sets source
+* Linear models
+* Transformations
+
+$$
+\left\{
+\begin{aligned}
+V_{bole} & = \frac{c^2 h}{4 \pi \left( 1 - \frac{1{,}3}{h} \right)^2} f_{new} \\
+f_{new} & = f_{III}(c, h, h_{dec})
+\end{aligned}
+\right.
+$$
+
+$$
+log(V_{bole}) = f_{I}(log(c))
+$$
+
+## What we change
+
+* Explanatory variables
+  * $h_{dec}$ turns into $h_{dec}'$
+  * variables are shared by every species
+  * $f(g)$ is dropped
+* Parameters
+  * the three-variable model is no longer cut-specific
+
+$$
+f_{new} = \alpha + \beta c + \gamma \frac{\sqrt{c}}{h_{dec}'} + \delta \frac{\sqrt{h_{dec}'}}{c^2 h} + \eta \left( 1 - \frac{h_{dec}'}{h} \right)
+$$
+
+$$
+V_{bole, I} = \mathrm{e}^{\alpha + \beta \ln(c) + \gamma \ln(c)^2 + \frac{\sigma^2}{2}}
+$$
+
+## Performances similar to current models
+
+![National bole volume estimates for trees with three measures](../../report/Figures/estimate_vbole_bygirth.pdf)
+
