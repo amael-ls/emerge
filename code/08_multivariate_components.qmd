@@ -276,15 +276,6 @@ if (!file.exists("florence-fagSyl.rds"))
 	fit = readRDS("./florence-fagSyl.rds")
 }
 
-#### Check posterior
-lazyPosterior(fit$draws("alpha"), val1 = coeffs_3["Fagus sylvatica", alpha])
-lazyPosterior(fit$draws("beta_"), val1 = coeffs_3["Fagus sylvatica", beta])
-lazyPosterior(fit$draws("gamma"), val1 = coeffs_3["Fagus sylvatica", gamma])
-lazyPosterior(fit$draws("delta"), val1 = coeffs_3["Fagus sylvatica", delta])
-lazyPosterior(fit$draws("eta"), val1 = coeffs_3["Fagus sylvatica", eta])
-
-lazyPosterior(fit$draws("sigma"), fun = dgamma, shape = 0.1, rate = 0.1)
-
 fagSyl = rbindlist(list(florence = coeffs_3["Fagus sylvatica", .(alpha, beta, gamma, delta, eta)],
 	amael = data.table(
 		alpha = mean(fit$draws("alpha")),
@@ -293,19 +284,6 @@ fagSyl = rbindlist(list(florence = coeffs_3["Fagus sylvatica", .(alpha, beta, ga
 		delta = mean(fit$draws("delta")),
 		eta = mean(fit$draws("eta")))
 ), idcol = "model")
-
-#### Check posterior prediction
-k = nfi["Fagus sylvatica", which.max(bole_volume_m3)]
-draws = getVol(nfi["Fagus sylvatica"], k, fit)
-lazyPosterior(draws, val1 = nfi["Fagus sylvatica"][k, bole_volume_m3])
-
-k = nfi["Fagus sylvatica", which.min(bole_volume_m3)]
-draws = getVol(nfi["Fagus sylvatica"], k, fit)
-lazyPosterior(draws, val1 = nfi["Fagus sylvatica"][k, bole_volume_m3])
-
-k = 68
-draws = getVol(nfi["Fagus sylvatica"], k, fit)
-lazyPosterior(draws, val1 = nfi["Fagus sylvatica"][k, bole_volume_m3])
 
 #### Pred on Inra data
 genQ = cmdstan_model("./florence_univariate_genQ.stan")
@@ -320,10 +298,6 @@ stanData_gen = list(
 )
 
 sim = genQ$generate_quantities(fit, data = stanData_gen, seed = 123, parallel_chains = min(n_chains, 4))
-
-k = 12
-str = paste0("pred_bole[", k, "]")
-lazyPosterior(sim$draws(str), val1 = inra_dec["Fagus sylvatica"][k, bole_volume_m3])
 
 mean_pred = apply(X = sim$draws("pred_bole"), MARGIN = 3, FUN = mean)
 plot(mean_pred, inra_dec["Fagus sylvatica", bole_volume_m3], pch = 19, cex = 0.3,
@@ -419,10 +393,6 @@ curve(sigma_fct(x, a, b), to = 700)
 
 genQ = cmdstan_model("./florence_univariate_heterosked_genQ.stan")
 sim = genQ$generate_quantities(fit_heterosked, data = stanData_gen, seed = 123, parallel_chains = min(n_chains, 4))
-
-k = 12
-str = paste0("pred_bole[", k, "]")
-lazyPosterior(sim$draws(str), val1 = inra_dec["Fagus sylvatica"][k, bole_volume_m3])
 
 mean_pred = apply(X = sim$draws("pred_bole"), MARGIN = 3, FUN = mean)
 plot(mean_pred, inra_dec["Fagus sylvatica", bole_volume_m3], pch = 19, cex = 0.3,
@@ -714,18 +684,13 @@ curve(linReg(x, beta_0, beta_1, beta_2, beta_3, beta_4), add = TRUE, lwd = 2, co
 Ok, beautiful, but what are the residuals?
 
 ```{r}
-#### Correlated model
 n_sampling = fit$metadata()$iter_sampling
+# pred_Vb_Cr = fit$draws("pred_Vb_Cr_joined")
+# pred_bole_volume = exp(pred_Vb_Cr[, , seq(1, 2*inra_dec[, .N] - 1, by = 2)])
+# pred_crown_volume = exp(pred_Vb_Cr[, , seq(2, 2*inra_dec[, .N], by = 2)])
 
+## Predictions
 pred_total_volume = fit$draws("pred_total_volume")
-pred_Vb_Cr = fit$draws("pred_Vb_Cr_joined")
-
-pred_bole_volume = exp(pred_Vb_Cr[, , seq(1, 2*inra_dec[, .N] - 1, by = 2)])
-pred_crown_volume = exp(pred_Vb_Cr[, , seq(2, 2*inra_dec[, .N], by = 2)])
-
-## Predictions uncorrelated model
-pred_bole_volume_uncor = fit_uncor$draws("pred_bole_volume")
-pred_crown_volume_uncor = fit_uncor$draws("pred_crown_volume")
 pred_total_volume_uncor = fit_uncor$draws("pred_total_volume")
 
 dharma_helper = function(simResp, obs, ncol = n_sampling*n_chains)
@@ -747,32 +712,12 @@ dharma_helper = function(simResp, obs, ncol = n_sampling*n_chains)
 }
 
 #### Residuals correlated model
-## Bole volume
-sim_dharma = dharma_helper(simResp = pred_bole_volume, obs = inra_dec[, bole_volume_m3])
-plot(sim_dharma, quantreg = TRUE)
-plotResiduals(sim_dharma, inra_dec[, circumference_m], quantreg = TRUE)
-
-## Crown volume
-sim_dharma = dharma_helper(simResp = pred_crown_volume, obs = inra_dec[, crown_volume_m3])
-plot(sim_dharma, quantreg = TRUE)
-plotResiduals(sim_dharma, inra_dec[, circumference_m], quantreg = TRUE)
-
 ## Total volume
 sim_dharma = dharma_helper(simResp = pred_total_volume, obs = inra_dec[, total_volume_m3])
 plot(sim_dharma, quantreg = TRUE)
 plotResiduals(sim_dharma, inra_dec[, circumference_m], quantreg = TRUE)
 
 #### Residuals uncorrelated model
-## Bole volume
-sim_dharma = dharma_helper(simResp = pred_bole_volume_uncor, obs = inra_dec[, bole_volume_m3])
-plot(sim_dharma, quantreg = TRUE)
-plotResiduals(sim_dharma, inra_dec[, circumference_m], quantreg = TRUE)
-
-## Crown volume
-sim_dharma = dharma_helper(simResp = pred_crown_volume_uncor, obs = inra_dec[, crown_volume_m3])
-plot(sim_dharma, quantreg = TRUE)
-plotResiduals(sim_dharma, inra_dec[, circumference_m], quantreg = TRUE)
-
 ## Total volume
 sim_dharma = dharma_helper(simResp = pred_total_volume_uncor, obs = inra_dec[, total_volume_m3])
 plot(sim_dharma, quantreg = TRUE)
@@ -837,48 +782,27 @@ if (!file.exists("fake_trunk-crown_uncor.rds"))
 
 ```{r}
 #### Check the residuals
+lazyTrace(fit$draws("rho"), val1 = varCov_mat[2, 1]/(sqrt(varCov_mat[1, 1]) * sqrt(varCov_mat[2, 2])))
+lazyPosterior(fit$draws("rho"), val1 = varCov_mat[2, 1]/(sqrt(varCov_mat[1, 1]) * sqrt(varCov_mat[2, 2])))
+
 n_sampling = fit$metadata()$iter_sampling
 
+## Predictions
 pred_total_volume = fit$draws("pred_total_volume")
-pred_Vb_Cr = fit$draws("pred_Vb_Cr_joined")
-
-pred_bole_volume = exp(pred_Vb_Cr[, , seq(1, 2*inra_dec[, .N] - 1, by = 2)])
-pred_crown_volume = exp(pred_Vb_Cr[, , seq(2, 2*inra_dec[, .N], by = 2)])
-
-## Predictions uncorrelated model
-pred_bole_volume_uncor = fit_uncor$draws("pred_bole_volume")
-pred_crown_volume_uncor = fit_uncor$draws("pred_crown_volume")
 pred_total_volume_uncor = fit_uncor$draws("pred_total_volume")
 
 #### Residuals correlated model
-## Bole volume
-sim_dharma = dharma_helper(simResp = pred_bole_volume, obs = data[, v_bft])
-plot(sim_dharma, quantreg = TRUE)
-plotResiduals(sim_dharma, data[, circumference_m], quantreg = TRUE)
-
-## Crown volume
-sim_dharma = dharma_helper(simResp = pred_crown_volume, obs = data[, v_crown])
-plot(sim_dharma, quantreg = TRUE)
-plotResiduals(sim_dharma, data[, circumference_m], quantreg = TRUE)
-
 ## Total volume
 sim_dharma = dharma_helper(simResp = pred_total_volume, obs = data[, v_bft + v_crown])
 plot(sim_dharma, quantreg = TRUE)
 plotResiduals(sim_dharma, data[, circumference_m], quantreg = TRUE)
 
 #### Residuals uncorrelated model
-## Bole volume
-sim_dharma = dharma_helper(simResp = pred_bole_volume_uncor, obs = data[, v_bft])
-plot(sim_dharma, quantreg = TRUE)
-plotResiduals(sim_dharma, data[, circumference_m], quantreg = TRUE)
-
-## Crown volume
-sim_dharma = dharma_helper(simResp = pred_crown_volume_uncor, obs = data[, v_crown])
-plot(sim_dharma, quantreg = TRUE)
-plotResiduals(sim_dharma, data[, circumference_m], quantreg = TRUE)
-
 ## Total volume
 sim_dharma = dharma_helper(simResp = pred_total_volume_uncor, obs = data[, v_bft + v_crown])
 plot(sim_dharma, quantreg = TRUE)
 plotResiduals(sim_dharma, data[, circumference_m], quantreg = TRUE)
 ```
+
+## Model that uses both datasets to fit the bole parameters
+
