@@ -553,6 +553,7 @@ And here are few posterior stuff
 
 ```{r}
 pred = apply(X = fit$draws("pred_crown"), FUN = mean, MARGIN = 3)
+apply(X = fit$draws("sigmas"), FUN = mean, MARGIN = 3)
 
 plot(pred, inra_dec[, crown_volume_m3], pch = 19, cex = 0.35, col = inra_dec[, colour],
 	xlab = "Pred", ylab = "Obs", axes = FALSE)
@@ -560,5 +561,324 @@ legend(x = "topleft", legend = c("small", "med", "tall", "very tall"), fill = me
 axis(1)
 axis(2, las = 1)
 abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
+
+n_sampling = fit$metadata()$iter_sampling
+
+simResp = fit$draws("pred_crown")
+dim(simResp)
+n_chains = dim(simResp)[2] # Number of successful chains
+
+# Reshape simResp as a matrix nobs x n_repetition
+simResp_matrix = matrix(data = 0, nrow = inra_dec[, .N], ncol = n_sampling*n_chains)
+for (obs in seq_len(inra_dec[, .N]))
+	for (chain in 1:n_chains)
+		simResp_matrix[obs, ] = simResp[, chain, obs] # One line of n_sampling*n_chains simulations per observation
+
+sim_dharma = createDHARMa(simulatedResponse = simResp_matrix,
+	observedResponse = inra_dec[, crown_volume_m3],
+	fittedPredictedResponse = apply(simResp, MARGIN = 3, median),
+	integerResponse = FALSE)
+
+plot(sim_dharma, quantreg = TRUE)
+plotResiduals(sim_dharma, inra_dec[, circumference_m], quantreg = TRUE)
 ```
 
+## Simple test of trunk-crown model
+```{r}
+## Compile correlated and uncorrelated models
+model = cmdstan_model("./trunk-crown.stan")
+uncor = cmdstan_model("./crown-trunk_uncor.stan")
+
+stanData = list(
+	N = inra_dec[, .N],
+
+	circumference_m = inra_dec[, circumference_m],
+
+	bole_volume_m3 = inra_dec[, bole_volume_m3],
+	crown_volume_m3 = inra_dec[, crown_volume_m3]
+)
+
+n_chains = 4
+
+if (!file.exists("fagSyl_trunk-crown.rds"))
+{
+	fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4), max_treedepth = 12)
+
+	# Save results
+	fit$save_output_files(dir = "./", basename = paste0("fagSyl_trunk-crown"), random = FALSE)
+	saveRDS(fit, "./fagSyl_trunk-crown.rds")
+} else {
+	fit = readRDS("./fagSyl_trunk-crown.rds")
+}
+
+if (!file.exists("fagSyl_trunk-crown_uncor.rds"))
+{
+	fit_uncor = uncor$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4),
+		max_treedepth = 12)
+
+	# Save results
+	fit_uncor$save_output_files(dir = "./", basename = paste0("fagSyl_trunk-crown_uncor"), random = FALSE)
+	saveRDS(fit_uncor, "./fagSyl_trunk-crown_uncor.rds")
+} else {
+	fit_uncor = readRDS("./fagSyl_trunk-crown_uncor.rds")
+}
+```
+
+```{r}
+#### Check results
+## Posteriors
+lazyTrace(fit$draws("rho"))
+lazyPosterior(fit$draws("rho"))
+
+## Predictions
+pred_total_volume = apply(X = fit$draws("pred_total_volume"), MARGIN = 3, FUN = mean)
+pred_Vb_Cr = apply(X = fit$draws("pred_Vb_Cr_joined"), MARGIN = 3, FUN = mean)
+
+pred_bole_volume = exp(pred_Vb_Cr[seq(1, length(pred_Vb_Cr) - 1, by = 2)])
+pred_crown_volume = exp(pred_Vb_Cr[seq(2, length(pred_Vb_Cr), by = 2)])
+
+## Predictions uncorrelated model
+pred_bole_volume_uncor = apply(X = fit_uncor$draws("pred_bole_volume"), MARGIN = 3, FUN = mean)
+pred_crown_volume_uncor = apply(X = fit_uncor$draws("pred_crown_volume"), MARGIN = 3, FUN = mean)
+pred_total_volume_uncor = apply(X = fit_uncor$draws("pred_total_volume"), MARGIN = 3, FUN = mean)
+
+## Bole volume
+plot(pred_bole_volume, inra_dec[, bole_volume_m3], pch = 19, cex = 0.75,
+	xlab = "Pred bole", ylab = "Obs bole", axes = FALSE)
+axis(1)
+axis(2, las = 1)
+abline(a = 0, b = 1, col = "#CD212A", lwd = 2)
+
+## Bole volume
+plot(pred_crown_volume, inra_dec[, crown_volume_m3], pch = 19, cex = 0.75,
+	xlab = "Pred crown", ylab = "Obs crown", axes = FALSE)
+axis(1)
+axis(2, las = 1)
+abline(a = 0, b = 1, col = "#CD212A", lwd = 2)
+
+## Total volume
+plot(pred_total_volume, inra_dec[, total_volume_m3], pch = 19, cex = 0.75,
+	xlab = "Pred tot.", ylab = "Obs tot", axes = FALSE)
+axis(1)
+axis(2, las = 1)
+abline(a = 0, b = 1, col = "#CD212A", lwd = 2)
+
+########
+## Bole volume
+plot(pred_bole_volume_uncor, inra_dec[, bole_volume_m3], pch = 19, cex = 0.75,
+	xlab = "Pred bole", ylab = "Obs bole", axes = FALSE)
+axis(1)
+axis(2, las = 1)
+abline(a = 0, b = 1, col = "#CD212A", lwd = 2)
+
+## Bole volume
+plot(pred_crown_volume_uncor, inra_dec[, crown_volume_m3], pch = 19, cex = 0.75,
+	xlab = "Pred crown", ylab = "Obs crown", axes = FALSE)
+axis(1)
+axis(2, las = 1)
+abline(a = 0, b = 1, col = "#CD212A", lwd = 2)
+
+## Total volume
+plot(pred_total_volume_uncor, inra_dec[, total_volume_m3], pch = 19, cex = 0.75,
+	xlab = "Pred tot.", ylab = "Obs tot", axes = FALSE)
+axis(1)
+axis(2, las = 1)
+abline(a = 0, b = 1, col = "#CD212A", lwd = 2)
+########
+
+## Fit on the log scale
+# Extract parameters
+alpha_0 = apply(X = fit$draws("alpha_0"), FUN = mean, MARGIN = 3)
+beta_0 = apply(X = fit$draws("beta_0"), FUN = mean, MARGIN = 3)
+alpha_1 = apply(X = fit$draws("alpha_1"), FUN = mean, MARGIN = 3)
+beta_1 = apply(X = fit$draws("beta_1"), FUN = mean, MARGIN = 3)
+alpha_2 = apply(X = fit$draws("alpha_2"), FUN = mean, MARGIN = 3)
+beta_2 = apply(X = fit$draws("beta_2"), FUN = mean, MARGIN = 3)
+beta_3 = apply(X = fit$draws("beta_3"), FUN = mean, MARGIN = 3)
+beta_4 = apply(X = fit$draws("beta_4"), FUN = mean, MARGIN = 3)
+
+plot(log(stanData$circumference_m), log(stanData$bole_volume_m3), pch = 19, cex = 0.75,
+	xlab = "log(circum)", ylab = "log(bole)", axes = FALSE)
+axis(1)
+axis(2, las = 1)
+curve(powReg(x, alpha_0, alpha_1, alpha_2, min(log(stanData$circumference_m))), add = TRUE,
+	lwd = 2, col = "#CD212A")
+
+plot(log(stanData$circumference_m), log(stanData$crown_volume_m3), pch = 19, cex = 0.75,
+	xlab = "log(circum)", ylab = "log(crown)", axes = FALSE)
+axis(1)
+axis(2, las = 1)
+curve(linReg(x, beta_0, beta_1, beta_2, beta_3, beta_4), add = TRUE, lwd = 2, col = "#CD212A")
+```
+
+Ok, beautiful, but what are the residuals?
+
+```{r}
+#### Correlated model
+n_sampling = fit$metadata()$iter_sampling
+
+pred_total_volume = fit$draws("pred_total_volume")
+pred_Vb_Cr = fit$draws("pred_Vb_Cr_joined")
+
+pred_bole_volume = exp(pred_Vb_Cr[, , seq(1, 2*inra_dec[, .N] - 1, by = 2)])
+pred_crown_volume = exp(pred_Vb_Cr[, , seq(2, 2*inra_dec[, .N], by = 2)])
+
+## Predictions uncorrelated model
+pred_bole_volume_uncor = fit_uncor$draws("pred_bole_volume")
+pred_crown_volume_uncor = fit_uncor$draws("pred_crown_volume")
+pred_total_volume_uncor = fit_uncor$draws("pred_total_volume")
+
+dharma_helper = function(simResp, obs, ncol = n_sampling*n_chains)
+{
+	n_chains = dim(simResp)[2] # Number of successful chains
+
+	# Reshape simResp as a matrix nobs x n_repetition
+	simResp_matrix = matrix(data = 0, nrow = length(obs), ncol = ncol)
+	for (i in seq_along(obs))
+		for (chain in 1:n_chains)
+			simResp_matrix[i, ] = simResp[, chain, i] # One line of n_sampling*n_chains simulations per observation
+
+	sim_dharma = createDHARMa(simulatedResponse = simResp_matrix,
+		observedResponse = obs,
+		fittedPredictedResponse = apply(simResp, MARGIN = 3, median),
+		integerResponse = FALSE)
+	
+	return (sim_dharma)
+}
+
+#### Residuals correlated model
+## Bole volume
+sim_dharma = dharma_helper(simResp = pred_bole_volume, obs = inra_dec[, bole_volume_m3])
+plot(sim_dharma, quantreg = TRUE)
+plotResiduals(sim_dharma, inra_dec[, circumference_m], quantreg = TRUE)
+
+## Crown volume
+sim_dharma = dharma_helper(simResp = pred_crown_volume, obs = inra_dec[, crown_volume_m3])
+plot(sim_dharma, quantreg = TRUE)
+plotResiduals(sim_dharma, inra_dec[, circumference_m], quantreg = TRUE)
+
+## Total volume
+sim_dharma = dharma_helper(simResp = pred_total_volume, obs = inra_dec[, total_volume_m3])
+plot(sim_dharma, quantreg = TRUE)
+plotResiduals(sim_dharma, inra_dec[, circumference_m], quantreg = TRUE)
+
+#### Residuals uncorrelated model
+## Bole volume
+sim_dharma = dharma_helper(simResp = pred_bole_volume_uncor, obs = inra_dec[, bole_volume_m3])
+plot(sim_dharma, quantreg = TRUE)
+plotResiduals(sim_dharma, inra_dec[, circumference_m], quantreg = TRUE)
+
+## Crown volume
+sim_dharma = dharma_helper(simResp = pred_crown_volume_uncor, obs = inra_dec[, crown_volume_m3])
+plot(sim_dharma, quantreg = TRUE)
+plotResiduals(sim_dharma, inra_dec[, circumference_m], quantreg = TRUE)
+
+## Total volume
+sim_dharma = dharma_helper(simResp = pred_total_volume_uncor, obs = inra_dec[, total_volume_m3])
+plot(sim_dharma, quantreg = TRUE)
+plotResiduals(sim_dharma, inra_dec[, circumference_m], quantreg = TRUE)
+```
+
+## Simulate data
+I use what the model found in the previous section in order to simulate data and then fit a correlated and non-correlated model.
+
+```{r}
+#### Create data following our stan model for real case scenario
+## Get the parameters
+varCov_mat = matrix(data = apply(X = fit$draws("Sigma"), MARGIN = 3, FUN = mean), ncol = 2, nrow = 2)
+
+avg = function(x, params_b, params_c)
+	return (c(powReg(x, p1 = params_b[1], p2 = params_b[2], p3 = params_b[3], shift = params_b[4]),
+		linReg(x, p1 = params_c[1], p2 = params_c[2], p3 = params_c[3], p4 = params_c[4], p5 = params_c[5])))
+
+params_b = c(apply(X = fit$draws(c("alpha_0", "alpha_1", "alpha_2")), MARGIN = 3, FUN = mean),
+	shift = min(log(stanData$circumference_m)))
+
+params_c = apply(X = fit$draws(c("beta_0", "beta_1", "beta_2", "beta_3", "beta_4")), MARGIN = 3, FUN = mean)
+
+## Create data
+data = data.table(circumference_m = stanData$circumference_m, v_bft = 0, v_crown = 0)
+
+set.seed(1969 - 08 - 18) # Woodstock seed
+for (i in seq_len(data[, .N]))
+	data[i, c("v_bft", "v_crown") := as.list(exp(MASS::mvrnorm(1, avg(log(circumference_m), params_b, params_c),
+		varCov_mat)))]
+
+stanData$bole_volume_m3 = data[, v_bft]
+stanData$crown_volume_m3 = data[, v_crown]
+```
+
+```{r}
+#### Fit models accouting for vs neglecting correlation
+## Fit both models
+if (!file.exists("fake_trunk-crown.rds"))
+{
+	fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4), max_treedepth = 12)
+
+	# Save results
+	fit$save_output_files(dir = "./", basename = paste0("fake_trunk-crown"), random = FALSE)
+	saveRDS(fit, "./fake_trunk-crown.rds")
+} else {
+	fit = readRDS("./fake_trunk-crown.rds")
+}
+
+if (!file.exists("fake_trunk-crown_uncor.rds"))
+{
+	fit_uncor = uncor$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4),
+		max_treedepth = 12)
+
+	# Save results
+	fit_uncor$save_output_files(dir = "./", basename = paste0("fake_trunk-crown_uncor"), random = FALSE)
+	saveRDS(fit_uncor, "./fake_trunk-crown_uncor.rds")
+} else {
+	fit_uncor = readRDS("./fake_trunk-crown_uncor.rds")
+}
+```
+
+```{r}
+#### Check the residuals
+n_sampling = fit$metadata()$iter_sampling
+
+pred_total_volume = fit$draws("pred_total_volume")
+pred_Vb_Cr = fit$draws("pred_Vb_Cr_joined")
+
+pred_bole_volume = exp(pred_Vb_Cr[, , seq(1, 2*inra_dec[, .N] - 1, by = 2)])
+pred_crown_volume = exp(pred_Vb_Cr[, , seq(2, 2*inra_dec[, .N], by = 2)])
+
+## Predictions uncorrelated model
+pred_bole_volume_uncor = fit_uncor$draws("pred_bole_volume")
+pred_crown_volume_uncor = fit_uncor$draws("pred_crown_volume")
+pred_total_volume_uncor = fit_uncor$draws("pred_total_volume")
+
+#### Residuals correlated model
+## Bole volume
+sim_dharma = dharma_helper(simResp = pred_bole_volume, obs = data[, v_bft])
+plot(sim_dharma, quantreg = TRUE)
+plotResiduals(sim_dharma, data[, circumference_m], quantreg = TRUE)
+
+## Crown volume
+sim_dharma = dharma_helper(simResp = pred_crown_volume, obs = data[, v_crown])
+plot(sim_dharma, quantreg = TRUE)
+plotResiduals(sim_dharma, data[, circumference_m], quantreg = TRUE)
+
+## Total volume
+sim_dharma = dharma_helper(simResp = pred_total_volume, obs = data[, v_bft + v_crown])
+plot(sim_dharma, quantreg = TRUE)
+plotResiduals(sim_dharma, data[, circumference_m], quantreg = TRUE)
+
+#### Residuals uncorrelated model
+## Bole volume
+sim_dharma = dharma_helper(simResp = pred_bole_volume_uncor, obs = data[, v_bft])
+plot(sim_dharma, quantreg = TRUE)
+plotResiduals(sim_dharma, data[, circumference_m], quantreg = TRUE)
+
+## Crown volume
+sim_dharma = dharma_helper(simResp = pred_crown_volume_uncor, obs = data[, v_crown])
+plot(sim_dharma, quantreg = TRUE)
+plotResiduals(sim_dharma, data[, circumference_m], quantreg = TRUE)
+
+## Total volume
+sim_dharma = dharma_helper(simResp = pred_total_volume_uncor, obs = data[, v_bft + v_crown])
+plot(sim_dharma, quantreg = TRUE)
+plotResiduals(sim_dharma, data[, circumference_m], quantreg = TRUE)
+```
