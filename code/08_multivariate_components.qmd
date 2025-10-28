@@ -58,8 +58,9 @@ format:
 <!-- Math commands -->
 \newcommand{\Vbft}{V_{\text{BFT}}}
 \newcommand{\Fbft}{F_{\text{BFT}}}
+\newcommand{\Fcrn}{F_{\text{CRN}}}
 
-\newcommand{\Vcro}{V_{\text{crown}}}
+\newcommand{\Vcrn}{V_{\text{crown}}}
 
 \newcommand{\Vtot}{V_{\text{tot}}}
 
@@ -96,6 +97,19 @@ linReg = function(x, p1, p2, p3, p4, p5)
 
 powReg = function(x, p1, p2, p3, shift)
 	return(p1 + p2*(x - shift)^p3)
+
+florence_bft = function(c, h, hdec, params, bounds)
+{
+	fnew = params[1, alpha] + params[1, beta]*c + params[1, gamma]*sqrt(c)/hdec +
+		params[1, delta]*sqrt(hdec)/(c^2*h) + params[1, eta]*(1 - hdec/h)
+
+	fnew = max(fnew, bounds[1, bft_min])
+	fnew = min(fnew, bounds[1, bft_max])
+
+	# Remember that fnew_old is bounded by f_lim, and new = (1 - 1.3/h)^2 old
+	return(c^2*h/(4*pi) * min(fnew/(1 - 1.3/h)^2, bounds[1, bft_lim]))
+	# return(c^2*h/(4*pi) * fnew/(1 - 1.3/h)^2)
+}
 ```
 
 ```{r}
@@ -119,19 +133,55 @@ path_data = paste0(mnt_point, "/data/")
 if (!dir.exists(path_data))
 	stop(paste0("Folder <", path_data, "> does not exist! Did you run 01_prepare_data.qmd?"))
 
-# opt = "_full"
-opt = "_inra"
+opt = "_full"
+# opt = "_inra"
 
 ## Loading
-stanData = readRDS(paste0(path_data, "stanData_nfi-inra", opt, ".rds"))
-# forest_dt = readRDS(paste0(path_data, "nfi-inra_dt", opt, ".rds"))
-inra = readRDS(paste0(path_data, "nfi-inra_dt", opt, ".rds"))
+forest_dt = readRDS(paste0(path_data, "nfi-inra_dt", opt, ".rds"))
 
 ## Subset data
-# nfi = forest_dt["nfi"]
-# nfi = nfi[, n_indiv := .N, by = speciesName_sci]
-# nfi = nfi[n_indiv > 5000]
+inra = forest_dt[origin_data == "inra"] 
+nfi = forest_dt[origin_data == "nfi"]
+nfi = nfi[, n_indiv := .N, by = speciesName_sci]
+nfi = nfi[n_indiv > 10000]
 
+setkey(inra, speciesName_sci)
+setkey(nfi, speciesName_sci)
+
+rm(forest_dt)
+
+## Load profiles
+profiles = readRDS(paste0(mnt_point, "data/profiles_oudin.rds"))
+```
+
+Estimation of $\hdec$ from the profiles.
+```{r}
+## Rk: A decrease of 10% of circumference (i.e., C_{n + 1} = 0.9 C_n) implies 19% in volume (0.9^2 = 0.81)
+profiles[, decrease_10pct := {prev = data.table::shift(log_volume_m3, type = "lag")
+	(log_volume_m3 / prev) <= 0.81}, by = unique_id]
+
+## Rk It is almost sure that the circumference decreases by 10% between 0.5 and 1.5 m height, because of
+#		butt swell (empattement). Moreover, measures starts from 1.3 m at the french NFI
+profiles = profiles[at_height > 1.5]
+
+# For each unique_id, keep only the first TRUE as TRUE, which will indicate taper height (hdec)
+profiles[, first_true := FALSE]
+
+profiles[decrease_10pct == TRUE, 
+	first_true := .I == .I[1],  # mark only the first TRUE row within each group
+	by = unique_id]
+
+# plot(profiles[1:16, at_height], profiles[1:16, log_volume_m3], pch = 19, cex = 0.75, col = "#CD212A")
+
+profiles = profiles[(first_true), .(unique_id, hdec = at_height + 0.5)] # +0.5 because measured every metre
+```
+
+Add estimated taper height to `inra`
+```{r}
+inra[unique_id %in% profiles$unique_id]
+
+inra = merge.data.table(inra, profiles, by = "unique_id", all.x = TRUE)
+inra[!is.na(hdec), .N, by = speciesName_sci]
 setkey(inra, speciesName_sci)
 ```
 
@@ -140,6 +190,97 @@ setkey(inra, speciesName_sci)
 The ratio model is dangerous! Check how steep is the curve for small value of $\Vbft$... That means a hypersensitive model for small trees!
 
 Therefore, I need to change the paradigm! In the @sec-univariate_BFT I recreate the model of Florence to estimate $\Vbft$ from three variables: $c$, $h$, and, $\hdec'$ (which is either $\hdec$ or $\htot$).
+
+## Apply the model of Florence to Emerge data
+
+In this section, I apply the model of FLorence to the Emerge data. The parameters' value can be found in `rapport_tarifs.pdf`, p. 33 (annexe 2).
+
+```{r}
+#### Coeff data table
+coeffs_3 = data.table(
+	speciesName_sci = c("Quercus robur", "Quercus petraea", "Fagus sylvatica", "Pinus pinaster",
+		"Pinus sylvestris", "Abies alba", "Picea abies"),
+	tarif = c("02", "03", "09", "51", "52", "61", "62"),
+	alpha = c(0.4139968, 0.4439589, 0.3962135, 0.3625385, 0.3826291, 0.4333959, 0.4468885),
+	beta = c(-0.0069499, -0.0203087, 0.0004032, 0.0172278, 0.0057494, 0.0043911, -0.0315384),
+	gamma = c(-0.3001131, -0.2944278, -0.2723268, -0.1878927, -0.2250570, -0.2955610, -0.3736340),
+	delta = c(-0.0348160, -0.0390426, -0.0353373, -0.0238314, -0.0247413, -0.0305603, -0.0321009),
+	eta = c(-0.0075658, -0.0140190, -0.0166928, -0.0183863, -0.0026865, -0.0089731, 0.0188160),
+	bft_min = c(0.15, 0.15, 0.13, 0.17, 0.17, 0.17, 0.20),
+	bft_max = c(0.44, 0.43, 0.43, 0.40, 0.42, 0.48, 0.43),
+	bft_lim = c(0.8, 0.8, 0.9, 0.9, 1.0, 0.9, 0.9),
+	key = "speciesName_sci"
+)
+```
+
+```{r}
+#### Check estimated hdec of Emerge vs measured hdec from nfi for Fagus sylvatica
+hdec_dt = inra[speciesName_sci == "Fagus sylvatica" & !is.na(hdec)]
+
+plot(nfi["Fagus sylvatica", circumference_m], nfi["Fagus sylvatica", taper_height], pch = 19,
+	cex = 0.75, xlab = "Circumference", ylab = "Taper height", axes = FALSE, col = "#0F7BA2")
+points(hdec_dt[, circumference_m], hdec_dt[, hdec], col = "#FAB255", pch = 19, cex = 0.75)
+axis(1)
+axis(2, las = 1)
+
+#### Compute the taper volume for 7 species
+inra[speciesName_sci == "Fagus sylvatica" & !is.na(hdec),
+	bole_volume_m3_gohon := florence_bft(circumference_m, height, hdec,
+		params = coeffs_3["Fagus sylvatica", .(alpha, beta, gamma, delta, eta)],
+		bounds = coeffs_3["Fagus sylvatica", .(bft_min, bft_max, bft_lim)])]
+
+plot(inra[, bole_volume_m3_gohon], inra[, bole_volume_m3], pch = 19, cex = 0.75,
+	xlab = "Pred", ylab = "Obs", axes = FALSE)
+axis(1)
+axis(2, las = 1)
+abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
+
+inra[, bole_volume_m3_gohon := NULL]
+```
+
+## Explore the crown
+
+In this section, I look at the relation there can be between the crown and tree dimensions (circumference, height, and taper height).
+
+```{r}
+inra_dec = inra[!is.na(hdec)]
+
+plot(inra_dec[, circumference_m], inra_dec[, crown_volume_m3], pch = 19,
+	cex = 0.35, xlab = "Circumference", ylab = "Crown volume", axes = FALSE)
+axis(1)
+axis(2, las = 1)
+
+plot(inra_dec[, hdec], inra_dec[, crown_volume_m3], pch = 19,
+	cex = 0.35, xlab = "Taper height", ylab = "Crown volume", axes = FALSE)
+axis(1)
+axis(2, las = 1)
+```
+
+Not that convincing... Let us try to use a form factor similar to the one used for bole volume:
+$$
+	\Fcrn = \frac{4\pi \Vcrn}{c^2 h} \left( 1 - \frac{1.3}{h} \right)^2
+$$
+
+```{r}
+inra[, Fcrn := 4*pi*crown_volume_m3/(circumference_m^2*height)*(1 - 1.3/height)^2]
+inra[, Fcrn_sphere := 6*pi^2*crown_volume_m3/circumference_m^3]
+inra_dec = inra[!is.na(hdec)]
+
+plot(inra_dec[, circumference_m], inra_dec[, crown_volume_m3], pch = 19,
+	cex = 0.35, xlab = "Circumference", ylab = "Crown volume", axes = FALSE)
+axis(1)
+axis(2, las = 1)
+
+plot(inra_dec[, hdec], inra_dec[, crown_volume_m3], pch = 19,
+	cex = 0.35, xlab = "Taper height", ylab = "Crown volume", axes = FALSE)
+axis(1)
+axis(2, las = 1)
+
+plot(inra_dec[, height], inra_dec[, crown_volume_m3], pch = 19,
+	cex = 0.35, xlab = "Taper height", ylab = "Crown volume", axes = FALSE)
+axis(1)
+axis(2, las = 1)
+```
 
 ## Fit model Florence{#sec-univariate_BFT}
 
@@ -151,25 +292,280 @@ $${#eq-flo_univariate}
 For the code and equation, see `rapport_tarifs.Rmd`, line 638.
 
 ```{r}
-# model = cmdstan_model("./florence_univariate.stan")
+model = cmdstan_model("./florence_univariate.stan")
 
-# stanData = list(
-# 	N = nfi["Fagus sylvatica", .N],
+stanData = list(
+	N = nfi["Fagus sylvatica", .N],
 
-# 	circumference_m = nfi["Fagus sylvatica", circumference_m],
-# 	height = nfi["Fagus sylvatica", height],
-# 	hdec = nfi["Fagus sylvatica", taper_height],
+	circumference_m = nfi["Fagus sylvatica", circumference_m],
+	height = nfi["Fagus sylvatica", height],
+	hdec = nfi["Fagus sylvatica", taper_height],
 
-# 	bole_volume_m3 = nfi["Fagus sylvatica", bole_volume_m3]
-# )
+	bole_volume_m3 = nfi["Fagus sylvatica", bole_volume_m3]
+)
 
-# fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4), max_treedepth = 12)
+n_chains = 4
+
+fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4), max_treedepth = 12)
+
+fit$save_output_files(dir = "./", basename = paste0("florence-fagSyl"), random = FALSE)
+saveRDS(fit, "florence-fagSyl.rds")
+
+#### Check posterior
+lazyPosterior(fit$draws("alpha"), val1 = coeffs_3["Fagus sylvatica", alpha])
+lazyPosterior(fit$draws("beta_"), val1 = coeffs_3["Fagus sylvatica", beta])
+lazyPosterior(fit$draws("gamma"), val1 = coeffs_3["Fagus sylvatica", gamma])
+lazyPosterior(fit$draws("delta"), val1 = coeffs_3["Fagus sylvatica", delta])
+lazyPosterior(fit$draws("eta"), val1 = coeffs_3["Fagus sylvatica", eta])
+
+lazyPosterior(fit$draws("sigma"), fun = dgamma, shape = 0.1, rate = 0.1)
+
+fagSyl = rbindlist(list(florence = coeffs_3["Fagus sylvatica", .(alpha, beta, gamma, delta, eta)],
+	amael = data.table(
+		alpha = mean(fit$draws("alpha")),
+		beta = mean(fit$draws("beta_")),
+		gamma = mean(fit$draws("gamma")),
+		delta = mean(fit$draws("delta")),
+		eta = mean(fit$draws("eta")))
+), idcol = "model")
+
+#### Check posterior prediction
+getVol = function(nfi_sp, k, fit)
+{
+	str = paste0("pred_formFactor[", k, "]")
+	convert = nfi_sp[k, circumference_m^2]*nfi_sp[k, height]/(4*pi*(1 - 1.3/nfi_sp[k, height])^2)
+	return (fit$draws(str)*convert)
+}
+
+k = nfi["Fagus sylvatica", which.max(bole_volume_m3)]
+draws = getVol(nfi["Fagus sylvatica"], k, fit)
+lazyPosterior(draws, val1 = nfi["Fagus sylvatica"][k, bole_volume_m3])
+
+k = nfi["Fagus sylvatica", which.min(bole_volume_m3)]
+draws = getVol(nfi["Fagus sylvatica"], k, fit)
+lazyPosterior(draws, val1 = nfi["Fagus sylvatica"][k, bole_volume_m3])
+
+k = 68
+draws = getVol(nfi["Fagus sylvatica"], k, fit)
+lazyPosterior(draws, val1 = nfi["Fagus sylvatica"][k, bole_volume_m3])
+
+#### Pred on Inra data
+genQ = cmdstan_model("./florence_univariate_genQ.stan")
+stanData_gen = list(
+	N = inra_dec["Fagus sylvatica", .N],
+
+	circumference_m = inra_dec["Fagus sylvatica", circumference_m],
+	height = inra_dec["Fagus sylvatica", height],
+	hdec = inra_dec["Fagus sylvatica", hdec],
+
+	bole_volume_m3 = inra_dec["Fagus sylvatica", bole_volume_m3]
+)
+
+sim = genQ$generate_quantities(fit, data = stanData_gen, seed = 123, parallel_chains = min(n_chains, 4))
+
+k = 12
+str = paste0("pred_bole[", k, "]")
+lazyPosterior(sim$draws(str), val1 = inra_dec["Fagus sylvatica"][k, bole_volume_m3])
+
+mean_pred = apply(X = sim$draws("pred_bole"), MARGIN = 3, FUN = mean)
+plot(mean_pred, inra_dec["Fagus sylvatica", bole_volume_m3], pch = 19, cex = 0.3,
+	xlab = "Pred", ylab = "Obs", axes = FALSE)
+axis(1)
+axis(2, las = 1)
+abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
 ```
 
+### Try with heteroskedasticity
+
+I model the variance by:
+$$
+	\sigma = a (c^2 h)^b,
+$$
+where $a > 0$ and $b$ are two parameters to estimate.
+
+```{r}
+model = cmdstan_model("./florence_univariate_heterosked.stan")
+
+sam = sample(seq_len(nfi["Fagus sylvatica", .N]), size = 6e3, replace = FALSE)
+nfi_sam = nfi["Fagus sylvatica"][sam]
+
+stanData = list(
+	N = 6e3, # nfi["Fagus sylvatica", .N],
+
+	circumference_m = nfi_sam[, circumference_m],
+	height = nfi_sam[, height],
+	hdec = nfi_sam[, taper_height],
+
+	bole_volume_m3 = nfi_sam[, bole_volume_m3]
+)
+
+n_chains = 4
+
+fit_heterosked = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4),
+	max_treedepth = 12)
+
+fit_heterosked$save_output_files(dir = "./", basename = paste0("florence-fagSyl_heterosked"), random = FALSE)
+saveRDS(fit_heterosked, "florence-fagSyl_heterosked.rds")
+
+fagSyl = rbindlist(list(fagSyl,
+	data.table(
+		model = "heterosked",
+		alpha = mean(fit_heterosked$draws("alpha")),
+		beta = mean(fit_heterosked$draws("beta_")),
+		gamma = mean(fit_heterosked$draws("gamma")),
+		delta = mean(fit_heterosked$draws("delta")),
+		eta = mean(fit_heterosked$draws("eta")))
+))
+
+a = mean(fit_heterosked$draws("a"))
+b = mean(fit_heterosked$draws("b"))
+
+sigma_fct = function(x, a, b)
+	return (a*x^b)
+
+range(stanData$circumference_m^2*stanData$height)
+curve(sigma_fct(x, a, b), to = 700)
+
+genQ = cmdstan_model("./florence_univariate_heterosked_genQ.stan")
+sim = genQ$generate_quantities(fit_heterosked, data = stanData_gen, seed = 123, parallel_chains = min(n_chains, 4))
+
+k = 12
+str = paste0("pred_bole[", k, "]")
+lazyPosterior(sim$draws(str), val1 = inra_dec["Fagus sylvatica"][k, bole_volume_m3])
+
+mean_pred = apply(X = sim$draws("pred_bole"), MARGIN = 3, FUN = mean)
+plot(mean_pred, inra_dec["Fagus sylvatica", bole_volume_m3], pch = 19, cex = 0.3,
+	xlab = "Pred", ylab = "Obs", axes = FALSE)
+axis(1)
+axis(2, las = 1)
+abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
+```
+
+## Heatmaps
+
+```{r}
+inra[, .N, by = speciesName_sci]
+selected_sp = 2
+selected_sp = c("Abies alba", "Fagus sylvatica", "Quercus petraea")[selected_sp]
+heatmap_bole = unique(inra[selected_sp, .(speciesName_sci, circumference_m, height, bole_volume_m3)],
+	by = c("speciesName_sci", "circumference_m", "height"))
+# fwrite(heatmap_bole, "./pgfplots/c_h_vbole.csv")
+heatmap_crown = unique(inra[selected_sp, .(speciesName_sci, circumference_m, height, crown_volume_m3)],
+	by = c("speciesName_sci", "circumference_m", "height"))
+# fwrite(heatmap_crown, "./pgfplots/c_h_vcrown.csv")
+
+## Bole volume
+heatmap_bole[, c2h := circumference_m^2*height]
+heatmap_bole[, ratio := bole_volume_m3/c2h*(1 - 1.3/height)^2]
+
+plot(heatmap_bole[, c2h], heatmap_bole[, bole_volume_m3], axes = FALSE, pch = 19, cex = 0.75,
+	xlab = "Cylinder", ylab = "Bole volume")
+axis(1)
+axis(2, las = 1)
+
+plot(heatmap_bole[, circumference_m], heatmap_bole[, bole_volume_m3], axes = FALSE, pch = 19, cex = 0.75,
+	xlab = "Circumference", ylab = "Bole volume")
+axis(1)
+axis(2, las = 1)
+
+plot(heatmap_bole[, log(circumference_m)], heatmap_bole[, log(bole_volume_m3)], axes = FALSE, pch = 19, cex = 0.75,
+	xlab = "Circumference (log)", ylab = "Bole volume (log)")
+axis(1)
+axis(2, las = 1)
+
+plot(heatmap_bole[, height], heatmap_bole[, bole_volume_m3], axes = FALSE, pch = 19, cex = 0.75,
+	xlab = "Height", ylab = "Bole volume")
+axis(1)
+axis(2, las = 1)
+
+plot(heatmap_bole[, circumference_m], heatmap_bole[, ratio], axes = FALSE, pch = 19, cex = 0.75,
+	xlab = "Circumference", ylab = "Ratio")
+axis(1)
+axis(2, las = 1)
+
+## Crown volume
+heatmap_crown[, c2h := circumference_m^2*height]
+heatmap_crown[, ratio := crown_volume_m3/c2h]
+
+plot(heatmap_crown[, c2h], heatmap_crown[, crown_volume_m3], axes = FALSE, pch = 19, cex = 0.75,
+	xlab = "Cylinder", ylab = "Crown volume")
+axis(1)
+axis(2, las = 1)
+
+plot(heatmap_crown[, circumference_m], heatmap_crown[, crown_volume_m3], axes = FALSE, pch = 19, cex = 0.75,
+	xlab = "Circumference", ylab = "Crown volume")
+axis(1)
+axis(2, las = 1)
+
+plot(heatmap_crown[, log(circumference_m)], heatmap_crown[, log(crown_volume_m3)], axes = FALSE, pch = 19,
+	cex = 0.75, xlab = "Circumference (log)", ylab = "Crown volume (log)")
+axis(1)
+axis(2, las = 1)
+
+plot(heatmap_crown[, height], heatmap_crown[, crown_volume_m3], axes = FALSE, pch = 19, cex = 0.75,
+	xlab = "Height", ylab = "Crown volume")
+axis(1)
+axis(2, las = 1)
+
+plot(heatmap_crown[, circumference_m], heatmap_crown[, ratio], axes = FALSE, pch = 19, cex = 0.75,
+	xlab = "Circumference", ylab = "Ratio")
+axis(1)
+axis(2, las = 1)
+
+
+
+plot(nfi[selected_sp, circumference_m^2*height], nfi[selected_sp, bole_volume_m3], axes = FALSE,
+	pch = 19, cex = 0.35, xlab = "Cylinder", ylab = "Bole volume", col = "#CD212A")
+points(inra[selected_sp, circumference_m^2*height], inra[selected_sp, bole_volume_m3],
+	pch = 19, cex = 0.35, col = "#FAB255")
+axis(1)
+axis(2, las = 1)
+
+
+plot(inra[selected_sp, plot_id], inra[selected_sp, crown_volume_m3], axes = FALSE,
+	pch = 19, cex = 0.75, xlab = "Bole volume", ylab = "Crown volume")
+axis(1)
+axis(2, las = 1)
+
+
+michMenten = function(x, p1, p2)
+	return(x*p1/(p2 + x))
+
+curve(michMenten(x, 1, 2), to = 10)
+
+for (current_sp in heatmap_bole[, unique(speciesName_sci)])
+{
+	si = interp(x = heatmap_crown[current_sp, circumference_m], y = heatmap_crown[current_sp, height],
+		z = heatmap_bole[current_sp, bole_volume_m3], method = "linear", duplicate = "mean")
+
+	filled.contour(si,
+		plot.axes = {
+			axis(1)
+			axis(2, las = 1)
+			contour(si, add = TRUE, lwd = 2, axes = NULL)
+		}, xlab = "Taper diametre", ylab = "Taper height", main = current_sp, frame.plot = FALSE,
+		color.palette = colorRampPalette(met.brewer("Hiroshige", direction = -1))
+	)
+
+	si = interp(x = heatmap_crown[current_sp, circumference_m], y = heatmap_crown[current_sp, height],
+		z = heatmap_crown[current_sp, crown_volume_m3], method = "linear", duplicate = "mean")
+
+	filled.contour(si,
+		plot.axes = {
+			axis(1)
+			axis(2, las = 1)
+			contour(si, add = TRUE, lwd = 2, axes = NULL)
+		}, xlab = "Circumference", ylab = "Height", main = current_sp, frame.plot = FALSE,
+		color.palette = colorRampPalette(met.brewer("Hiroshige", direction = -1))
+	)
+}
+```
 
 ## Simple test of trunk-crown model
 ```{r}
+## Compile correlated and uncorrelated models
 model = cmdstan_model("./trunk-crown.stan")
+uncor = cmdstan_model("./crown-trunk_uncor.stan")
 
 stanData = list(
 	N = inra["Fagus sylvatica", .N],
@@ -182,7 +578,28 @@ stanData = list(
 
 n_chains = 4
 
-fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4), max_treedepth = 12)
+if (!file.exists("fagSyl_trunk-crown.rds"))
+{
+	fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4), max_treedepth = 12)
+
+	# Save results
+	fit$save_output_files(dir = "./", basename = paste0("fagSyl_trunk-crown"), random = FALSE)
+	saveRDS(fit, "./fagSyl_trunk-crown.rds")
+} else {
+	fit = readRDS("./fagSyl_trunk-crown.rds")
+}
+
+if (!file.exists("fagSyl_trunk-crown_uncor.rds"))
+{
+	fit_uncor = uncor$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4),
+		max_treedepth = 12)
+
+	# Save results
+	fit_uncor$save_output_files(dir = "./", basename = paste0("fagSyl_trunk-crown_uncor"), random = FALSE)
+	saveRDS(fit_uncor, "./fagSyl_trunk-crown_uncor.rds")
+} else {
+	fit_uncor = readRDS("./fagSyl_trunk-crown_uncor.rds")
+}
 ```
 
 ```{r}
@@ -197,6 +614,11 @@ pred_Vb_Cr = apply(X = fit$draws("pred_Vb_Cr_joined"), MARGIN = 3, FUN = mean)
 
 pred_bole_volume = exp(pred_Vb_Cr[seq(1, length(pred_Vb_Cr) - 1, by = 2)])
 pred_crown_volume = exp(pred_Vb_Cr[seq(2, length(pred_Vb_Cr), by = 2)])
+
+## Predictions uncorrelated model
+pred_bole_volume_uncor = apply(X = fit_uncor$draws("pred_bole_volume"), MARGIN = 3, FUN = mean)
+pred_crown_volume_uncor = apply(X = fit_uncor$draws("pred_crown_volume"), MARGIN = 3, FUN = mean)
+pred_total_volume_uncor = apply(X = fit_uncor$draws("pred_total_volume"), MARGIN = 3, FUN = mean)
 
 ## Bole volume
 plot(pred_bole_volume, inra["Fagus sylvatica", bole_volume_m3], pch = 19, cex = 0.75,
@@ -218,6 +640,29 @@ plot(pred_total_volume, inra["Fagus sylvatica", total_volume_m3], pch = 19, cex 
 axis(1)
 axis(2, las = 1)
 abline(a = 0, b = 1, col = "#CD212A", lwd = 2)
+
+########
+## Bole volume
+plot(pred_bole_volume_uncor, inra["Fagus sylvatica", bole_volume_m3], pch = 19, cex = 0.75,
+	xlab = "Pred bole", ylab = "Obs bole", axes = FALSE)
+axis(1)
+axis(2, las = 1)
+abline(a = 0, b = 1, col = "#CD212A", lwd = 2)
+
+## Bole volume
+plot(pred_crown_volume_uncor, inra["Fagus sylvatica", crown_volume_m3], pch = 19, cex = 0.75,
+	xlab = "Pred crown", ylab = "Obs crown", axes = FALSE)
+axis(1)
+axis(2, las = 1)
+abline(a = 0, b = 1, col = "#CD212A", lwd = 2)
+
+## Total volume
+plot(pred_total_volume_uncor, inra["Fagus sylvatica", total_volume_m3], pch = 19, cex = 0.75,
+	xlab = "Pred tot.", ylab = "Obs tot", axes = FALSE)
+axis(1)
+axis(2, las = 1)
+abline(a = 0, b = 1, col = "#CD212A", lwd = 2)
+########
 
 ## Fit on the log scale
 # Extract parameters
@@ -243,4 +688,92 @@ axis(1)
 axis(2, las = 1)
 curve(linReg(x, beta_0, beta_1, beta_2, beta_3, beta_4), add = TRUE, lwd = 2, col = "#FAB255")
 
+```
+
+## Simulate data
+I use what the model found in the previous section in order to simulate data and then fit a correlated and non-correlated model.
+
+```{r}
+#### Create data following our stan model for real case scenario
+## Get the parameters
+varCov_mat = matrix(data = apply(X = fit$draws("Sigma"), MARGIN = 3, FUN = mean), ncol = 2, nrow = 2)
+
+avg = function(x, params_b, params_c)
+	return (c(powReg(x, p1 = params_b[1], p2 = params_b[2], p3 = params_b[3], shift = params_b[4]),
+		linReg(x, p1 = params_c[1], p2 = params_c[2], p3 = params_c[3], p4 = params_c[4], p5 = params_c[5])))
+
+params_b = c(apply(X = fit$draws(c("alpha_0", "alpha_1", "alpha_2")), MARGIN = 3, FUN = mean),
+	shift = min(log(stanData$circumference_m)))
+
+params_c = apply(X = fit$draws(c("beta_0", "beta_1", "beta_2", "beta_3", "beta_4")), MARGIN = 3, FUN = mean)
+
+## Create data
+data = data.table(circumference_m = stanData$circumference_m, v_bft = 0, v_crown = 0)
+
+set.seed(1969 - 08 - 18) # Woodstock seed
+for (i in seq_len(data[, .N]))
+	data[i, c("v_bft", "v_crown") := as.list(exp(MASS::mvrnorm(1, avg(log(circumference_m), params_b, params_c),
+		varCov_mat)))]
+
+stanData$bole_volume_m3 = data[, v_bft]
+stanData$crown_volume_m3 = data[, v_crown]
+```
+
+```{r}
+#### Fit models accouting for vs neglecting correlation
+## Fit both models
+if (!file.exists("fake_trunk-crown.rds"))
+{
+	fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4), max_treedepth = 12)
+
+	# Save results
+	fit$save_output_files(dir = "./", basename = paste0("fake_trunk-crown"), random = FALSE)
+	saveRDS(fit, "./fake_trunk-crown.rds")
+} else {
+	fit = readRDS("./fake_trunk-crown.rds")
+}
+
+if (!file.exists("fake_trunk-crown_uncor.rds"))
+{
+	fit_uncor = uncor$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4),
+		max_treedepth = 12)
+
+	# Save results
+	fit_uncor$save_output_files(dir = "./", basename = paste0("fake_trunk-crown_uncor"), random = FALSE)
+	saveRDS(fit_uncor, "./fake_trunk-crown_uncor.rds")
+} else {
+	fit_uncor = readRDS("./fake_trunk-crown_uncor.rds")
+}
+```
+
+```{r}
+#### Check the posteriors
+# Parameter alpha 0
+lazyPosterior(fit$draws("alpha_0"), val1 = params_b["alpha_0"])
+lazyPosterior(fit_uncor$draws("alpha_0"), val1 = params_b["alpha_0"])
+
+# Parameter beta 4
+lazyPosterior(fit$draws("beta_4"), val1 = params_c["beta_4"])
+lazyPosterior(fit_uncor$draws("beta_4"), val1 = params_c["beta_4"])
+
+# Prediction v_bft, v_crown, and the sum, v_tot for the ith individual
+i = 253
+if (i < 1 || i > data[, .N])
+	stop("Individual out of range")
+
+v_bft = exp(fit$draws(paste0("pred_Vb_Cr_joined[1,", i, "]")))
+v_bft_uncor = fit_uncor$draws(paste0("pred_bole_volume[", i, "]"))
+v_crown = exp(fit$draws(paste0("pred_Vb_Cr_joined[2,", i, "]")))
+v_crown_uncor = fit_uncor$draws(paste0("pred_crown_volume[", i, "]"))
+v_tot = fit$draws(paste0("pred_total_volume[", i, "]"))
+v_tot_uncor = v_bft_uncor + v_crown_uncor
+
+lazyPosterior(v_bft, val1 = data[i, v_bft])
+lazyPosterior(v_bft_uncor, val1 = data[i, v_bft])
+
+lazyPosterior(v_crown, val1 = data[i, v_crown])
+lazyPosterior(v_crown_uncor, val1 = data[i, v_crown])
+
+lazyPosterior(v_tot, val1 = data[i, v_bft + v_crown])
+lazyPosterior(v_tot_uncor, val1 = data[i, v_bft + v_crown])
 ```
