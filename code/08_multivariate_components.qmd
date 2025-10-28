@@ -221,27 +221,26 @@ coeffs_3 = data.table(
 
 ```{r}
 #### Check estimated hdec of Emerge vs measured hdec from nfi for Fagus sylvatica
-hdec_dt = inra[speciesName_sci == "Fagus sylvatica" & !is.na(hdec)]
+inra_dec = inra["Fagus sylvatica"][!is.na(hdec) & !(presence_NA)]
 
 plot(nfi["Fagus sylvatica", circumference_m], nfi["Fagus sylvatica", taper_height], pch = 19,
 	cex = 0.75, xlab = "Circumference", ylab = "Taper height", axes = FALSE, col = "#0F7BA2")
-points(hdec_dt[, circumference_m], hdec_dt[, hdec], col = "#FAB255", pch = 19, cex = 0.75)
+points(inra_dec[, circumference_m], inra_dec[, hdec], col = "#FAB255", pch = 19, cex = 0.75)
 axis(1)
 axis(2, las = 1)
 
 #### Compute the taper volume for 7 species
-inra[speciesName_sci == "Fagus sylvatica" & !is.na(hdec),
-	bole_volume_m3_gohon := florence_bft(circumference_m, height, hdec,
+inra_dec[, bole_volume_m3_gohon := florence_bft(circumference_m, height, hdec,
 		params = coeffs_3["Fagus sylvatica", .(alpha, beta, gamma, delta, eta)],
 		bounds = coeffs_3["Fagus sylvatica", .(bft_min, bft_max, bft_lim)])]
 
-plot(inra[, bole_volume_m3_gohon], inra[, bole_volume_m3], pch = 19, cex = 0.75,
+plot(inra_dec[, bole_volume_m3_gohon], inra_dec[, bole_volume_m3], pch = 19, cex = 0.75,
 	xlab = "Pred", ylab = "Obs", axes = FALSE)
 axis(1)
 axis(2, las = 1)
 abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
 
-inra[, bole_volume_m3_gohon := NULL]
+inra_dec[, bole_volume_m3_gohon := NULL]
 ```
 
 ### Fit model Florence{#sec-univariate_BFT}
@@ -267,10 +266,10 @@ stanData = list(
 )
 
 n_chains = 4
-fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4), max_treedepth = 12)
 
 if (!file.exists("florence-fagSyl.rds"))
 {
+	fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4), max_treedepth = 12)
 	fit$save_output_files(dir = "./", basename = paste0("florence-fagSyl"), random = FALSE)
 	saveRDS(fit, "florence-fagSyl.rds")
 } else {
@@ -360,11 +359,10 @@ stanData = list(
 
 n_chains = 4
 
-fit_heterosked = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4),
-	max_treedepth = 12)
-
 if (!file.exists("florence-fagSyl_heterosked.rds"))
 {
+	fit_heterosked = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4),
+		max_treedepth = 12)
 	fit_heterosked$save_output_files(dir = "./", basename = paste0("florence-fagSyl_heterosked"), random = FALSE)
 	saveRDS(fit_heterosked, "florence-fagSyl_heterosked.rds")
 } else {
@@ -405,7 +403,7 @@ fagSyl |>
 	) |>
 	fmt_number(
 		columns = ends_with("a"),
-		decimals = 2
+		decimals = 4
 	)
 ```
 
@@ -439,8 +437,6 @@ abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
 In this section, I look at the relation there can be between the crown and tree dimensions (circumference, height, and taper height).
 
 ```{r}
-inra_dec = inra["Fagus sylvatica"][!is.na(hdec) & !(presence_NA)]
-
 lim = quantile(inra_dec[, hdec], c(0.25, 0.5, 0.75))
 inra_dec[, colour := met.brewer("Egypt")[1]]
 inra_dec[(lim["25%"] < hdec) & (hdec <= lim["50%"]), colour := met.brewer("Egypt")[2]]
@@ -515,3 +511,54 @@ axis(2, las = 1)
 ## Simple test of crown model
 
 I will try a crown model with a hierarchy at the taper height level (try also with height and more values!). This model will use $\log(c)$ to predict $\log(\Vcrn)$.
+
+```{r}
+#### Prepare the data
+## Compute the indices
+# Reorder data
+setorder(inra_dec, hdec)
+
+# Indices
+indices = inra_dec[, .(start = .I[1], end = .I[.N]), by = .(colour)]
+indices[, class := c("small", "med", "tall", "very tall")]
+```
+
+And now, the test of the crown model...
+```{r}
+model = cmdstan_model("./crown.stan")
+
+stanData = list(
+	N = inra_dec[, .N],
+	N_group = indices[, .N],
+	start_ind = indices[, start],
+	end_ind = indices[, end],
+	circumference_m = inra_dec[, circumference_m],
+	crown_volume_m3 = inra_dec[, crown_volume_m3]
+)
+
+n_chains = 4
+
+if (!file.exists("crown.rds"))
+{
+	fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4),
+		max_treedepth = 12)
+	fit$save_output_files(dir = "./", basename = paste0("crown"), random = FALSE)
+	saveRDS(fit, "crown.rds")
+} else {
+	fit = readRDS("crown.rds")
+}
+```
+
+And here are few posterior stuff
+
+```{r}
+pred = apply(X = fit$draws("pred_crown"), FUN = mean, MARGIN = 3)
+
+plot(pred, inra_dec[, crown_volume_m3], pch = 19, cex = 0.35, col = inra_dec[, colour],
+	xlab = "Pred", ylab = "Obs", axes = FALSE)
+legend(x = "topleft", legend = c("small", "med", "tall", "very tall"), fill = met.brewer("Egypt")[1:4])
+axis(1)
+axis(2, las = 1)
+abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
+```
+
