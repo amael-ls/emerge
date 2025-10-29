@@ -1,0 +1,61 @@
+\begin{tikzpicture}
+\begin{axis}[
+	xlabel={\( \Vbft \) (pred)},
+	ylabel={\( \Vbft \) (obs)},
+	tick label style={font=\small},
+	label style={font=\small},
+	width=6.5cm,
+	height=6.5cm,
+	axis on top,
+	axis lines=left,
+	tick align=outside,
+	legend style={
+		draw=none,
+		fill=none,
+		font=\small,
+		at={(0, -0.3)},
+		anchor=north west,
+		/tikz/inner sep=1pt
+	},
+	% legend cell align=left,
+	legend columns = 4,
+	% xtick={-1,-0.5,0,0.5,1},
+	% xticklabels={-1,-0.5,0,0.5,1},
+	% ytick={0,0.5,1,.5},
+	% yticklabels={0,0.5,1,.5},
+	colormap = {egypt}{
+		HTML = (DD5129)
+		HTML = (0F7BA2)
+		HTML = (43B284)
+		HTML = (FAB255)
+	}
+]
+\addlegendimage{only marks,mark=*,mark size=1.5pt,fill=egyptRed,draw=egyptRed},
+\addlegendentry{Small},
+\addlegendimage{only marks,mark=*,mark size=1.5pt,fill=egyptBlue,draw=egyptBlue},
+\addlegendentry{Median},
+\addlegendimage{only marks,mark=*,mark size=1.5pt,fill=egyptGreen,draw=egyptGreen},
+\addlegendentry{Tall},
+\addlegendimage{only marks,mark=*,mark size=1.5pt,fill=egyptYellow,draw=egyptYellow},
+\addlegendentry{Very tall},
+\addplot[
+	scatter,
+	only marks,
+	mark=*,
+	mark size=.75pt,
+	point meta = explicit,
+	scatter/use mapped color={
+		fill=mapped color,
+		draw=mapped color
+	},
+] table[
+	x=bole_volume_m3_gohon,
+	y=bole_volume_m3,
+	meta = class,
+	col sep=comma
+] {inra_dec.csv};
+
+\addplot[domain = 0:7, mark = none, thick] {x};
+
+\end{axis}
+\end{tikzpicture}
