@@ -1,0 +1,289 @@
+\documentclass[sectiontocframe default=off, aspectratio=169]{beamer}
+
+%%%%%%%%%%%%%%%%%%%    PACKAGES    %%%%%%%%%%%%%%%%%%%
+%% Font
+\usepackage{fontspec}
+	\setmainfont{TexGyrePagella}
+
+\usepackage{fontawesome5}
+
+\usepackage{unicode-math}
+	\setmathfont{TexGyrePagella-math}
+
+%% Languages
+\usepackage{polyglossia}
+	\setdefaultlanguage[variant=british]{english}
+
+%% Bibliography
+\usepackage[style = authoryear, maxnames = 1]{biblatex}
+\addbibresource{./centralised_bibliography/references.bib}
+
+%% Maths
+\usepackage{amsmath}
+\usepackage{luacode}
+\usepackage{cancel}
+
+%% Colours
+\usepackage{xcolor}
+\definecolor{egyptRed}{HTML}{DD5129}
+\definecolor{egyptBlue}{HTML}{0F7BA2}
+\definecolor{egyptGreen}{HTML}{43B284}
+\definecolor{egyptYellow}{HTML}{FAB255}
+
+\definecolor{blueGrey}{HTML}{EEF2F6}
+
+%% Graphics
+\usepackage{tikz}
+\usepackage{pgfplots}
+	\pgfplotsset{compat=1.18}
+	\pgfplotsset{set layers}
+
+% Tikz libraries
+\usetikzlibrary{overlay-beamer-styles}
+\usetikzlibrary{positioning}
+\usetikzlibrary{arrows.meta}
+\usetikzlibrary{calc}
+
+% Pgfplots libraries
+\usepgfplotslibrary{fillbetween}
+
+%% Tikz commands
+% Styles
+\tikzset{arrow/.style = {> = {Latex[length = 1.2mm]}}}
+
+% Database node style
+\makeatletter
+	\tikzset{
+		database/.style={
+		path picture={
+		\draw[fill = #1] (0, 1.5*\database@segmentheight) circle [x radius=\database@radius,
+		y radius=\database@aspectratio*\database@radius];
+		\draw (-\database@radius, 0.5*\database@segmentheight) arc [start angle=180,end angle=360,x radius=\database@radius,
+		y radius=\database@aspectratio*\database@radius];
+		\draw (-\database@radius,-0.5*\database@segmentheight) arc [start angle=180,end angle=360,x radius=\database@radius,
+		y radius=\database@aspectratio*\database@radius];
+		\draw (-\database@radius,1.5*\database@segmentheight) -- ++(0,-3*\database@segmentheight) arc [start angle=180,end angle=360,
+		x radius=\database@radius, y radius=\database@aspectratio*\database@radius] -- ++(0,3*\database@segmentheight);
+		},
+		minimum width=2*\database@radius + \pgflinewidth,
+		minimum height=3*\database@segmentheight + 2*\database@aspectratio*\database@radius + \pgflinewidth,
+		},
+		database segment height/.store in=\database@segmentheight,
+		database radius/.store in=\database@radius,
+		database aspect ratio/.store in=\database@aspectratio,
+		database segment height=0.1cm,
+		database radius=0.25cm,
+		database aspect ratio=0.35,
+	}
+\makeatother
+
+%% Others
+\usepackage{siunitx}
+
+%%%%%%%%%%%%%%%%%%    PARAMETERS    %%%%%%%%%%%%%%%%%%
+%% Theme
+\usetheme{gotham}
+
+%% Remove footer
+\defbeamertemplate{frame footer}{default/emptyFoot}{}
+\gothamset{footer template = emptyFoot}
+
+%% Add logo IGN
+\renewcommand{\gothamInstituteLogoSquare}[1][4 ex]{\includegraphics[height = #1]{./figures/IGN_logo.pdf}}
+\renewcommand{\gothamtitlepagelogo}{\hspace{5cm}\includegraphics[height = 1.5cm]{./figures/IGN_logo.pdf}}
+
+%----------------------------------------------------------------------------------------
+%	PAGE TITLE
+%----------------------------------------------------------------------------------------
+\title{Taper and total aerial volumes}
+\date{\today}
+\author{Florence Gohon and Amaël Le Squin}
+\institute{Institut National de l'information géographique et forestière}
+
+%----------------------------------------------------------------------------------------
+%	NEW COMMANDS
+%----------------------------------------------------------------------------------------
+\newcommand{\Fbft}{F_{\text{BFT}}}
+
+\newcommand{\fnew}{f_{\text{new}}}
+\newcommand{\hdec}{h_{\text{dec}}}
+
+\newcommand{\Vtot}{V_{\text{tot}}}
+\newcommand{\Vbft}{V_{\text{bole}}}
+\newcommand{\Vcrn}{V_{\text{crown}}}
+
+\newcommand{\Sigmabf}{\symbfup{\Sigma}}
+
+\DeclareMathOperator{\MVN}{MVN}
+
+%%%% Start document
+\begin{document}
+
+\maketitle
+
+\section{Taper volume}
+
+\begin{frame}{Single-variable and three-variable models}
+	In tree sample\ldots{}
+	\begin{itemize}
+		\item trees \( j \), where \( c \), \( h \), \( \hdec \) are measured
+		\[
+			\Vbft(j) = f_{III}(c, h, \hdec)
+		\]
+		\item \emph{simplified} or \emph{remeasured} trees \( i \), where \( c \) is measured
+		\[
+			\cancel{ \Vbft(i) = \Vbft(j) }
+			\to
+			\cancel{ \Vbft(i) = \Vbft(j) \frac{c(i)}{c(j)} }
+			\to
+			\Vbft(i) = \Vbft(j) \frac{f_{I}(c(i))}{f_{I}(c(j))}
+		\]
+	\end{itemize}
+\end{frame}
+
+\begin{frame}{What we keep}
+	\begin{itemize}
+		\item Data sets source
+		\item Linear models
+		\item Transformations
+	\end{itemize}
+
+\[
+	\left\{
+	\begin{aligned}
+		\Vbft &= \frac{c^2 h}{4 \pi \left( 1 - \frac{1{,}3}{h} \right)^2} \fnew \\
+		\fnew &= f_{III}(c, h, \hdec)
+	\end{aligned}
+	\right.
+\]
+\bigskip
+\[
+	\ln(\Vbft) = f_{I}\big( \ln(c) \big)
+\]
+\end{frame}
+
+\begin{frame}{What we change}
+	\begin{itemize}
+		\item Explanatory variables
+		\begin{itemize}
+			\item \(\hdec\) turns into \(\hdec'\)
+			\item variables are shared by every species
+			\item \(f(g)\) is dropped
+		\end{itemize}
+		\item Parameters
+		\begin{itemize}
+			\item the three-variable model is no longer cut-specific 
+		\end{itemize}
+		\begin{align*}
+			\fnew &= \alpha + \beta c + \gamma \frac{\sqrt{c}}{\hdec'} + \delta \frac{\sqrt{\hdec'}}{c^2 h} + \eta \left( 1 - \frac{\hdec'}{h} \right) \\
+			V_{\text{bole}, I} &= \mathrm{e}^{\alpha + \beta \ln(c) + \gamma \ln(c)^2 + \frac{\sigma^2}{2}}
+		\end{align*}
+	\end{itemize}
+\end{frame}
+
+\begin{frame}{Performances similar to current models}
+	\begin{center}
+		\includegraphics[scale = 0.7]{./figures/estimate_vbole_bygirth.pdf}
+	\end{center}
+\end{frame}
+
+\section{Total aerial volume}
+%%%% Tree frame
+\begin{frame}{A tree in Emerge data}
+	\begin{center}
+		\begin{tikzpicture}
+			\node[inner sep = 0pt] (tree) at (0, 0) {\includegraphics[scale = 0.65]{./pictures/ign_tree.pdf}};
+			\matrix[anchor = north west, right = 0.8cm of tree] (legend)  at ([yshift=-1cm]tree.north east) {
+				\node [draw, shape = rectangle, fill = egyptYellow, label = right:{Bole volume}] {}; \\
+				\node [draw, shape = rectangle, fill = egyptGreen, label = right:{Large branches}] {}; \\
+				\node [draw, shape = rectangle, fill = egyptBlue, label = right:{Small branches}] {}; \\
+			};
+		\end{tikzpicture}
+	\end{center}
+\end{frame}
+
+%%%% 3 options to model
+\begin{frame}{Three paths}
+	\begin{center}
+		\begin{enumerate}
+			\item Bole volume (Florence) and independent crown model
+			\item Multivariate model for both bole and crown volumes
+			\item Model on the ratio between bole and total volumes
+		\end{enumerate}
+	\end{center}
+\end{frame}
+
+%%%% Option 1 --- results
+\begin{frame}{Independent crown model -- 1}
+	\begin{columns}
+		\begin{column}{0.5\textwidth}
+			\begin{center}
+				\input{figures/pred_bole_FG.tex}
+			\end{center}
+		\end{column}
+		%
+		\begin{column}{0.5\textwidth}
+			\begin{center}
+				\input{figures/pred_crown_FG.tex}
+			\end{center}
+		\end{column}
+	\end{columns}
+\end{frame}
+
+\begin{frame}{Independent crown model -- 2}
+	\begin{center}
+		\input{figures/pred_tot_FG.tex}
+	\end{center}
+\end{frame}
+
+%%%% Option 2 --- results
+\begin{frame}{Multivariate model -- 1}
+	\begin{columns}
+		\begin{column}{0.5\textwidth}
+			\begin{center}
+				\input{figures/mvn.tex}
+			\end{center}
+		\end{column}
+		%
+		\begin{column}{0.5\textwidth}
+			\[
+				\begin{pmatrix}
+					\log(\Vbft) \\
+					\log(\Vcrn)
+				\end{pmatrix}
+				\sim
+				\MVN\left\{ \begin{pmatrix}
+					f(c, \, h; \symbfup{\theta}) \\
+					g(c, \, h; \symbfup{\theta}) \\
+				\end{pmatrix}, \Sigmabf \right\}
+			\]
+		\end{column}
+	\end{columns}
+\end{frame}
+
+\begin{frame}{Multivariate model -- 2}
+	\begin{columns}
+		\begin{column}{0.5\textwidth}
+			\begin{center}
+				\input{figures/pred_tot_MVN.tex}
+			\end{center}
+		\end{column}
+		%
+		\begin{column}{0.5\textwidth}
+			\begin{center}
+				\input{figures/residuals_tot_MVN.tex}
+			\end{center}
+		\end{column}
+	\end{columns}
+\end{frame}
+
+%%%% Option 3 --- results
+\begin{frame}{Ratio model}
+	
+\end{frame}
+
+\section{Conclusion}
+\begin{frame}{Sum-up}
+	Figure that sums up everything!
+\end{frame}
+\end{document}
