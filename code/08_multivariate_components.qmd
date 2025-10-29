@@ -92,12 +92,15 @@ library(gt)
 ## Tool function
 source("./toolFunctions.R")
 
+## Regression formula for crown
 linReg = function(x, p1, p2, p3, p4, p5)
 	return(p1 + p2*x + p3*x^2 + p4*x^3 + p5*x^4)
 
+## Regression formula for bole
 powReg = function(x, p1, p2, p3, shift)
 	return(p1 + p2*(x - shift)^p3)
 
+## Get volume from Florence formula with bounds
 florence_bft = function(c, h, hdec, params, bounds)
 {
 	fnew = params[1, alpha] + params[1, beta]*c + params[1, gamma]*sqrt(c)/hdec +
@@ -110,11 +113,20 @@ florence_bft = function(c, h, hdec, params, bounds)
 	return(c^2*h/(4*pi) * min(fnew/(1 - 1.3/h)^2, bounds[1, bft_lim]))
 }
 
+## To get volume from Bayesian form factor
 getVol = function(nfi_sp, k, fit)
 {
 	str = paste0("pred_formFactor[", k, "]")
 	convert = nfi_sp[k, circumference_m^2]*nfi_sp[k, height]/(4*pi*(1 - 1.3/nfi_sp[k, height])^2)
 	return (fit$draws(str)*convert)
+}
+
+## Internal function from DHARMa package
+rankTransform = function(x)
+{
+	pred = rank(x, ties.method = "average")
+	pred = pred / max(pred)
+	return(pred)
 }
 ```
 
@@ -408,10 +420,13 @@ In this section, I look at the relation there can be between the crown and tree 
 
 ```{r}
 lim = quantile(inra_dec[, hdec], c(0.25, 0.5, 0.75))
-inra_dec[, colour := met.brewer("Egypt")[1]]
-inra_dec[(lim["25%"] < hdec) & (hdec <= lim["50%"]), colour := met.brewer("Egypt")[2]]
-inra_dec[(lim["50%"] < hdec) & (hdec <= lim["75%"]), colour := met.brewer("Egypt")[3]]
-inra_dec[lim["75%"] < hdec, colour := met.brewer("Egypt")[4]]
+inra_dec[, `:=` (colour = met.brewer("Egypt")[1], class = 1)]
+inra_dec[(lim["25%"] < hdec) & (hdec <= lim["50%"]), `:=` (colour = met.brewer("Egypt")[2], class = 2)]
+inra_dec[(lim["50%"] < hdec) & (hdec <= lim["75%"]), `:=` (colour = met.brewer("Egypt")[3], class = 3)]
+inra_dec[lim["75%"] < hdec, `:=` (colour = met.brewer("Egypt")[4], class = 4)]
+
+# fwrite(inra_dec[, .(circumference_m, bole_volume_m3, crown_volume_m3, class)],
+# 	"./pgfplots/inra_dec.csv")
 
 plot(inra_dec[, log(circumference_m)], inra_dec[, log(crown_volume_m3)], pch = 19, col = inra_dec[, colour],
 	cex = 0.65, xlab = "Circumference", ylab = "Crown volume", axes = FALSE)
@@ -553,7 +568,7 @@ plot(sim_dharma, quantreg = TRUE)
 plotResiduals(sim_dharma, inra_dec[, circumference_m], quantreg = TRUE)
 ```
 
-## Simple test of trunk-crown model
+## Simple test of trunk-crown model {#sec-mvn_trunk-crown}
 ```{r}
 ## Compile correlated and uncorrelated models
 model = cmdstan_model("./trunk-crown.stan")
@@ -633,6 +648,9 @@ axis(1)
 axis(2, las = 1)
 abline(a = 0, b = 1, col = "#CD212A", lwd = 2)
 
+# fwrite(data.table(pred = pred_total_volume, obs = inra_dec[, total_volume_m3], class = inra_dec[, class]),
+# 	"./pgfplots/pred_tot.csv")
+
 ########
 ## Bole volume
 plot(pred_bole_volume_uncor, inra_dec[, bole_volume_m3], pch = 19, cex = 0.75,
@@ -681,7 +699,7 @@ axis(2, las = 1)
 curve(linReg(x, beta_0, beta_1, beta_2, beta_3, beta_4), add = TRUE, lwd = 2, col = "#CD212A")
 ```
 
-Ok, beautiful, but what are the residuals?
+Ok, beautiful, but how are the residuals?
 
 ```{r}
 n_sampling = fit$metadata()$iter_sampling
@@ -716,6 +734,37 @@ dharma_helper = function(simResp, obs, ncol = n_sampling*n_chains)
 sim_dharma = dharma_helper(simResp = pred_total_volume, obs = inra_dec[, total_volume_m3])
 plot(sim_dharma, quantreg = TRUE)
 plotResiduals(sim_dharma, inra_dec[, circumference_m], quantreg = TRUE)
+
+## Export for pgfplots
+dharmaQuant = DHARMa::testQuantiles(simulationOutput = sim_dharma,
+	predictor = inra_dec[, rankTransform(circumference_m)], plot = FALSE)
+
+# Add the rank transformed predictor and the prediction + height class for colour
+pgfplots = data.table(circumference_rt = inra_dec[, rankTransform(circumference_m)],
+	residuals = sim_dharma$scaledResiduals, class = inra_dec[, class])
+setorder(pgfplots, circumference_rt)
+
+# Add the quantile regression lines
+pgfplots[, q25 := dharmaQuant$predictions[, 2]]
+pgfplots[, q50 := dharmaQuant$predictions[, 4]]
+pgfplots[, q75 := dharmaQuant$predictions[, 6]]
+
+# Add the errors on the quantiles
+pgfplots[, err25 := dharmaQuant$predictions[, 3]]
+pgfplots[, err50 := dharmaQuant$predictions[, 5]]
+pgfplots[, err75 := dharmaQuant$predictions[, 7]]
+
+fwrite(pgfplots, "./pgfplots/residuals.csv")
+
+# Test of my data table, should give the same as plotResiduals(sim_dharma, inra_dec[, circumference_m])
+plot(inra_dec[, rankTransform(circumference_m)], sim_dharma$scaledResiduals, pch = 19, cex = 0.75)
+quantiles = c(0.25, 0.5, 0.75)
+abline(h = 0.5, col = "red", lwd = 0.5, lty = 2)
+polygon(c(pgfplots[, circumference_rt], rev(pgfplots[, circumference_rt])),
+	c(pgfplots[, q50] - pgfplots[, err50],
+		rev(pgfplots[, q50] + pgfplots[, err50])),
+	col = "#00000020", border = FALSE)
+lines(pgfplots[, circumference_rt], pgfplots[, q50], col = "red", lwd = 2)
 
 #### Residuals uncorrelated model
 ## Total volume
@@ -805,4 +854,106 @@ plotResiduals(sim_dharma, data[, circumference_m], quantreg = TRUE)
 ```
 
 ## Model that uses both datasets to fit the bole parameters
+In this section, I adapt the correlated model developped in @sec-mvn_trunk-crown to two datasets (Inra and NFI) for the bole volume.
+
+```{r}
+model = cmdstan_model("./trunk-crown_2data.stan")
+
+stanData = list(
+	N = inra_dec[, .N],
+	N_nfi = nfi_sam[, .N],
+
+	circumference_m = inra_dec[, circumference_m],
+	circumference_m_nfi = nfi_sam[, circumference_m],
+
+	bole_volume_m3 = inra_dec[, bole_volume_m3],
+	bole_volume_m3_nfi = nfi_sam[, bole_volume_m3],
+	crown_volume_m3 = inra_dec[, crown_volume_m3]
+)
+
+n_chains = 4
+
+if (!file.exists("fagSyl_trunk-crown_2data.rds"))
+{
+	fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4), max_treedepth = 12)
+
+	# Save results
+	fit$save_output_files(dir = "./", basename = paste0("fagSyl_trunk-crown_2data"), random = FALSE)
+	saveRDS(fit, "./fagSyl_trunk-crown_2data.rds")
+} else {
+	fit = readRDS("./fagSyl_trunk-crown_2data.rds")
+}
+```
+
+And now, some pred (on Inra data).
+```{r}
+#### Check results
+## Posteriors
+lazyTrace(fit$draws("rho"))
+lazyPosterior(fit$draws("rho"))
+
+## Predictions
+pred_total_volume = apply(X = fit$draws("pred_total_volume"), MARGIN = 3, FUN = mean)
+pred_Vb_Cr = apply(X = fit$draws("pred_Vb_Cr_joined"), MARGIN = 3, FUN = mean)
+
+pred_bole_volume = exp(pred_Vb_Cr[seq(1, length(pred_Vb_Cr) - 1, by = 2)])
+pred_crown_volume = exp(pred_Vb_Cr[seq(2, length(pred_Vb_Cr), by = 2)])
+
+## Bole volume
+plot(pred_bole_volume, inra_dec[, bole_volume_m3], pch = 19, cex = 0.75,
+	xlab = "Pred bole", ylab = "Obs bole", axes = FALSE)
+axis(1)
+axis(2, las = 1)
+abline(a = 0, b = 1, col = "#CD212A", lwd = 2)
+
+## Bole volume
+plot(pred_crown_volume, inra_dec[, crown_volume_m3], pch = 19, cex = 0.75,
+	xlab = "Pred crown", ylab = "Obs crown", axes = FALSE)
+axis(1)
+axis(2, las = 1)
+abline(a = 0, b = 1, col = "#CD212A", lwd = 2)
+
+## Total volume
+plot(pred_total_volume, inra_dec[, total_volume_m3], pch = 19, cex = 0.75,
+	xlab = "Pred tot.", ylab = "Obs tot", axes = FALSE)
+axis(1)
+axis(2, las = 1)
+abline(a = 0, b = 1, col = "#CD212A", lwd = 2)
+
+## Fit on the log scale
+# Extract parameters
+alpha_0 = apply(X = fit$draws("alpha_0"), FUN = mean, MARGIN = 3)
+beta_0 = apply(X = fit$draws("beta_0"), FUN = mean, MARGIN = 3)
+alpha_1 = apply(X = fit$draws("alpha_1"), FUN = mean, MARGIN = 3)
+beta_1 = apply(X = fit$draws("beta_1"), FUN = mean, MARGIN = 3)
+alpha_2 = apply(X = fit$draws("alpha_2"), FUN = mean, MARGIN = 3)
+beta_2 = apply(X = fit$draws("beta_2"), FUN = mean, MARGIN = 3)
+beta_3 = apply(X = fit$draws("beta_3"), FUN = mean, MARGIN = 3)
+beta_4 = apply(X = fit$draws("beta_4"), FUN = mean, MARGIN = 3)
+
+plot(log(stanData$circumference_m), log(stanData$bole_volume_m3), pch = 19, cex = 0.75,
+	xlab = "log(circum)", ylab = "log(bole)", axes = FALSE)
+axis(1)
+axis(2, las = 1)
+curve(powReg(x, alpha_0, alpha_1, alpha_2, min(log(stanData$circumference_m))), add = TRUE,
+	lwd = 2, col = "#CD212A")
+
+plot(log(stanData$circumference_m), log(stanData$crown_volume_m3), pch = 19, cex = 0.75,
+	xlab = "log(circum)", ylab = "log(crown)", axes = FALSE)
+axis(1)
+axis(2, las = 1)
+curve(linReg(x, beta_0, beta_1, beta_2, beta_3, beta_4), add = TRUE, lwd = 2, col = "#CD212A")
+```
+
+I believe there is no need for the residuals... Now a small discussion!
+
+::: {.callout-important}
+
+## Should I have only one set of parameters
+
+Obviously, having only one set of parameters is a failure! It is not surprising, the trees are too different between the datasets (not the same type of forest, not the same period, not the same measurements), and the parameters should reflect the observed trees.
+
+Therefore, despite it is the same species, one set of parameters per species might not makes sense. Now, I cannot have two sets, as I will later apply the model to the tree NFI!
+
+:::
 
