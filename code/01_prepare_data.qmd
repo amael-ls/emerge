@@ -52,7 +52,7 @@ In order to understand the data, I first define what is a tree in @sec-what_a_tr
 
 ### Define what is a tree {#sec-what_a_tree}
 
-Trees are partitioned into hierarchical elements in Forest Inventories (\eg @fig-partition). Definitions of elements can vary between inventories, and they do not necessarily contains the same data. In our case, the tree data come from different institutes and different periods of time:
+Trees are partitioned into hierarchical elements in Forest Inventories (\eg @fig-partition). Definitions of elements can vary between inventories, and they do not necessarily contain the same data. In our case, the tree data come from different institutes and different periods of time:
 
 1.  'Protocole Oudin', dataset preserved by INRA, between 1930 and 1980 (<span class="egypt_red"></span> on the @fig-map)
 
@@ -299,7 +299,17 @@ setDT(inra_arbres)
 setDT(codesforets)
 
 ## Compute (total) volume in m³, and format data
-inra_arbres[, total_volume_m3 := (v_tronc_verif + v_fourche_verif + v_fourche2_verif + v_br_verif + v_menu_verif)/1e3]
+inra_arbres[, total_volume_m3 := (v_tronc_verif +
+	ifelse(is.na(v_fourche_verif), 0, v_fourche_verif) +
+	ifelse(is.na(v_fourche2_verif), 0, v_fourche2_verif) +
+	ifelse(is.na(v_br_verif), 0, v_br_verif) +
+	ifelse(is.na(v_menu_verif), 0, v_menu_verif))/1e3]
+
+inra_arbres[, presence_NA := ifelse(is.na(v_fourche_verif) |
+	is.na(v_fourche2_verif) |
+	is.na(v_br_verif) |
+	is.na(v_menu_verif), TRUE, FALSE)]
+
 inra_arbres[, v_tronc_verif := v_tronc_verif/1e3] # Conversion to m3
 inra_arbres[, v_courrone := total_volume_m3 - v_tronc_verif] # Volume of the crown, i.e., everything that is NOT trunk > 7 cm
 inra_arbres[, circumference_m := c130/100]
@@ -308,21 +318,40 @@ inra_arbres[, year := format(as.Date(date, "%Y-%m-%d"), "%Y")]
 
 ## Keep only column of interest and rename them
 inra_arbres = unique(inra_arbres[, .(nom_fichier, id_codesessences, circumference_m, h_tot,
-	total_volume_m3, v_tronc_verif, v_courrone, genre, id_codesforets, year)])
+	total_volume_m3, v_tronc_verif, v_courrone, genre, id_codesforets, year, presence_NA)])
 inra_arbres = merge.data.table(inra_arbres, codesforets[, .(id, longitude, latitude)],
-	by.x = "id_codesforets", by.y = "id")
+	by.x = "id_codesforets", by.y = "id", all.x = TRUE)
 inra_arbres = merge.data.table(inra_arbres, codesessences[, .(essence, speciesName_sci, fct_type)],
 	by.x = "id_codesessences", by.y = "essence")
 
 inra_arbres = na.omit(inra_arbres)
 
 setnames(inra_arbres, new = c("species_code_inra", "plot_id", "unique_id", "circumference_m", "height",
-	"total_volume_m3", "bole_volume_m3", "crown_volume_m3", "genus", "year", "lon", "lat",
+	"total_volume_m3", "bole_volume_m3", "crown_volume_m3", "genus", "year", "presence_NA", "lon", "lat",
 	"speciesName_sci", "fct_type"))
 
 ## Change type of cols
 inra_arbres[, unique_id := as.character(unique_id)]
 inra_arbres[, genus := as.character(genus)]
+```
+
+I also clean the dataset `inra_arbres_profils`, which could be useful to estimate the taper height (called $h_{\text{dec}}$ at the French NFI).
+
+```{r}
+setDT(inra_arbres_profils)
+
+## Keep only column of interest and rename them
+inra_arbres_profils = unique(inra_arbres_profils[, .(nom_fichier, arbre, haut, v_bill, circonf_sur_ecorce)])
+inra_arbres_profils = inra_arbres_profils[!is.na(v_bill)]
+inra_arbres_profils[, v_bill := v_bill/1e3] # Convert to cubic metre
+inra_arbres_profils[, circonf_sur_ecorce := circonf_sur_ecorce/1e2] # Convert to metre
+
+inra_arbres_profils[, nom_fichier := as.character(nom_fichier)]
+inra_arbres_profils[, arbre := as.character(arbre)]
+
+setnames(inra_arbres_profils, new = c("unique_id", "tree_id", "at_height", "log_volume_m3", "circumference_m"))
+
+saveRDS(inra_arbres_profils, paste0(mnt_point, "data/profiles_oudin.rds"))
 ```
 
 ### Request of the French NFI data (using inventR package) {#sec-nfi_query}
@@ -334,8 +363,7 @@ As said above, I do not trust the data.frame `ifn_arbres`. I do my own request h
 db = connect_db()
 
 # In Ancient Method (am), the inventory was done by cycle rather than homogeneously distributed everywhere
-
-nfi_data = exec_req(conn = db, req = "
+nfi_data_am = exec_req(conn = db, req = "
 	SELECT
 		tree.NPP, tree.A, tree.ESS, tree.C13, tree.HTOT, tree.R, tree.V, tree.VTOT,
 		tree.d26, tree.ddec, tree.dmed, tree.cmed, tree.hdec,
@@ -362,6 +390,44 @@ nfi_data = exec_req(conn = db, req = "
 
 	ORDER BY
 		npp, a;", DT = TRUE)
+
+# New method
+nfi_data_nm = exec_req(conn = db, req = "
+	SELECT
+		tree_complete.NPP, tree_complete.A, tree.ESS, tree.C13, tree.HTOT, tree.R, tree.V,
+		
+		tree_complete.VTOT, tree_complete.d26, tree_complete.ddec, tree_complete.dmed,
+		tree_complete.cmed, tree_complete.hdec,
+
+		log.surlon, log.surdia, log.ns,
+		coords1.XL, coords1.YL, coords1.dep as department, coords1.cyc as cycle,
+		EXTRACT(YEAR FROM coords2.DATEPOINT) AS year
+
+	FROM
+		inv_exp_nm.g3complete AS tree_complete
+
+		LEFT JOIN inv_exp_nm.g3bille AS log
+		ON log.npp = tree_complete.npp AND log.A = tree_complete.A
+
+		LEFT JOIN inv_exp_nm.g3arbre AS tree
+		ON tree.npp = tree_complete.npp AND tree.A = tree_complete.A
+
+		LEFT JOIN inv_exp_nm.e1point AS coords1
+		ON coords1.npp = tree.npp
+		
+		LEFT JOIN inv_exp_nm.e2point AS coords2
+		ON coords2.npp = tree.npp
+
+	WHERE
+		tree.CUBE = 'M' AND -- Useless, as inv_exp_nm.g3complete already filtered on it...
+		(tree.veget = '0' OR tree.veget = 'Z') AND -- Alive
+		COALESCE(tree.forme, 'X') NOT IN ('0', 'Z') AND -- No pollarded nor heavily pruned tree
+		COALESCE(tree.tige, '1') = '1' -- No fork
+
+	ORDER BY
+		npp, a;", DT = TRUE)
+
+nfi_data = rbindlist(list(nfi_data_am, nfi_data_nm))
 
 disconnect_db(db)
 ```
@@ -440,20 +506,14 @@ nfi_data[, c("v1", "v2", "v3", "d26", "dmed", "cmed", "verif") := NULL]
 nfi_data = merge.data.table(nfi_data, codesessences[, .(nfi, genre, speciesName_sci, fct_type)],
 	by.x = "ess", by.y = "nfi")
 
-## Strangely, v and vtot are the same... I keep v then
-if (isTRUE(nfi_data[, all.equal(v, vtot, tol = 1e-5)]))
-{
-	print("The cols v and vtot are the same, which is strange as I was expecting vtot = (1 - r)*v. I remove vtot and r")
-	nfi_data[, vtot := NULL]
-	nfi_data[, r := NULL]
-} else {
-	stop("When I downloaded the data, v and vtot were the same. It seems it is not anymore! Check what could have happened")
-}
+## Remove v and vtot, and keep only my reconstruction (Florence could not reconstruct them at 100% either)
+nfi_data[, v := NULL]
+nfi_data[, vtot := NULL]
 
 ## Change column names
 setnames(nfi_data, new = c("species_code_nfi", "plot_id", "tree_id", "circumference_m", "height",
-	"bole_volume_m3", "taper_diameter", "taper_height", "x_lambert", "y_lambert", "department",
-	"cycle", "year", "bole_volume_reconstruct_m3", "genus", "speciesName_sci", "fct_type"))
+	"r", "taper_diameter", "taper_height", "x_lambert", "y_lambert", "department",
+	"cycle", "year", "bole_volume_m3", "genus", "speciesName_sci", "fct_type"))
 
 ## Densities of circumference and height for taper_height < 2.6
 plot(nfi_data[taper_height <= 2.6, density(height)], xlab = "Height", main = "", axes = FALSE, lwd = 3)
@@ -535,9 +595,6 @@ if (forest_dt[, any(bole_volume_m3 <= 0)])
 		warning(paste("There were even", forest_dt[bole_volume_m3 < 0, .N], "negative volumes!"))
 	forest_dt = forest_dt[bole_volume_m3 > 0]
 }
-
-## Set bole_volume_reconstruct_m3 of inra data to bole_volume_m3. TO DO: RECONSTRUCT THE VOLUMES
-forest_dt[origin_data == "inra", bole_volume_reconstruct_m3 := bole_volume_m3] # TO DO: RECONSTRUCT THE VOLUMES
 
 ## Compute number of individuals per species
 forest_dt[, nb_indiv := .N, by = speciesName_sci]
@@ -644,7 +701,7 @@ makeData = function(dt, ind_ls)
 		circumference_m = dt[, circumference_m],
 
 		total_volume_m3 = dt[, total_volume_m3],
-		bole_volume_m3 = dt[, bole_volume_reconstruct_m3],
+		bole_volume_m3 = dt[, bole_volume_m3],
 		crown_volume_m3 = dt[, crown_volume_m3]
 	)
 
@@ -667,12 +724,12 @@ saveRDS(stanData, paste0(mnt_point, "data/stanData_nfi-inra", add_name, ".rds"))
 saveRDS(forest_dt, paste0(mnt_point, "data/nfi-inra_dt", add_name, ".rds"))
 saveRDS(ind_species, paste0(mnt_point, "data/ind_species_nfi-inra", add_name, ".rds"))
 if (!dir.exists(paste0(mnt_point, "data/coords_inra", add_name)))
-	writeVector(x = coords_inra, filename = paste0(mnt_point, "data/coords_inra", add_name), filetype = "ESRI Shapefile",
-		overwrite = TRUE)
+	writeVector(x = coords_inra, filename = paste0(mnt_point, "data/coords_inra", add_name),
+		filetype = "ESRI Shapefile", overwrite = TRUE)
 
 if (!dir.exists(paste0(mnt_point, "data/coords_nfi", add_name)))
-	writeVector(x = coords_nfi, filename = paste0(mnt_point, "data/coords_nfi", add_name), filetype = "ESRI Shapefile",
-		overwrite = TRUE)
+	writeVector(x = coords_nfi, filename = paste0(mnt_point, "data/coords_nfi", add_name),
+		filetype = "ESRI Shapefile", overwrite = TRUE)
 
 ## Random sub dataset
 add_name = ""
@@ -942,9 +999,9 @@ emerge[, .N, by = speciesName_sci]
 
 # Plot of bole volume in function of circumference
 plot(forest_dt_inra[, circumference_m],
-	forest_dt_inra[, bole_volume_reconstruct_m3], pch = 19, cex = 0.5,
+	forest_dt_inra[, bole_volume_m3], pch = 19, cex = 0.5,
 	xlab = "Circumference", ylab = "Bole volume",
-	ylim = c(0, max(forest_dt_inra[, bole_volume_reconstruct_m3], emerge[, bole_volume_conic_m3])))
+	ylim = c(0, max(forest_dt_inra[, bole_volume_m3], emerge[, bole_volume_conic_m3])))
 points(emerge[, circumference_m], emerge[, bole_volume_conic_m3], pch = 19,
 	col = "#CD212A")
 
@@ -1233,6 +1290,11 @@ dd_fr = density(forest_dt[origin_data == "nfi", height/circumference_m]) # Frenc
 dd_in = density(forest_dt[origin_data == "inra", height/circumference_m]) # Inra/Emerge data
 dd_ch = density(swiss_dt[, height/circumference_m]) # swiss data
 
+# fwrite(data.table(xfr = dd_fr$x, yfr = dd_fr$y,
+# 	xin = dd_in$x, yin = dd_in$y,
+# 	xch = dd_ch$x, ych = dd_ch$y),
+# 	"./pgfplots/data.csv")
+
 plot(dd_fr, col = colours["nfi"], axes = FALSE, lwd = 3, xlab = "Slenderness (height/circumference)", main = "",
 	ylim = c(0, max(dd_fr$y, dd_in$y, dd_ch$y)))
 polygon(dd_fr, col = paste0(colours["nfi"], 44))
@@ -1255,7 +1317,7 @@ legend(x = "topright", legend = c("Emerge", "NFI", "EFM"), fill = colours[c("inr
 #### Binding both forest_dt and swiss_dt
 ## Temporary data
 temp = rbind(forest_dt[, .(plot_id, tree_id, genus, circumference_m,
-		bole_volume_m3 = bole_volume_reconstruct_m3, crown_volume_m3, origin_data)],
+		bole_volume_m3, crown_volume_m3, origin_data)],
 	swiss_dt[, .(plot_id, tree_id, genus, circumference_m,
 		bole_volume_m3 = bole_volume_cyl_m3, crown_volume_m3)], fill = TRUE)
 
@@ -1413,7 +1475,6 @@ legend(x = "topright", legend = c("Emerge", "EFM"), fill = colours[c("inra", "sw
 
 ### Relation between crown and (merchantable) bole volume
 ```{r}
-
 ch_inra = temp[CJ(unique(genus), c("inra", "swiss")), nomatch = 0]
 
 plot(ch_inra[, bole_volume_m3], ch_inra[, crown_volume_m3], col = ch_inra[, colour], pch = 19, lwd = 0, axes = FALSE,
