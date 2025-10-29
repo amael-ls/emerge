@@ -1,0 +1,86 @@
+\begin{tikzpicture}
+\begin{axis}[
+	view={45}{55},
+	grid=major,
+	xlabel={\( \Vbft \)},
+	ylabel={\( \Vcrn \)},
+	zlabel={},
+	xtick=\empty,
+	ytick=\empty,
+	ztick=\empty,
+	width = 12cm,
+	height = 12cm,
+	domain = -5:5,
+	y domain = -5:5,
+	samples=40,
+	zmin=0,
+	zmax=0.4,
+	axis lines=center,
+	enlargelimits=0.1,
+	every axis plot/.append style={line join=round},
+	hide z axis=false,
+	axis on top,
+]
+
+% ----------------------------------------------------------
+% Parameters (mean, covariance)
+% ----------------------------------------------------------
+\pgfmathsetmacro{\mux}{0}
+\pgfmathsetmacro{\muy}{0}
+\pgfmathsetmacro{\sigx}{1}
+\pgfmathsetmacro{\sigy}{sqrt(2)}
+\pgfmathsetmacro{\rho}{0.6}
+
+% ----------------------------------------------------------
+% Random samples from MVN (Lua)
+% ----------------------------------------------------------
+\begin{luacode*}
+math.randomseed(1234)
+local N = 2000
+local rho = 0.6
+local sigx = 1.0
+local sigy = math.sqrt(2)
+local L11 = sigx
+local L21 = rho * sigy
+local L22 = sigy * math.sqrt(1 - rho^2)
+tex.print("\\addplot3[only marks,mark=*,mark size=0.4pt,color=black,opacity=0.5]")
+tex.print("table[row sep=crcr]{%")
+for i=1,N do
+	local z1 = math.sqrt(-2*math.log(math.random()))*math.cos(2*math.pi*math.random())
+	local z2 = math.sqrt(-2*math.log(math.random()))*math.sin(2*math.pi*math.random())
+	local x = L11*z1
+	local y = L21*z1 + L22*z2
+	tex.print(string.format("%.4f %.4f 0\\\\", x, y))
+end
+tex.print("};")
+\end{luacode*}
+
+% ----------------------------------------------------------
+% Sigma ellipses (1σ, 2σ, 3σ)
+% ----------------------------------------------------------
+\foreach \k in {1,2,3}{
+	\addplot3[domain=0:360,smooth,variable=\t,thick,green!60!black]
+		({\k*(\sigx*cos(\t)+\rho*\sigy*sin(\t))}, {\k*(\sigy*sin(\t))}, {0.001});
+}
+
+% ----------------------------------------------------------
+% 1D marginal PDFs (walls)
+% ----------------------------------------------------------
+\addplot3[
+	domain=-5:5,
+	samples=100,
+	thick,
+	color=blue
+]
+({x},{0},{1/(sqrt(2*pi)*\sigx)*exp(-0.5*(x/\sigx)^2)});
+
+\addplot3[
+	domain=-5:5,
+	samples=100,
+	thick,
+	color=red
+]
+({-0},{x},{1/(sqrt(2*pi)*\sigy)*exp(-0.5*(x/\sigy)^2)});
+
+\end{axis}
+\end{tikzpicture}

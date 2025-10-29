@@ -1,7 +1,7 @@
 \begin{tikzpicture}
 \begin{axis}[
-	xlabel={\( \Vcrn \) (pred)},
-	ylabel={\( \Vcrn \) (obs)},
+	xlabel={\( \Vtot \) (pred)},
+	ylabel={\( \Vtot \) (obs)},
 	tick label style={font=\small},
 	label style={font=\small},
 	width=6.5cm,
@@ -44,13 +44,13 @@
 		draw=mapped color
 	},
 ] table[
-	x=pred_crown_volume,
-	y=crown_volume_m3,
+	x=pred,
+	y=obs,
 	meta = class,
 	col sep=comma
-] {inra_dec.csv};
+] {pred_tot.csv};
 
-\addplot[domain = 0:4, mark = none, thick] {x};
+\addplot[domain = 0:8, mark = none, thick] {x};
 
 \end{axis}
 \end{tikzpicture}

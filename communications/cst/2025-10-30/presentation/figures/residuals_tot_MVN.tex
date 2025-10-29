@@ -1,0 +1,114 @@
+\begin{tikzpicture}
+\begin{axis}[
+	xlabel={Circumference (RT)},
+	ylabel={Residuals (RT)},
+	tick label style={font=\small},
+	label style={font=\small},
+	xtick={0,0.25,0.5,0.75,1},
+	xticklabels={0,0.25,0.5,0.75,1},
+	ytick={0,0.25,0.5,0.75,1},
+	yticklabels={0,0.25,0.5,0.75,1},
+	width=6.5cm,
+	height=6.5cm,
+	tick align=outside,
+	tick label style={font=\small},
+	label style={font=\small},
+	colormap = {egypt}{
+		HTML = (DD5129)
+		HTML = (0F7BA2)
+		HTML = (43B284)
+		HTML = (FAB255)
+	}
+]
+
+%% Plot residuals
+\addplot[
+	scatter,
+	only marks,
+	mark=*,
+	mark size=.75pt,
+	point meta = explicit,
+	scatter/use mapped color={
+		fill=mapped color,
+		draw=mapped color
+	},
+] table[
+	x=circumference_rt,
+	y=residuals,
+	meta = class,
+	col sep=comma
+] {residuals.csv};
+
+%% Quantile 25 and plygon
+\addplot[name path=lower, draw=none] table[
+	x=circumference_rt,
+	y expr=\thisrow{q25} - \thisrow{err25},
+	col sep=comma
+]{residuals.csv};
+
+\addplot[name path=upper, draw=none] table[
+	x=circumference_rt, 
+	y expr=\thisrow{q25} + \thisrow{err25},
+	col sep=comma
+]{residuals.csv};
+
+\addplot[fill=black, fill opacity=0.1, draw=none] 
+fill between[of=lower and upper];
+
+\addplot[red, mark = none, thick] table[
+	x=circumference_rt,
+	y=q25,
+	col sep=comma
+] {residuals.csv};
+
+%% Quantile 50 and plygon
+\addplot[name path=lower, draw=none] table[
+	x=circumference_rt,
+	y expr=\thisrow{q50} - \thisrow{err50},
+	col sep=comma
+]{residuals.csv};
+
+\addplot[name path=upper, draw=none] table[
+	x=circumference_rt, 
+	y expr=\thisrow{q50} + \thisrow{err50},
+	col sep=comma
+]{residuals.csv};
+
+\addplot[fill=black, fill opacity=0.1, draw=none] 
+fill between[of=lower and upper];
+
+\addplot[red, mark = none, thick] table[
+	x=circumference_rt,
+	y=q50,
+	col sep=comma
+] {residuals.csv};
+
+%% Quantile 75 and plygon
+\addplot[name path=lower, draw=none] table[
+	x=circumference_rt,
+	y expr=\thisrow{q75} - \thisrow{err75},
+	col sep=comma
+]{residuals.csv};
+
+\addplot[name path=upper, draw=none] table[
+	x=circumference_rt, 
+	y expr=\thisrow{q75} + \thisrow{err75},
+	col sep=comma
+]{residuals.csv};
+
+\addplot[fill=black, fill opacity=0.1, draw=none] 
+fill between[of=lower and upper];
+
+\addplot[black, mark = none, thick] table[
+	x=circumference_rt,
+	y=q75,
+	col sep=comma
+] {residuals.csv};
+
+%% Add the dashed lines
+\addplot[domain = 0:1, thin, dashed] {0.25};
+\addplot[domain = 0:1, thin, dashed] {0.50};
+\addplot[domain = 0:1, thin, dashed] {0.75};
+
+\end{axis}
+\end{tikzpicture}
