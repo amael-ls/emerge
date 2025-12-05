@@ -51,3 +51,271 @@ format:
       - text: |
           \usepackage{unicode-math}
 ---
+
+<!--------------------------------------------------------------------------------------->
+<!---------------------------------    NEW COMMANDS    ---------------------------------->
+<!--------------------------------------------------------------------------------------->
+
+<!-- Datasets -->
+\newcommand{\Ed}{\mathscr{E}} <!-- Emerge dataset -->
+\newcommand{\Fd}{\mathscr{F}} <!-- French NFI dataset -->
+
+<!-- Maths -->
+\newcommand{\Fbole}{F_{\text{bft}}}
+\newcommand{\Vbole}{V_{\text{bft}}}
+\newcommand{\Vcrown}{V_{\text{crown}}}
+
+\newcommand{\tb}{\symbfup{\vartheta_b}}
+\newcommand{\tc}{\symbfup{\vartheta_c}}
+
+\newcommand{\Sigmabf}{\symbfup{\Sigma}}
+\newcommand{\sigbe}{\sigma_{b, \mathscr{E}}}
+\newcommand{\sigbf}{\sigma_{b, \mathscr{F}}}
+\newcommand{\sigc}{\sigma_c}
+
+\newcommand{\hdec}{h_{\text{dec}}}
+
+<!--------------------------------------------------------------------------------------->
+<!---------------------------------    MAIN R CODES    ---------------------------------->
+<!--------------------------------------------------------------------------------------->
+
+```{r}
+#| output: false
+
+#### Clear space and load packages
+rm(list = ls())
+graphics.off()
+
+options(max.print = 500)
+
+library(data.table)
+library(MetBrewer)
+library(bayesplot)
+library(cmdstanr)
+	register_knitr_engine(override = TRUE)
+library(stringi)
+library(inventR)
+library(gt)
+
+#### Tool functions
+## Load functions
+source("./toolFunctions.R")
+```
+
+```{r}
+#### Load datasets
+## Florence
+florence_dt = readRDS("../../gohon_florence/arbComp.rds")
+setkey(florence_dt, "ess")
+essences = c("02", "03", "11", "51", "09", "62", "05", "64", "52", "10", "61", "12", "17",
+	"06", "53", "31", "25", "21", "14", "13", "24", "54", "15", "22", "73", "20", "41", "72",
+	"18", "33", "63", "40", "04", "58", "07", "74", "19", "38", "56", "08", "65", "57", "32",
+	"27", "67", "28", "26", "39") # Essences selectionnées par Florence
+
+set.seed(1969 - 08 - 18) # Woodstock seed
+
+sp_info = readRDS("../../gohon_florence/espar.rds")
+setkey(sp_info, "ess")
+lm_list = readRDS("../../gohon_florence/output_lm.rds")
+
+## Emerge
+# Path
+os = Sys.info()[['sysname']]
+mnt_point = "/mnt/local_share/"
+if (os == "Linux" || os == "Darwin")
+{
+	if (!dir.exists(mnt_point))
+		stop(paste0("The mounting point <", mnt_point, "> does not exist"))
+} else if (os == "Windows") {
+	stop("TO DO!!! No idea how that works on Windows!")
+} else {
+	stop(paste("Unknown Operating System:", os))
+}
+
+path_data = paste0(mnt_point, "/data/")
+if (!dir.exists(path_data))
+	stop(paste0("Folder <", path_data, "> does not exist! Did you run 01_prepare_data.qmd?"))
+
+opt = "_inra"
+
+# Loading Emerge data
+inra = readRDS(paste0(path_data, "nfi-inra_dt", opt, ".rds"))
+setkey(inra, speciesName_sci)
+
+## Species
+species_dt = readRDS(paste0(path_data, "species_dt.rds"))
+
+## Profiles to compute hdec
+profiles = readRDS(paste0(mnt_point, "data/profiles_oudin.rds"))
+```
+
+```{r}
+#### Prepare species_dt
+ls_species = species_dt[species_code_nfi %in% essences, unique(speciesName_sci)] # Because of two Acer sp.
+# inventR::ListDataMod("ess")
+
+## Change species_code_inra 222 to 86 (both Pinus nigra), but only 7 individuals for code 222
+species_dt[species_code_inra == 222, species_code_inra := 86]
+
+## Subset species to listed ones
+species_dt = species_dt[speciesName_sci %in% ls_species]
+
+## Reshape species_dt
+species_dt[, tokeep := !all(is.na(species_code_inra)) & !all(is.na(species_code_nfi)), by = speciesName_sci]
+species_dt = unique(species_dt[(tokeep)])
+species_dt[, tokeep := NULL]
+
+species_dt = unique(species_dt[, .(species_code_inra = species_code_inra[!is.na(species_code_inra)],
+	species_code_nfi  = species_code_nfi[!is.na(species_code_nfi)]), by = speciesName_sci])
+```
+
+```{r}
+#### Subset both datasets and clean them
+## Keep only species that are in common between both datasets
+florence_dt = florence_dt[ess %in% species_dt[, species_code_nfi]]
+inra = inra[species_code_inra %in% species_dt[, species_code_inra]]
+
+## Keep only columns of interest and rename
+# Florence dt (NFI)
+florence_dt = florence_dt[, .(ess, tarif, c13, htot, hdec, hdecro, fnewbft, vbft, surbille)]
+if (florence_dt[, all.equal(ess, tarif)])
+{
+	print("Cols tarif and ess are identical, which was expected! Removing column tarif")
+	florence_dt[, tarif := NULL]
+} else {
+	warning("Cols tarif and ess were expected to be identical, but it is not the case!")
+}
+setnames(florence_dt, new = c("species_code_nfi", "circumference_m", "height",
+	"taper_height", "taper_height_flo", "Fbole", "bole_volume_m3", "is_dec"))
+florence_dt = merge.data.table(florence_dt, species_dt[, .(species_code_nfi, speciesName_sci)],
+	by = "species_code_nfi")
+
+# Inra (Emerge)
+inra = inra[, .(speciesName_sci, unique_id, year, circumference_m, height, bole_volume_m3, total_volume_m3)]
+
+#### Add species_code_nfi to inra dataset
+inra = merge.data.table(inra, species_dt[, .(speciesName_sci, species_code_nfi)], by = "speciesName_sci")
+```
+
+```{r}
+#### Estimate taper height
+## In case of, reorder the dataset per unique_id and at_height (should be the case already)
+profiles = profiles[order(unique_id, at_height)]
+# profiles[unique_id == "pin_sylvestre_2_0031"]
+
+## Check that the first log is always starting at 0.5 and second one at 1.5
+to_remove = profiles[profiles[, .I[1], by = unique_id]$V1][at_height > 0.5, unique_id]
+profiles = profiles[!(unique_id %in% to_remove)]
+
+to_remove = profiles[profiles[, .I[2], by = unique_id]$V1][at_height != 1.5, unique_id]
+profiles = profiles[!(unique_id %in% to_remove)]
+
+## Remove all the individuals with log length != 1
+profiles[, `:=`(prev_vol = data.table::shift(log_volume_m3, type = "lag"),
+	length = at_height - data.table::shift(at_height, type = "lag")), by = unique_id]
+
+profiles[profiles[, .I[1], by = unique_id]$V1, length := 1] # Already ensured that 1m between two first log
+
+check = profiles[length > 1, unique(unique_id)]
+profiles = profiles[!(unique_id %in% check)]
+
+if (profiles[, any(length != 1)])
+{
+	stop("The delta log was supposed to be one only!")
+} else {
+	profiles[, length := NULL]
+}
+
+## Compute delta volumes between two consecutive measurements
+# Rk: A decrease of 10% of circumference (i.e., C_{n + 1} <= 0.9 C_n) implies 19% in volume (0.9^2 = 0.81)
+# 	Because I insured there are only one meter long logs, computing the ratio of volume is enough
+#	compared to the more complicated formula:
+# 	(log_volume_m3 / prev_vol) * (prev_length / length) <= 0.81
+
+profiles[, dec_19pct_vol := (log_volume_m3 / prev_vol) <= 0.81, by = unique_id]
+
+## Rk It is almost sure that the circumference decreases by 10% between 0.5 and 1.5 m height, because of
+#		butt swell (empattement).
+profiles = profiles[at_height > 1.5]
+
+# For each unique_id, keep only the first TRUE as TRUE, which will indicate taper height (hdec)
+profiles[, first_true := FALSE]
+
+profiles[dec_19pct_vol == TRUE, 
+	first_true := .I == .I[1],  # mark only the first TRUE row within each group
+	by = unique_id]
+
+# plot(profiles[1:16, at_height], profiles[1:16, log_volume_m3], pch = 19, cex = 0.75, col = "#CD212A")
+
+## Compute hdec, remove -0.5 because log measurements are every metre from 0.5
+hdec_dt = profiles[(first_true), .(unique_id, hdec = at_height - 0.5)]
+
+missing_dt = data.table(
+	unique_id = unique(profiles$unique_id)[!(unique(profiles$unique_id) %in% hdec_dt$unique_id)],
+	hdec = -Inf)
+# unique(profiles$unique_id)[!(unique(profiles$unique_id) %in% inra$unique_id)][1:3]
+
+profiles = rbindlist(list(hdec_dt, missing_dt))
+```
+
+```{r}
+inra[unique_id %in% profiles$unique_id]
+
+inra = merge.data.table(inra, profiles, by = "unique_id", all.x = TRUE)
+inra[!is.na(hdec), .N, by = speciesName_sci]
+setkey(inra, speciesName_sci)
+
+inra_hdec = inra[!is.na(hdec)]
+inra_hdec[is.infinite(hdec), hdec := height]
+setnames(inra_hdec, old = "hdec", new = "taper_height")
+```
+
+<!--------------------------------------------------------------------------------------->
+<!---------------------------------    MAIN CONTENT    ---------------------------------->
+<!--------------------------------------------------------------------------------------->
+
+## Introduction
+
+Dans ce fichier, je teste un modèle utilisant conjointement les jeux de données IFN, $\Fd$, et Emerge, $\Ed$,  afin d'estimer le volume bois-fort tige, $\Vbole$ (IFN et Emerge) et le volume de houppier (Emerge uniquement). Le modèle est le suivant:
+
+$$
+	[\tb, \, \tc, \, \sigbe, \sigbf, \Sigmabf | \Ed, \Fd] \propto [\Fd | \tb, \sigbf] \cdot
+		[\Ed | \tb, \tc, \Sigmabf] \times [\text{Priors}],
+$$ {#eq-joined_model}
+
+où $\tb$ et $\tc$ sont les paramètres de régressions associés à BFT (bole) et houppier (crown), *resp.*, $\sigbe$ et $\sigbf$ sont les std. dev. résiduels de $\Vbole$ pour les jeux de données $\Ed$ et $\Fd$, *resp.*, et $\sigc$ est le std. dev. du houppier. Enfin la matrice symétrique de var-covar, $\Sigmabf$, est définie par:
+
+$$
+	\Sigmabf = \begin{bmatrix}
+		\sigbe^2 & \cdot \\
+		\rho \sigbe \sigc & \sigc^2
+	\end{bmatrix},
+$$
+où $\rho$ est la correlation entre $\sigbe$ et $\sigc$.
+
+A noter que $\tb$ est déterminé par les deux jeux de données, mais avec une variance résiduelle spécifique à chaque jeu. Bien sûr, c'est $\Fd$ qui déterminera principalement le posterior des paramètres $\tb$. Enfin, les résidus du lieklihood de $\Ed$ sachant $\tb$ et $\tc$ sont corrélés, car $\Vbole$ et $\Vcrown$ sont mesurés sur les mêmes individus. Une fois contrôlé pour $c$ et $h$, on peut s'attendre à une corrélation négative entre les deux volumes, car Emerge contient principalement des arbres de haute futaie, qui investissent beaucoup plus dans le tronc que le houppier.
+
+## Préparation des données
+
+Les données sont préparées dans `01_prepare_data.qmd`, mais il reste deux chose à faire:
+1. Florence utilise la variable $\hdec'$, qui est égale à $\hdec$ s'il y a une découpe, et $h$ sinon. La raison de cette variable est que jusqu'en 2019, $\hdec$ était mesuré à la découpe 7 cm s'il n'y avait pas de découpe franche (10% de réduction sur 1 m). Il faut donc corriger $\hdec$ dans les données préparées (`taper_height_flo`)
+2. Les données Emerge ne contiennent pas $\hdec$. J'applique donc la formule bête et méchante de la définition de $\hdec$: la hauteur à laquelle il y a une découpe franche le cas échéant, et $h$ sinon. Les données Emerge contiennent les volumes de billions d'un mètre de long. Je cherche donc une réduction du volume de 19% dans le cas de longueur de billon constante. Plus généralement, le volume d'un billon $i$ est $V_i = \pi c_i^2 L_i$. Il y a découpe si $c_{i + 1} \leqslant 0.9 c_i$, *i.e.*, si:
+
+$$
+	\frac{V_{i + 1}}{V_i} \frac{L_i}{L_{i + 1}} \leqslant 0.81.
+$$
+
+Dans le cas où $L_i = \text{cste}$, on a bien une réduction de volume de 19%. La figure @fig-hdec montre que les valeurs estimées tombent bien dans l'intervalle des valeurs mesurés sur les arbres de l'IFN.
+
+```{r}
+#| fig-cap: $\hdec$ mesuré pour l'IFN (en bleu), et estimé pour Emerge (en jaune) en fonction de la circonférence.
+#| label: fig-hdec
+
+plot(florence_dt[, circumference_m], florence_dt[, taper_height], xlab = "Circumference", pch = 19,
+	ylab = "Taper height", axes = FALSE, cex = 0.75, col = "#0F7BA2")
+points(inra_hdec[, circumference_m], inra_hdec[, taper_height], pch = 19, col = "#FAB255")
+axis(1)
+axis(2, las = 1)
+```
+
+## Test du modèle @eq-joined_model
