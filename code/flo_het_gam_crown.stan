@@ -9,11 +9,11 @@ data {
 
 	// Explanatory
 	vector <lower = 0> [N_inra] circumference_m_inra;
-	vector <lower = 0> [N_inra] taper_height_inra;
+	vector <lower = 0> [N_inra] taper_height_flo_inra;
 	vector <lower = 0> [N_inra] height_inra;
 
 	vector <lower = 0> [N] circumference_m;
-	vector <lower = 0> [N] taper_height;
+	vector <lower = 0> [N] taper_height_flo;
 	vector <lower = 0> [N] height;
 
 	// Observations
@@ -36,6 +36,7 @@ transformed data {
 
 	// Predictor crown volume
 	vector [N_inra] log_circumference_m_inra = log(circumference_m_inra);
+	vector [N] log_circumference_m = log(circumference_m);
 
 	// Transformed dependent variables...
 	// ... Form factor
@@ -110,10 +111,48 @@ model {
 	{
 		// print(mu_vec[i, :]);
 		target += multi_normal_cholesky_lpdf(to_vector({fnewbft_inra[i], log_crown[i]}) |
-			[alpha0 + alpha1*p1 + alpha2*p2 + alpha3*p3 + alpha4*p4,
+			[alpha0 + alpha1*p1_inra[i] + alpha2*p2_inra[i] + alpha3*p3_inra[i] + alpha4*p4_inra[i],
 			beta0 + beta1*log_circumference_m_inra[i] + beta2*log_circumference_m_inra[i].^2 +
 			beta3*log_circumference_m_inra[i].^3 + beta4*log_circumference_m_inra[i].^4],
 			diag_pre_multiply([sigma_b_inra, sigma_c], L));
+	}
+}
+
+generated quantities {
+	matrix [2, N] pred_Vb_Cr_joined;
+	matrix [2, N] pred_Vb_Cr_joined_inra;
+	cov_matrix[2] Sigma;
+	cov_matrix[2] Sigma_inra;
+
+	real rho = tcrossprod(L)[2, 1];
+
+	// Prediction of the total volume
+	{
+		vector [2] joined_pred;
+
+		for (i in 1:N)
+		{
+			Sigma = multiply_lower_tri_self_transpose(diag_pre_multiply([sigma_b, sigma_c], L));
+			joined_pred = multi_normal_rng(
+				[alpha0 + alpha1*p1[i] + alpha2*p2[i] + alpha3*p3[i] + alpha4*p4[i],
+				beta0 + beta1*log_circumference_m[i] + beta2*log_circumference_m[i].^2 +
+				beta3*log_circumference_m[i].^3 + beta4*log_circumference_m[i].^4],
+				Sigma);
+
+			pred_Vb_Cr_joined[, i] = joined_pred;
+		}
+
+		for (i in 1:N_inra)
+		{
+			Sigma_inra = multiply_lower_tri_self_transpose(diag_pre_multiply([sigma_b_inra, sigma_c], L));
+			joined_pred = multi_normal_rng(
+				[alpha0 + alpha1*p1_inra[i] + alpha2*p2_inra[i] + alpha3*p3_inra[i] + alpha4*p4_inra[i],
+				beta0 + beta1*log_circumference_m_inra[i] + beta2*log_circumference_m_inra[i].^2 +
+				beta3*log_circumference_m_inra[i].^3 + beta4*log_circumference_m_inra[i].^4],
+				Sigma_inra);
+
+			pred_Vb_Cr_joined_inra[, i] = joined_pred;
+		}
 	}
 }
 
