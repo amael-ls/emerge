@@ -41,11 +41,11 @@ transformed data {
 	// Transformed dependent variables...
 	// ... Form factor
 	vector [N] fnewbft = 4*pi()*bole_volume_m3 ./ (circumference_m.^2 .* height) .* (1 - 1.3 ./ height).^2;
-	vector [N] fnewbft_inra = 4*pi()*bole_volume_m3_inra ./ (circumference_m_inra.^2 .* height_inra) .*
+	vector [N_inra] fnewbft_inra = 4*pi()*bole_volume_m3_inra ./ (circumference_m_inra.^2 .* height_inra) .*
 		(1 - 1.3 ./ height_inra).^2;
 	
 	// ... Log crown volume
-	vector [N] log_crown = log(crown_volume_m3_inra);
+	vector [N_inra] log_crown = log(crown_volume_m3_inra);
 
 }
 
@@ -107,7 +107,7 @@ model {
 	target += normal_lpdf(fnewbft | alpha0 + alpha1*p1 + alpha2*p2 + alpha3*p3 + alpha4*p4, sigma_b);
 	
 	// ... on bole and crown volumes, regression with correlation on Emerge data (INRA)
-	for (i in 1:N)
+	for (i in 1:N_inra)
 	{
 		// print(mu_vec[i, :]);
 		target += multi_normal_cholesky_lpdf(to_vector({fnewbft_inra[i], log_crown[i]}) |
