@@ -52,7 +52,31 @@ format:
           \usepackage{unicode-math}
 ---
 
+```{r}
+library(data.table)
+# library(copula)
+```
+
 ## Introduction
 
-Notes résumant et explorant [un post sur les copulas](https://bggj.is/posts/stan-copulas-1/index.html), et que j'adapte ici à deux variables gammamiquement distribuées (genre ce qui m'intéresse pour les volumes!).
+Notes résumant et explorant d'abord @Genest2007 puis [un post sur les copulas](https://bggj.is/posts/stan-copulas-1/index.html), et que j'adapte ici à deux variables gammamiquement distribuées (genre ce qui m'intéresse pour les volumes!).
 
+## Lecture de @Genest2007
+
+### Données
+Le jeu de données est constitué de six mesure (voir @fig-data).
+```{r}
+data = data.table(i = 1:6, X = c(-2.224, -1.538, -0.807, 0.024, 0.052, 1.324),
+	Y = c(0.431, 1.035, 0.586, 1.465, 1.115, -0.847))
+```
+
+```{r}
+#| fig-cap: Jeu de données
+#| label: fig-data
+
+plot(data$X, data$Y, pch = 19, axes = FALSE, xlab = "X", ylab = "Y")
+axis(1)
+axis(2, las = 1)
+```
+
+### Dependence and ranks
