@@ -50,16 +50,48 @@ format:
     include-in-header:
       - text: |
           \usepackage{unicode-math}
+          \usepackage{amsfonts}
 ---
 
 ```{r}
+rm(list = ls())
+graphics.off()
+
 library(data.table)
+library(gt)
 # library(copula)
 ```
 
 ## Introduction
 
 Notes résumant et explorant d'abord @Genest2007 puis [un post sur les copulas](https://bggj.is/posts/stan-copulas-1/index.html), et que j'adapte ici à deux variables gammamiquement distribuées (genre ce qui m'intéresse pour les volumes!).
+
+Key factors in choosing a copula:
+
+1. Tail dependence: do extreme values tend to occur together?
+	- Gaussian copula: No tail dependence (extremes are independent)
+	- t-copula: Symmetric tail dependence (joint extremes in both tails)
+	- Gumbel copula: Upper tail dependence only (joint high values)
+	- Clayton copula: Lower tail dependence only (joint low values)
+
+2. Symmetry: is the dependence symmetric, or is positive correlation different from negative?
+	- Gaussian, t, FGM: Symmetric
+	- Clayton, Gumbel: Asymmetric
+
+3. Strength of dependence
+	- FGM: Limited to weak dependence (|ρ| ≤ 1/3 in terms of correlation)
+	- Gaussian, t, Archimedean copulas: Can achieve full range of dependence
+
+4. Shape of relationship
+	- Copulas with same correlation can have very different joint behavior
+	- Example: Both Gaussian and t-copula can have ρ = 0.7, but t-copula has more probability mass in joint extremes
+
+Un copula est une fonction qui capture la structure de dépendance entre variables aléatoires de manière indépendante de leurs distributions marginales individuelles. Le copula sépare deux aspects distincts d'une distribution multivariée:
+1. Les distributions marginales (univariées) de chaque variable -- qui peuvent suivre n'importe quelle forme (normale, exponentielle, etc.)
+2. La structure de dépendance entre les variables -- capturée par le copula
+
+Cette séparation signifie que la dépendance n'est pas définie par des paramètres spécifiques aux distributions marginales (comme des moyennes ou variances), mais par une fonction qui existe "au-dessus" de ces distributions, d'où une nature "non-paramétrique". C'est un peu contre-intuitif d'utiliser ce phrasé, sachant que chaque famille de copule à un/des paramètres à estimer! Le non paramétrique est au niveau des marginales.
+
 
 ## Lecture de @Genest2007
 
@@ -80,3 +112,70 @@ axis(2, las = 1)
 ```
 
 ### Dependence and ranks
+
+L'unique copula $C$ (unicité d'après le théorème de Sklar) représentant la dépendance jointe des deux variables $X$ et $Y$ est invariant à toute transformation monotone croissante. Donc, toute représentation graphique de la dépendance devrait posséder cette propriété! La paire de rangs (voir @fig-rank) est une fonction toute trouvée afin de représenter les données et le copula judicieusement.
+
+```{r}
+data[, R := rank(data$X)]
+data[, S := rank(data$Y)]
+```
+
+```{r}
+#| fig-cap: Rangs, où $R = rank(X)$ et $S = rank(Y)$
+#| label: fig-rank
+plot(data$R, data$S, pch = 19, axes = FALSE, xlab = "R", ylab = "S")
+axis(1)
+axis(2, las = 1)
+```
+
+En divisant par $n + 1$, on obtient le so-called *empirical copula*:
+$$
+	C_n(u, v) = \frac{1}{n} \sum_{i = 1}^{n} \mathbb{1} \left[ \frac{R_i}{n + 1} \geqslant u, \, \frac{S_i}{n + 1} \geqslant v \right],
+$$
+où $\mathbb{1}$ est la fonction indicatrice. $C_n$ est la meilleure *sample-based* représentation de $C$, et est utilisé pour mesurer empiriquement la dépendance. Sperman's $\rho$ est défini par:
+$$
+\rho_n = \frac{12}{n(n + 1)(n - 1)} \sum_i R_i S_i - 3 \frac{n + 1}{n - 1}
+$$
+
+Dans notre cas, ça donne:
+```{r}
+rho_sperman = function(rk_dt, col1 = "R", col2 = "S")
+{
+	n = rk_dt[, .N]
+	sig = sum(rk_dt[, ..col1]*rk_dt[, ..col2])
+	return(12/(n*(n + 1)*(n - 1)) * sig - 3*(n + 1)/(n - 1))
+}
+```
+
+```{r}
+data.table(rho = rho_sperman(data), r = cor(data$X, data$Y, method = "pearson")) |>
+	gt() |>
+	cols_label(
+		rho = md("$\\rho_n$ (Spearmann)"),
+		r = md("$r_n$ (Pearson)"),
+	) |>
+	fmt_number(
+		decimals = 3
+	)
+```
+
+## Simulation des données
+
+```{r}
+# # 1. Create a Gaussian copula with desired correlation
+# rho <- 0.7  # correlation
+# cop <- normalCopula(rho, dim = 2)
+
+# # 2. Generate correlated uniform samples
+# n <- 1000
+# u <- rCopula(n, cop)  # gives n x 2 matrix of correlated uniforms
+
+# # 3. Transform to gamma distributions
+# shape1 <- 2; rate1 <- 1
+# shape2 <- 3; rate2 <- 0.5
+
+# x1 <- qgamma(u[,1], shape = shape1, rate = rate1)
+# x2 <- qgamma(u[,2], shape = shape2, rate = rate2)
+
+# Now x1 and x2 are correlated gamma variables
+```
