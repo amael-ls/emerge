@@ -1,0 +1,209 @@
+\documentclass[oneside]{caesar_book}
+
+%%%%%%%%%%%%%%%%%%%    PACKAGES    %%%%%%%%%%%%%%%%%%%
+%% Font
+\usepackage{fontspec}
+	\setmainfont{TexGyrePagella}
+
+\usepackage{fontawesome5}
+
+\usepackage{unicode-math}
+	\setmathfont{TexGyrePagella-math}
+
+%% Languages
+\usepackage{polyglossia}
+	\setdefaultlanguage{french}
+
+%% Figures...
+% ...graphics
+\usepackage[luatex]{graphicx}
+
+\usepackage[font = small]{caption}
+\usepackage{subcaption}
+	\captionsetup{subrefformat=parens}
+	\captionsetup[subfigure]{aboveskip=0pt,belowskip=25pt} % aboveskip=-30pt,belowskip=-2pt, or skip=-30pt for both
+
+% ...Colours
+\usepackage{xcolor}
+	\definecolor{egyptRed}{HTML}{DD5129}
+	\definecolor{egyptBlue}{HTML}{0F7BA2}
+	\definecolor{egyptGreen}{HTML}{43B284}
+	\definecolor{egyptYellow}{HTML}{FAB255}
+	\definecolor{lightGrey}{HTML}{CCCCCC}
+
+%% Links
+\usepackage{url}
+\usepackage[luatex, colorlinks=true, linkcolor=egyptBlue, urlcolor=egyptRed, citecolor=egyptGreen]{hyperref}
+
+%% Bibliography
+\usepackage{csquotes}
+\usepackage[backend=biber,style=philosophy-classic]{biblatex}
+\addbibresource{./centralised_bibliography/references.bib}
+
+%% Mathematics
+\usepackage{amsmath}
+\usepackage{siunitx}
+\usepackage{xfrac}
+
+%% Coding
+\usepackage{listings}
+
+\lstset{language=R,
+	basicstyle=\small\ttfamily,
+	stringstyle=\color{egyptGreen},
+	otherkeywords={0,1,2,3,4,5,6,7,8,9},
+	morekeywords={TRUE,FALSE},
+	deletekeywords={data,frame,length,as,character,table},
+	keywordstyle=\color{egyptBlue},
+	commentstyle=\color{egyptGreen},
+}
+
+%% Tables
+\usepackage{booktabs}
+
+%% Info box
+\usepackage[most]{tcolorbox}
+\tcbsetforeverylayer{shield externalize}
+\tcbset {
+	base/.style={
+		arc=0mm, 
+		bottomtitle=0.5mm,
+		boxrule=0mm,
+		colbacktitle=black!10!white, 
+		coltitle=black, 
+		fonttitle=\bfseries, 
+		left=2.5mm,
+		leftrule=1mm,
+		right=3.5mm,
+		title={#1},
+		toptitle=0.75mm, 
+	}
+}
+
+% new tcolorbox environment
+% #1: tcolorbox options
+% #2: box title
+\newtcolorbox[auto counter]{rkbox}[2][]{%
+	fonttitle = \bfseries,
+	title = Remarque~\thetcbcounter : #2,
+	breakable,
+	#1}
+
+\newtcolorbox{sumbox}[1]{
+	colframe=egyptBlue, 
+	base={#1}
+}
+
+% Information about the book
+% to be put on the title page
+\title{Note de préparation pour la réunion du 29.01.2026}
+
+\author{Amaël Le Squin}
+
+\publisher{}
+
+%----------------------------------------------------------------------------------------
+%	NEW COMMANDS
+%----------------------------------------------------------------------------------------
+
+%% Text
+\newcommand{\ie}{\textit{i.e., }}
+\newcommand{\eg}{\textit{e.g., }}
+
+%% Maths
+% Shortcuts
+\newcommand{\ddec}{d_{\text{dec}}}
+\newcommand{\hdec}{h_{\text{dec}}}
+\newcommand{\Vtot}{V_{\text{tot}}}
+\newcommand{\Vbft}{V_{\text{bft}}}
+\newcommand{\Fbft}{F_{\text{bft}}}
+\newcommand{\sigmap}{\sigma_{\text{pow}}}
+
+% Operators
+\DeclareMathOperator{\logit}{logit}
+\DeclareMathOperator{\MVN}{MVN}
+\DeclareMathOperator{\Cov}{Cov}
+\DeclareMathOperator{\E}{\mathbb{E}}
+
+\makeatletter
+\renewcommand{\maketitlepage}{% the title page is generated here
+	% first count the number of lines in the title
+	\begin{fullwidth}
+	\raggedright%
+	\setbox0\vbox{%
+		\noindent\fontsize{30}{38}\selectfont\textls{\MakeTextUppercase{\@title}}\par
+		\count@\z@
+		\loop
+		\unskip\unpenalty\unskip\unpenalty\unskip
+		\setbox0\lastbox
+		\ifvoid0
+			\xdef\caesar@numlines{\the\count@}%
+		\else
+			\advance\count@\@ne
+		\repeat%
+	}
+	% now adjust the vertical spaces accordingly
+	\edef\caesar@titlespace{\the\dimexpr 210pt - 15pt * \caesar@numlines \relax}% calculate the necessary space
+	\cleardoublepage%
+	\begingroup%
+	{%
+	\sffamily%
+%		\begin{fullwidth}%
+		\vspace*{0em}% one line extra space
+		\noindent\LARGE\textls{\MakeTextUppercase{\@author}}\par
+		\vfill%
+		\noindent\fontsize{30}{38}\selectfont\textcolor{darkgray}{\textls{\MakeTextUppercase{\@title}}}\par
+		\vfill%
+		\vspace{\caesar@titlespace}%
+		\noindent\Large\textls{\MakeTextUppercase{\caesar@publisher}}\par
+%		\end{fullwidth}%
+	}%
+	\thispagestyle{empty}%
+	\endgroup%
+	\end{fullwidth}
+}
+\makeatother
+
+\begin{document}
+% no page numbering in front matter
+\frontmatter
+% generate the title page
+\maketitlepage
+% show the table of contents
+\tableofcontents
+% start to number the pages
+\mainmatter
+
+\chapter{Introduction}
+
+Cette note concerne le volume aérien total, \( \Vtot \). Le but est de le modéliser avec le jeu de donnée Emerge (protocol Oudin de 1930 et campagne de 2009--2010), combiné aux données suisse EFM (Experimental Forest Monitoring), publié dans \cite{Didion2024}. Il y a \num{38742} individus qui possède les trois prédicteurs requis pour le volume bois-fort tige, à savoir la circonférence \( c \), la hauteur, \( h \), et la hauteur de découpe, \( \hdec \).
+
+\begin{sumbox}{Remarque}
+	A noter que \( \hdec \) a été estimée pour les arbres d'Emerge protocol Oudin ayant un profil de tige, soit \num{2596} individus sur les \num{10806} d'Emerge Oudin. Si nous n'avons pas besoin de \( \hdec \), nous auront alors \num{8210} individus de plus dans la base (\(10806 - 2596\)). De même, toutes les hauteurs de découpe des arbres EFM ont été estimées, soient \num{35920} individus. Seuls les \num{226} individus d'Emerge 2009--2010 ont eu leurs \( \hdec \) mesurés sur le terrain. Les estimés ne semblent pas aberrant. Le nombre d'individus par espèce est hétéroclite, et ne reflète pas les proportions observées en forêt française. Par exemple, \textit{Quercus robur} (chêne sessile) n'a que 8 individus.
+\end{sumbox}
+
+Dans les sections suivantes, je décris les différentes options que j'aimerais discuter pour la réunion du 29.01.2026. Selon que\( \hdec \) soit impliqué ou non dans nos modèles, nous aurons \num{8210} individus de plus en France. A noter que je montre aussi les voies que je pense condamnées.
+
+\chapter{Les cinq options}
+
+
+\section{Bayésien séquentiel et modèle joint}
+
+
+\section{Bi-variée \( \Gamma \)}
+
+
+\section{Copulas}
+
+
+\section{\( Vbft \) comme prédicteur}
+
+
+\section{Modèle conditionnel}
+
+
+\chapter{Conclusion}
+
+\printbibliography
+
+\end{document}

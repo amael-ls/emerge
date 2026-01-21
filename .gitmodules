@@ -7,3 +7,6 @@
 [submodule "communications/cst/2025-10-30/presentation/centralised_bibliography"]
 	path = communications/cst/2025-10-30/presentation/centralised_bibliography
 	url = https://github.com/amael-ls/centralised_bibliography.git
+[submodule "communications/reunions_recurrentes/2026-01-29/centralised_bibliography"]
+	path = communications/reunions_recurrentes/2026-01-29/centralised_bibliography
+	url = https://github.com/amael-ls/centralised_bibliography.git
