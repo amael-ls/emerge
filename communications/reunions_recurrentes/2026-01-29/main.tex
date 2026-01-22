@@ -133,7 +133,7 @@
 \newcommand{\de}{\mathcal{D}_{em}} % Emerge dataset both
 % \newcommand{\deO}{\mathcal{D}_{oudin}} % Emerge dataset oudin
 % \newcommand{\deM}{\mathcal{D}_{09-10}} % Emerge dataset modern
-\newcommand{\ds}{\mathcal{D}_{ch}} % IGN dataset
+\newcommand{\dc}{\mathcal{D}_{ch}} % IGN dataset
 
 \makeatletter
 \renewcommand{\maketitlepage}{% the title page is generated here
@@ -184,15 +184,45 @@
 % start to number the pages
 \mainmatter
 
-\chapter{Introduction}
-
-Cette note concerne le volume aérien total, \( \Vtot \). Le but est de le modéliser avec le jeu de donnée Emerge (protocol Oudin de 1930 et campagne de 2009--2010), combiné aux données suisse EFM (Experimental Forest Monitoring), publié dans \cite{Didion2024}. Il y a \num{38742} individus qui possède les trois prédicteurs requis pour le volume bois-fort tige, à savoir la circonférence \( c \), la hauteur, \( h \), et la hauteur de découpe, \( \hdec \).
-
-\begin{sumbox}{Remarque}
-	A noter que \( \hdec \) a été estimée pour les arbres d'Emerge protocol Oudin ayant un profil de tige, soit \num{2596} individus sur les \num{10806} d'Emerge Oudin. Si nous n'avons pas besoin de \( \hdec \), nous auront alors \num{8210} individus de plus dans la base (\(10806 - 2596\)). De même, toutes les hauteurs de découpe des arbres EFM ont été estimées, soient \num{35920} individus. Seuls les \num{226} individus d'Emerge 2009--2010 ont eu leurs \( \hdec \) mesurés sur le terrain. Les estimés ne semblent pas aberrant. Le nombre d'individus par espèce est hétéroclite, et ne reflète pas les proportions observées en forêt française. Par exemple, \textit{Quercus robur} (chêne sessile) n'a que 8 individus.
+\begin{sumbox}{Objectif}
+	Modéliser le volume aérien total, \( \Vtot \) en respectant les contraintes suivantes:
+	\begin{enumerate}
+		\item Volumes hiérarchiques: \( 0 < \Vbft < \Vtot \).
+		\item Volume bois-fort tige: \( \Vbft \) a une formule fixe qui ne peut pas changer.
+	\end{enumerate}
 \end{sumbox}
 
-Dans les sections suivantes, je décris les différentes options que j'aimerais discuter pour la réunion du 29.01.2026. Selon que \( \hdec \) soit impliqué ou non dans nos modèles, nous aurons \num{8210} individus de plus en France. A noter que je montre aussi les voies que je pense condamnées.
+\chapter{Introduction}
+
+Cette note concerne le volume aérien total, \( \Vtot \). Le but est de le paramétrer avec le jeu de donnée Emerge \( \de \) (protocol Oudin de 1930 et campagne de 2009--2010), combiné aux données suisse EFM \( \dc \) (Experimental Forest Monitoring), publié dans \cite{Didion2024}. Il y a \num{38742} individus qui possède les trois prédicteurs requis pour le volume bois-fort tige, à savoir la circonférence \( c \), la hauteur, \( h \), et la hauteur de découpe, \( \hdec \), condition \textit{sine qua non} a un modèle conjoint.
+
+\begin{rkbox}{Estimation et mesure d'\( \hdec \)}
+	A noter que \( \hdec \) a été estimée pour les arbres d'Emerge protocol Oudin ayant un profil de tige, soit \num{2596} individus sur les \num{10806} d'Emerge Oudin. Si nous n'avons pas besoin de \( \hdec \), nous auront alors \num{8210} individus de plus dans la base (\(10806 - 2596\)). De même, toutes les hauteurs de découpe des arbres Suisse ont été estimées, soient \num{35920} individus. Seuls les \num{226} individus d'Emerge 2009--2010 ont eu leurs \( \hdec \) mesurés sur le terrain. Les estimés ne semblent pas aberrant, cependant la précision ne peut aller en deça du mètre. Le nombre d'individus par espèce est hétéroclite, et ne reflète pas les proportions observées en forêt française. Par exemple, \textit{Quercus robur} (chêne sessile) n'a que 8 individus.
+\end{rkbox}
+
+Dans les sections suivantes, je décris les différentes options que j'aimerais discuter pour la réunion du 29.01.2026. Au total, il y a 15 options, répartie en cinq variables à modéliser et trois choix pour chaque\sidenote{Je vais essayer de garder ce vocabulaire: une \textbf{option} = une combinaison d'une \textbf{variable sélectionnée} et d'une manière \textbf{choisie} de paramétrer le modèle}. A noter que je pense certaines combinaisons condamnées. \\
+
+\noindent Les cinq variables sont les suivantes:
+\begin{enumerate}[label=(\alph*), ref=(\alph*)]
+	\item \( \Vtot \): prendre quelle distribution pour satisfaire \( \Vbft < \Vtot \)? \label{it::vtot}
+	\item \( \sfrac{\Vtot}{\Vbft} - 1 \): le \( - 1 \) est pour ramener la variable jusqu'à zéro et donc pouvoir utiliser une loi \( \Gamma \), lognormale, etc. Cette formule est utilisée par \cite{Longuetaud2013} avec une distribution normale. \label{it::longuetaud}
+	\item \( \ln(\sfrac{\Vtot}{\Vbft}) \): ici \( \ln \) est utilisé pour prolonger la variable jusqu'à zéro. \label{it::ln}
+	\item \( \sfrac{\Vbft}{\Vtot} \): le ratio sur lequel j'ai déjà travaillé avec une distribution Beta. \label{it::myRatio}
+	\item \( \Vhou = \Vtot - \Vbft \): le volume du houppier qui peut être modélisé via une \( \Gamma \), etc. Il faudra utiliser des simulations pour calculer les intervalles de confiance de \( \Vtot \). En effet, il n'y a pas de solution analytique à la somme de deux distributions \( \Gamma \) ou lognormale! Donc \( \Vtot = \Vbft + \Vhou \) ne peut-être déterminé que par simulation, surtout s'il y a une structure de corrélation entre les deux! \label{it::houp}
+\end{enumerate}
+Je dénote par \( Y \) la variable sélectionnée parmi ces cinq possibilités lorsque j'ai besoin d'une notation générique. \\
+
+\noindent Les trois choix possibles d'estimation des paramètres pour une variable \( Y \) sont les suivants:
+\begin{enumerate}
+	\item Simultané: \( \Vbft \) et \( Vtot \) paramétrés conjointement avec les trois jeux de données. \( \di \), \( \de \), et \( \dc \). \label{it::sim}
+	\item \label{it::seqdep} Séquentiel avec dépendance: \( \Vbft \) paramétré seul sur \( \di \) (déjà fait\sidenote{rapport en cours d'écriture et relecture}). Puis, mise à jour des paramètres de \( \Vbft \) lors de la paramétrisation conjointe avec \( \Vtot \) sur \( \de \) et \( \dc \). La dépendance est donc prise en compte.
+	\item Séquentiel, pas de dépendance: \( \Vbft \) paramétré seul sur \( \di \) et \( \Vtot \) seul sur \( \de \) et \( \dc \). La dépendance n'est pas prise en compte, mais selon le choix de la variable parmi les cinq choix décrit ci-dessus, on peut tout de même s'assurer de \( \Vbft < \Vtot\). \label{it::seqindep}
+\end{enumerate}
+
+\subsection{A quoi cela sert-il de modéliser la dépendance entre les deux variables \( \Vbft \) et \( \Vtot \)?}
+Dans le cas le plus simple \ref{it::seqindep}, où il n'y a pas de dépendance entre \( \Vbft \) et la variable \( Y \), on suppose qu'une fois les prédicteurs \( X \) connus (\ie \( c \), \( h \), et \( \hdec \)), savoir que le volume de tronc est plus gros que ce qui est prédit par \( X \) ne m'apporte aucune info supplémentaire sur \( Y \). A l'inverse, les choix \ref{it::sim} et \ref{it::seqdep} suppose une correlation dans les résidus. Si elle est positive, alors savoir que \( \Vbft \) est plus gros qu'attendu sachant \( X \) veut dire qu'on peut s'attendre à ce que \( Y \) soit plus gros que prévu sachant \( X \). J'améliore donc mes prédictions sur \( Y \) car je ne sous-estime pas la variance attendue à ce point là.
+
+\subsection{Notations}
 
 Afin de simplifier la lecture, je réuni les notations et acronymes utilisés dans ce rapport dans la table \ref{tab::notations}.
 \begin{table*}[h]
@@ -201,15 +231,15 @@ Afin de simplifier la lecture, je réuni les notations et acronymes utilisés da
 		\toprule
 		\multicolumn{1}{c}{\textbf{Symbole}} & \multicolumn{1}{c}{\textbf{Définition}} & \multicolumn{1}{c}{\textbf{Unité}} \\
 		\( c \) & Circonférence à hauteur de poitrine & \si{\centi\metre} \\
+		\( \dc \) & Jeu de données Suisse & - \\
 		\( \de \) & Jeu de données Emerge (Oudin et 2009--2010) & - \\
 		\( \di \) & Jeu de données IFN & - \\
-		\( \ds \) & Jeu de données Suisse & - \\
 		\( \E[] \) & Espérance (operateur donnant la valeur attendue d'une variable aléatoire) & divers \\
 		\( h \) & Hauteur totale & \si{\metre} \\
 		\( \hdec \) & Hauteur à \qty{7}{\centi\metre} de diamètre (si pas de découpe et avant 2019, \( h \) sinon) ou à une décroissance brusque (\( \geqslant 10\% \) en \qty{1}{\metre}) & \si{\metre} \\
 		\( \Vbft \) & Volume bois-fort tige & \si{\cubic\metre} \\
 		\( \Vtot \) & Volume aérien total & \si{\cubic\metre} \\
-		\( X, \, Y \) & Variables explicatives et dépendante, \textit{resp.} & - \\
+		\( X, \, Y \) & Variables explicatives et dépendante (parmi cinq choix), \textit{resp.} & - \\
 		\( \alpha, \, \beta, \, \gamma \) & Paramètres & divers \\
 		\( \symbfup{\theta} \) & Vecteur de paramètres & divers \\
 		\( \mu \) & Moyenne (souvent une fonction des variables explicatives et des paramètres) & - \\
@@ -218,32 +248,17 @@ Afin de simplifier la lecture, je réuni les notations et acronymes utilisés da
 	\caption{Notations utilisées dans ce document.\label{tab::notations}}
 \end{table*}
 
-\chapter{Les cinq options}
-
-\begin{sumbox}{Objectif}
-	Modéliser le volume aérien total, \( \Vtot \) en respectant les contraintes suivantes:
-	\begin{enumerate}
-		\item Volumes hiérarchiques: \( 0 < \Vbft < \Vtot \)
-		\item \( \Vbft \) a une formule fixe qui ne peut pas changer
-	\end{enumerate}
-\end{sumbox}
+\chapter{Les cinq variables}
 
 \section{Bayésien séquentiel et modèle joint}
 
 Cette approche est pragmatique et se déroule en deux temps:
 \begin{enumerate}
 	\item Paramétrer \( \Vbft \) sur le jeu de donnée IFN, \( \di \) (déjà fait, rapport en cours d'écriture et relecture).
-	\item Paramétrer conjointement \( \Vbft \) et, un choix parmi ceux listé ci dessous, \textbf{après} étape 1, sur les jeux de données Emerge, \( \de \), et Suisse, \( \ds \). Le prior de \( \Vbft \) est le posterior obtenue à l'étape 1:
-	\begin{enumerate}
-		\item \( \Vtot \): prendre quelle distribution pour satisfaire \( \Vbft < \Vtot \)? \label{it::vtot}
-		\item \( \sfrac{\Vtot}{\Vbft} - 1 \): le \( - 1 \) est pour ramener la variable jusqu'à zéro et donc pouvoir utiliser une loi \( \Gamma \), lognormale, etc. Cette formule est utilisée par \cite{Longuetaud2013} avec une distribution normale. \label{it::longuetaud}
-		\item \( \ln(\sfrac{\Vtot}{\Vbft}) \): ici \( \ln \) est utilisé pour prolonger la variable jusqu'à zéro. \label{it::ln}
-		\item \( \sfrac{\Vbft}{\Vtot} \): le ratio sur lequel j'ai déjà travaillé avec une distribution Beta. \label{it::myRatio}
-		\item \( \Vhou = \Vtot - \Vbft \): le volume du houppier qui peut être modélisé via une \( \Gamma \), etc. Il faudra utiliser des simulations pour calculer les intervalles de confiance de \( \Vtot \). En effet, il n'y a pas de solution analytique à la somme de deux distributions \( \Gamma \) ou lognormale! Donc \( \Vtot = \Vbft + \Vhou \) ne peut-être déterminé que par simulation, surtout s'il y a une structure de corrélation entre les deux! \label{it::houp}
-	\end{enumerate}
+	\item Paramétrer conjointement \( \Vbft \) et, un choix parmi ceux listé ci dessous, \textbf{après} étape 1, sur les jeux de données Emerge, \( \de \), et Suisse, \( \dc \). Le prior de \( \Vbft \) est le posterior obtenue à l'étape 1:
 \end{enumerate}
 
-\begin{rkbox}
+\begin{rkbox}{Sequential Bayesian updating}
 	Stan ne sait pas faire du sequential Bayesian updating proprement. Voir les posts de \href{https://statmodeling.stat.columbia.edu/2025/05/15/using-stan-to-do-sequential-bayesian-updating/}{Andrew Gelman} et de \href{https://statmodeling.stat.columbia.edu/2025/05/13/chaining-bayes-priors-from-posteriors/}{Bob Carpenter} à ce sujet. Dans mon cas, les posteriors de paramètres sont gaussiens (du moins de ce que j'en ai vu!), donc assez simple, pas besoin de la méthode décrite dans le post de Bob Carpenter.
 \end{rkbox}
 
@@ -262,19 +277,20 @@ Les copulas sont des fonctions qui capturent la structure de dépendance entre v
 Il y a donc deux étapes:
 \begin{enumerate}
 	\item choisir les marginales.
-	\item choisir la famille de copulas qui correspond à la structure de dépendance observée \parencite{Nelsen2006}.
+	\item choisir la famille de copulas qui correspond à la structure de dépendance observée \parencite{Nelsen2006}\sidenote{Voir particulièrement le chap. IV, p. 109 et la table 4.1 p. 116, ainsi que les figures 4.2--4.9 p. 120--122}.
 \end{enumerate}
 
-\begin{rkbox}
-	Ce choix est le plus compliqué à mettre en \oe uvre car je ne sais pas vraiment comment le coder en R. Il y a des infos dans les posts de \href{https://bggj.is/posts/stan-copulas-1/}{bggj}.
+\begin{rkbox}{Complexité}
+	Cette structure de dépendance est la plus compliquée à mettre en \oe uvre car je ne sais pas vraiment comment le coder en R. Il y a des infos dans les posts de \href{https://bggj.is/posts/stan-copulas-1/}{bggj}.
 \end{rkbox}
 
-\section{\( Vbft \) comme prédicteur}
+Tous les choix de \ref{it::vtot} à \ref{it::houp} sont codables avec les copulas sous réserve que le copula respecte l'ordre stochastique dans le cas du choix \ref{it::vtot} afin de garantir \( \Vbft < \Vtot \). Je n'ai aucune de quel copula est capable de ça.
 
+\section{\( Vbft \) comme prédicteur de \( \Vtot \)}
 
+Je pourrais tenter \( \Vbft \) comme prédicteur de \( \Vtot \), mais dans ce cas il y a un risque de propagation d'erreur important, car \( \Vbft \) n'est pas mesuré mais simulé! Je ne recommande donc pas cette voie\dots
 
-
-\section{Modèle conditionnel}
+% \section{Modèle conditionnel}
 
 
 \chapter{Conclusion}
