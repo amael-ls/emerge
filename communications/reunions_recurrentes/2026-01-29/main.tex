@@ -243,14 +243,35 @@ Cette approche est pragmatique et se déroule en deux temps:
 	\end{enumerate}
 \end{enumerate}
 
+\begin{rkbox}
+	Stan ne sait pas faire du sequential Bayesian updating proprement. Voir les posts de \href{https://statmodeling.stat.columbia.edu/2025/05/15/using-stan-to-do-sequential-bayesian-updating/}{Andrew Gelman} et de \href{https://statmodeling.stat.columbia.edu/2025/05/13/chaining-bayes-priors-from-posteriors/}{Bob Carpenter} à ce sujet. Dans mon cas, les posteriors de paramètres sont gaussiens (du moins de ce que j'en ai vu!), donc assez simple, pas besoin de la méthode décrite dans le post de Bob Carpenter.
+\end{rkbox}
+
 \section{Distribution bivariée \( \Gamma \)}
 
 Il y a diverses distributions bivariées \( \Gamma \), chacune induisant une structure différente de dépendance entre les variables. Il faudra donc faire des tests. Le choix \ref{it::vtot} est automatiquement écarté car il n'est pas possible de garantir \( \Vbft < \Vtot \). De même, le choix \ref{it::myRatio} est aussi écarté car il nécessite une distribution Beta. Il reste donc les choix \ref{it::longuetaud}, \ref{it::ln} et \ref{it::houp}, ce qui implique qu'il n'y a pas de distribution analytique pour \( \Vtot \) (produit ou somme de distribution \( \Gamma \) selon nos choix). Donc là encore, \( \Vtot \) ne peut-être déterminé que par simulation.
 
 \section{Copulas}
 
+Les copulas sont des fonctions qui capturent la structure de dépendance entre variables aléatoires de manière indépendante de leurs distributions marginales individuelles. Là où les distributions bivariées (bigamma, multilognormale et multinormale par exemple) fixent la même loi marginale pour toutes les composantes et imposent une structure de dépendance, les copulas le font en deux niveaux et de manière flexible:
+\begin{itemize}
+	\item Chaque composante peut suivre une loi marginale univariée différente.
+	\item Le copulas vient capturer la dépendance entre les variables. Autrement dit, la dépendance est capturée via une fonction `au dessus' des marginales.
+\end{itemize}
+
+Il y a donc deux étapes:
+\begin{enumerate}
+	\item choisir les marginales.
+	\item choisir la famille de copulas qui correspond à la structure de dépendance observée \parencite{Nelsen2006}.
+\end{enumerate}
+
+\begin{rkbox}
+	Ce choix est le plus compliqué à mettre en \oe uvre car je ne sais pas vraiment comment le coder en R. Il y a des infos dans les posts de \href{https://bggj.is/posts/stan-copulas-1/}{bggj}.
+\end{rkbox}
 
 \section{\( Vbft \) comme prédicteur}
+
+
 
 
 \section{Modèle conditionnel}
