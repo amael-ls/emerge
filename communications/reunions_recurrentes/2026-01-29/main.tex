@@ -35,6 +35,9 @@
 \usepackage{url}
 \usepackage[luatex, colorlinks=true, linkcolor=egyptBlue, urlcolor=egyptRed, citecolor=egyptGreen]{hyperref}
 
+%% List
+\usepackage{enumitem}
+
 %% Bibliography
 \usepackage{csquotes}
 \usepackage[backend=biber,style=philosophy-classic]{biblatex}
@@ -116,7 +119,7 @@
 \newcommand{\hdec}{h_{\text{dec}}}
 \newcommand{\Vtot}{V_{\text{tot}}}
 \newcommand{\Vbft}{V_{\text{bft}}}
-\newcommand{\Fbft}{F_{\text{bft}}}
+\newcommand{\Vhou}{V_{\text{hou}}}
 \newcommand{\sigmap}{\sigma_{\text{pow}}}
 
 % Operators
@@ -124,6 +127,13 @@
 \DeclareMathOperator{\MVN}{MVN}
 \DeclareMathOperator{\Cov}{Cov}
 \DeclareMathOperator{\E}{\mathbb{E}}
+
+% Datasets
+\newcommand{\di}{\mathcal{D}_{ifn}} % IGN dataset
+\newcommand{\de}{\mathcal{D}_{em}} % Emerge dataset both
+% \newcommand{\deO}{\mathcal{D}_{oudin}} % Emerge dataset oudin
+% \newcommand{\deM}{\mathcal{D}_{09-10}} % Emerge dataset modern
+\newcommand{\ds}{\mathcal{D}_{ch}} % IGN dataset
 
 \makeatletter
 \renewcommand{\maketitlepage}{% the title page is generated here
@@ -182,16 +192,60 @@ Cette note concerne le volume aérien total, \( \Vtot \). Le but est de le modé
 	A noter que \( \hdec \) a été estimée pour les arbres d'Emerge protocol Oudin ayant un profil de tige, soit \num{2596} individus sur les \num{10806} d'Emerge Oudin. Si nous n'avons pas besoin de \( \hdec \), nous auront alors \num{8210} individus de plus dans la base (\(10806 - 2596\)). De même, toutes les hauteurs de découpe des arbres EFM ont été estimées, soient \num{35920} individus. Seuls les \num{226} individus d'Emerge 2009--2010 ont eu leurs \( \hdec \) mesurés sur le terrain. Les estimés ne semblent pas aberrant. Le nombre d'individus par espèce est hétéroclite, et ne reflète pas les proportions observées en forêt française. Par exemple, \textit{Quercus robur} (chêne sessile) n'a que 8 individus.
 \end{sumbox}
 
-Dans les sections suivantes, je décris les différentes options que j'aimerais discuter pour la réunion du 29.01.2026. Selon que\( \hdec \) soit impliqué ou non dans nos modèles, nous aurons \num{8210} individus de plus en France. A noter que je montre aussi les voies que je pense condamnées.
+Dans les sections suivantes, je décris les différentes options que j'aimerais discuter pour la réunion du 29.01.2026. Selon que \( \hdec \) soit impliqué ou non dans nos modèles, nous aurons \num{8210} individus de plus en France. A noter que je montre aussi les voies que je pense condamnées.
+
+Afin de simplifier la lecture, je réuni les notations et acronymes utilisés dans ce rapport dans la table \ref{tab::notations}.
+\begin{table*}[h]
+	\centering
+	\begin{tabular}{@{}rp{10cm}l@{}}
+		\toprule
+		\multicolumn{1}{c}{\textbf{Symbole}} & \multicolumn{1}{c}{\textbf{Définition}} & \multicolumn{1}{c}{\textbf{Unité}} \\
+		\( c \) & Circonférence à hauteur de poitrine & \si{\centi\metre} \\
+		\( \de \) & Jeu de données Emerge (Oudin et 2009--2010) & - \\
+		\( \di \) & Jeu de données IFN & - \\
+		\( \ds \) & Jeu de données Suisse & - \\
+		\( \E[] \) & Espérance (operateur donnant la valeur attendue d'une variable aléatoire) & divers \\
+		\( h \) & Hauteur totale & \si{\metre} \\
+		\( \hdec \) & Hauteur à \qty{7}{\centi\metre} de diamètre (si pas de découpe et avant 2019, \( h \) sinon) ou à une décroissance brusque (\( \geqslant 10\% \) en \qty{1}{\metre}) & \si{\metre} \\
+		\( \Vbft \) & Volume bois-fort tige & \si{\cubic\metre} \\
+		\( \Vtot \) & Volume aérien total & \si{\cubic\metre} \\
+		\( X, \, Y \) & Variables explicatives et dépendante, \textit{resp.} & - \\
+		\( \alpha, \, \beta, \, \gamma \) & Paramètres & divers \\
+		\( \symbfup{\theta} \) & Vecteur de paramètres & divers \\
+		\( \mu \) & Moyenne (souvent une fonction des variables explicatives et des paramètres) & - \\
+		\bottomrule
+	\end{tabular}
+	\caption{Notations utilisées dans ce document.\label{tab::notations}}
+\end{table*}
 
 \chapter{Les cinq options}
 
+\begin{sumbox}{Objectif}
+	Modéliser le volume aérien total, \( \Vtot \) en respectant les contraintes suivantes:
+	\begin{enumerate}
+		\item Volumes hiérarchiques: \( 0 < \Vbft < \Vtot \)
+		\item \( \Vbft \) a une formule fixe qui ne peut pas changer
+	\end{enumerate}
+\end{sumbox}
 
 \section{Bayésien séquentiel et modèle joint}
 
+Cette approche est pragmatique et se déroule en deux temps:
+\begin{enumerate}
+	\item Paramétrer \( \Vbft \) sur le jeu de donnée IFN, \( \di \) (déjà fait, rapport en cours d'écriture et relecture).
+	\item Paramétrer conjointement \( \Vbft \) et, un choix parmi ceux listé ci dessous, \textbf{après} étape 1, sur les jeux de données Emerge, \( \de \), et Suisse, \( \ds \). Le prior de \( \Vbft \) est le posterior obtenue à l'étape 1:
+	\begin{enumerate}
+		\item \( \Vtot \): prendre quelle distribution pour satisfaire \( \Vbft < \Vtot \)? \label{it::vtot}
+		\item \( \sfrac{\Vtot}{\Vbft} - 1 \): le \( - 1 \) est pour ramener la variable jusqu'à zéro et donc pouvoir utiliser une loi \( \Gamma \), lognormale, etc. Cette formule est utilisée par \cite{Longuetaud2013} avec une distribution normale. \label{it::longuetaud}
+		\item \( \ln(\sfrac{\Vtot}{\Vbft}) \): ici \( \ln \) est utilisé pour prolonger la variable jusqu'à zéro. \label{it::ln}
+		\item \( \sfrac{\Vbft}{\Vtot} \): le ratio sur lequel j'ai déjà travaillé avec une distribution Beta. \label{it::myRatio}
+		\item \( \Vhou = \Vtot - \Vbft \): le volume du houppier qui peut être modélisé via une \( \Gamma \), etc. Il faudra utiliser des simulations pour calculer les intervalles de confiance de \( \Vtot \). En effet, il n'y a pas de solution analytique à la somme de deux distributions \( \Gamma \) ou lognormale! Donc \( \Vtot = \Vbft + \Vhou \) ne peut-être déterminé que par simulation, surtout s'il y a une structure de corrélation entre les deux! \label{it::houp}
+	\end{enumerate}
+\end{enumerate}
 
-\section{Bi-variée \( \Gamma \)}
+\section{Distribution bivariée \( \Gamma \)}
 
+Il y a diverses distributions bivariées \( \Gamma \), chacune induisant une structure différente de dépendance entre les variables. Il faudra donc faire des tests. Le choix \ref{it::vtot} est automatiquement écarté car il n'est pas possible de garantir \( \Vbft < \Vtot \). De même, le choix \ref{it::myRatio} est aussi écarté car il nécessite une distribution Beta. Il reste donc les choix \ref{it::longuetaud}, \ref{it::ln} et \ref{it::houp}, ce qui implique qu'il n'y a pas de distribution analytique pour \( \Vtot \) (produit ou somme de distribution \( \Gamma \) selon nos choix). Donc là encore, \( \Vtot \) ne peut-être déterminé que par simulation.
 
 \section{Copulas}
 
