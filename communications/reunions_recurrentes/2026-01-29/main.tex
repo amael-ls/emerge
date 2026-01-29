@@ -115,12 +115,22 @@
 
 %% Maths
 % Shortcuts
+% ... Explanatory variables
 \newcommand{\ddec}{d_{\text{dec}}}
 \newcommand{\hdec}{h_{\text{dec}}}
+
+% ... Dependant variables
 \newcommand{\Vtot}{V_{\text{tot}}}
 \newcommand{\Vbft}{V_{\text{bft}}}
 \newcommand{\Vhou}{V_{\text{hou}}}
-\newcommand{\sigmap}{\sigma_{\text{pow}}}
+
+% ... Variances
+\newcommand{\sigmaB}{\sigma_{\text{bft, ifn}}}
+\newcommand{\Sigmabf}{\symbfup{\Sigma}}
+
+% ... Parameters
+\newcommand{\thetaB}{\symbfup{\theta}_{\text{bft}}}
+\newcommand{\thetaY}{\symbfup{\theta}_{Y}}
 
 % Operators
 \DeclareMathOperator{\logit}{logit}
@@ -129,11 +139,9 @@
 \DeclareMathOperator{\E}{\mathbb{E}}
 
 % Datasets
-\newcommand{\di}{\mathcal{D}_{ifn}} % IGN dataset
-\newcommand{\de}{\mathcal{D}_{em}} % Emerge dataset both
-% \newcommand{\deO}{\mathcal{D}_{oudin}} % Emerge dataset oudin
-% \newcommand{\deM}{\mathcal{D}_{09-10}} % Emerge dataset modern
-\newcommand{\dc}{\mathcal{D}_{ch}} % IGN dataset
+\newcommand{\di}{\mathcal{D}_{\text{ifn}}} % IGN dataset
+\newcommand{\de}{\mathcal{D}_{\text{em}}} % Emerge dataset both
+\newcommand{\dc}{\mathcal{D}_{\text{ch}}} % IGN dataset
 
 \makeatletter
 \renewcommand{\maketitlepage}{% the title page is generated here
@@ -194,13 +202,13 @@
 
 \chapter{Introduction}
 
-Cette note concerne le volume aérien total, \( \Vtot \). Le but est de le paramétrer avec le jeu de donnée Emerge \( \de \) (protocol Oudin de 1930 et campagne de 2009--2010), combiné aux données suisse EFM \( \dc \) (Experimental Forest Monitoring), publié dans \cite{Didion2024}. Il y a \num{38742} individus qui possède les trois prédicteurs requis pour le volume bois-fort tige, à savoir la circonférence \( c \), la hauteur, \( h \), et la hauteur de découpe, \( \hdec \), condition \textit{sine qua non} a un modèle conjoint.
+Cette note concerne le volume aérien total, \( \Vtot \). Le but est de le paramétrer avec le jeu de donnée Emerge \( \de \) (protocol Oudin de 1930 et campagne de 2009--2010), combiné aux données suisse EFM, \( \dc \) \parencite[Experimental Forest Monitoring]{Didion2024}. Il y a \num{38742} individus qui possèdent les trois prédicteurs requis pour le volume bois-fort tige, à savoir la circonférence \( c \), la hauteur, \( h \), et la hauteur de découpe, \( \hdec \), condition \textit{sine qua non} d'un modèle conjoint.
 
-\begin{rkbox}{Estimation et mesure d'\( \hdec \)}
-	A noter que \( \hdec \) a été estimée pour les arbres d'Emerge protocol Oudin ayant un profil de tige, soit \num{2596} individus sur les \num{10806} d'Emerge Oudin. Si nous n'avons pas besoin de \( \hdec \), nous auront alors \num{8210} individus de plus dans la base (\(10806 - 2596\)). De même, toutes les hauteurs de découpe des arbres Suisse ont été estimées, soient \num{35920} individus. Seuls les \num{226} individus d'Emerge 2009--2010 ont eu leurs \( \hdec \) mesurés sur le terrain. Les estimés ne semblent pas aberrant, cependant la précision ne peut aller en deça du mètre. Le nombre d'individus par espèce est hétéroclite, et ne reflète pas les proportions observées en forêt française. Par exemple, \textit{Quercus robur} (chêne sessile) n'a que 8 individus.
+\begin{rkbox}{Estimation et mesure de \( \hdec \)}
+	A noter que \( \hdec \) a été estimée pour les arbres d'Emerge protocol Oudin ayant un profil de tige, soit \num{2596} individus sur les \num{10806} d'Emerge Oudin. Si nous n'avons pas besoin de \( \hdec \) (\ie pas de modèle conjoint, et \( \hdec \) non utilisée comme variable explicative), alors nous aurons \num{8210} individus de plus dans la base (\(10806 - 2596\)). De même, toutes les hauteurs de découpe des arbres suisses ont été estimées, soient \num{35920} individus. Seuls les \num{226} individus d'Emerge 2009--2010 ont eu leurs \( \hdec \) mesurées sur le terrain. Les estimées ne semblent pas aberrantes, cependant la précision ne peut aller en deça du mètre. Le nombre d'individus par espèce est hétéroclite, et ne reflète pas les proportions observées en forêt française. Par exemple, \textit{Quercus robur} (chêne sessile) n'a que 8 individus.
 \end{rkbox}
 
-Dans les sections suivantes, je décris les différentes options que j'aimerais discuter pour la réunion du 29.01.2026. Au total, il y a 15 options, répartie en cinq variables à modéliser et trois choix pour chaque\sidenote{Je vais essayer de garder ce vocabulaire: une \textbf{option} = une combinaison d'une \textbf{variable sélectionnée} et d'une manière \textbf{choisie} de paramétrer le modèle}. A noter que je pense certaines combinaisons condamnées. \\
+Dans les sections suivantes, je décris les différentes options que j'aimerais discuter pour la réunion du 29.01.2026. Au total, il y a 15 options, répartie en cinq variables à modéliser et trois choix pour chaque\sidenote{Je vais essayer de garder ce vocabulaire: une \textbf{option} = une combinaison d'une \textbf{variable sélectionnée} et d'une manière \textbf{choisie} de paramétrer le modèle}. A noter que certaines combinaisons sont condamnées telle, par exemple, la modélisation d'un ratio compris entre 0 et 1 par une loi gamma. \\
 
 \noindent Les cinq variables sont les suivantes:
 \begin{enumerate}[label=(\alph*), ref=(\alph*)]
@@ -208,19 +216,22 @@ Dans les sections suivantes, je décris les différentes options que j'aimerais 
 	\item \( \sfrac{\Vtot}{\Vbft} - 1 \): le \( - 1 \) est pour ramener la variable jusqu'à zéro et donc pouvoir utiliser une loi \( \Gamma \), lognormale, etc. Cette formule est utilisée par \cite{Longuetaud2013} avec une distribution normale. \label{it::longuetaud}
 	\item \( \ln(\sfrac{\Vtot}{\Vbft}) \): ici \( \ln \) est utilisé pour prolonger la variable jusqu'à zéro. \label{it::ln}
 	\item \( \sfrac{\Vbft}{\Vtot} \): le ratio sur lequel j'ai déjà travaillé avec une distribution Beta. \label{it::myRatio}
-	\item \( \Vhou = \Vtot - \Vbft \): le volume du houppier qui peut être modélisé via une \( \Gamma \), etc. Il faudra utiliser des simulations pour calculer les intervalles de confiance de \( \Vtot \). En effet, il n'y a pas de solution analytique à la somme de deux distributions \( \Gamma \) ou lognormale! Donc \( \Vtot = \Vbft + \Vhou \) ne peut-être déterminé que par simulation, surtout s'il y a une structure de corrélation entre les deux! \label{it::houp}
+	\item \( \Vhou = \Vtot - \Vbft \): le volume du houppier qui peut être modélisé via une \( \Gamma \), etc. \label{it::houp}
 \end{enumerate}
-Je dénote par \( Y \) la variable sélectionnée parmi ces cinq possibilités lorsque j'ai besoin d'une notation générique. \\
+Je dénote par \( Y \) la variable sélectionnée parmi ces cinq possibilités lorsque j'ai besoin d'une notation générique.
+\begin{rkbox}{Calculs analytiques}
+	Pour les cas \ref{it::longuetaud} à \ref{it::houp}, il faudra utiliser des simulations pour calculer la valeur moyenne ou les intervalles de confiance de \( \Vtot \). En effet, il n'y a pas de solution analytique à la somme ou produit de deux distributions \( \Gamma \) ou lognormale! Ceci est encore plus valable lorsqu'il y a une structure de corrélation entre la variable modélisée \( Y \) et \( \Vbft \)!
+\end{rkbox}
 
-\noindent Les trois choix possibles d'estimation des paramètres pour une variable \( Y \) sont les suivants:
+Les trois choix possibles d'estimation des paramètres pour une variable \( Y \) sont les suivants:
 \begin{enumerate}
-	\item Simultané: \( \Vbft \) et \( Vtot \) paramétrés conjointement avec les trois jeux de données. \( \di \), \( \de \), et \( \dc \). \label{it::sim}
-	\item \label{it::seqdep} Séquentiel avec dépendance: \( \Vbft \) paramétré seul sur \( \di \) (déjà fait\sidenote{rapport en cours d'écriture et relecture}). Puis, mise à jour des paramètres de \( \Vbft \) lors de la paramétrisation conjointe avec \( \Vtot \) sur \( \de \) et \( \dc \). La dépendance est donc prise en compte.
-	\item Séquentiel, pas de dépendance: \( \Vbft \) paramétré seul sur \( \di \) et \( \Vtot \) seul sur \( \de \) et \( \dc \). La dépendance n'est pas prise en compte, mais selon le choix de la variable parmi les cinq choix décrit ci-dessus, on peut tout de même s'assurer de \( \Vbft < \Vtot\). \label{it::seqindep}
+	\item Simultanée: \( \Vbft \) et \( \Vtot \) paramétrés conjointement avec les trois jeux de données, \( \di \) (pour \( \Vbft \) uniquement, données de 1988 à 2007), \( \de \), et \( \dc \). \label{it::simultanee}
+	\item \label{it::seqdep} Séquentielle avec dépendance: \( \Vbft \) paramétré seul sur \( \di \) (déjà fait\sidenote{Rapport en cours de relecture, tests des tarifs au niveau national à faire}). Puis, mise à jour des paramètres de \( \Vbft \) lors de la paramétrisation conjointe avec \( \Vtot \) sur \( \de \) et \( \dc \). La dépendance est donc prise en compte.
+	\item Séquentielle, pas de dépendance: \( \Vbft \) paramétré seul sur \( \di \) et \( \Vtot \) seul sur \( \de \) et \( \dc \). La dépendance n'est pas prise en compte, mais selon le choix de la variable parmi les cinq choix décrit ci-dessus, on peut tout de même s'assurer de \( \Vbft < \Vtot\). \label{it::seqindep}
 \end{enumerate}
 
 \subsection{A quoi cela sert-il de modéliser la dépendance entre les deux variables \( \Vbft \) et \( \Vtot \)?}
-Dans le cas le plus simple \ref{it::seqindep}, où il n'y a pas de dépendance entre \( \Vbft \) et la variable \( Y \), on suppose qu'une fois les prédicteurs \( X \) connus (\ie \( c \), \( h \), et \( \hdec \)), savoir que le volume de tronc est plus gros que ce qui est prédit par \( X \) ne m'apporte aucune info supplémentaire sur \( Y \). A l'inverse, les choix \ref{it::sim} et \ref{it::seqdep} suppose une correlation dans les résidus. Si elle est positive, alors savoir que \( \Vbft \) est plus gros qu'attendu sachant \( X \) veut dire qu'on peut s'attendre à ce que \( Y \) soit plus gros que prévu sachant \( X \). J'améliore donc mes prédictions sur \( Y \) car je ne sous-estime pas la variance attendue à ce point là.
+Dans le cas le plus simple \ref{it::seqindep}, où il n'y a pas de dépendance entre \( \Vbft \) et la variable \( Y \), on suppose qu'une fois les prédicteurs \( X \) connus (\ie \( c \), \( h \), et \( \hdec \)), savoir que le volume de tronc est plus gros que ce qui est prédit par \( X \) ne m'apporte aucune info supplémentaire sur \( Y \). A l'inverse, les choix \ref{it::simultanee} et \ref{it::seqdep} suppose une correlation dans les résidus. Si elle est positive, alors savoir que \( \Vbft \) est plus gros qu'attendu sachant \( X \) veut dire qu'on peut s'attendre à ce que \( Y \) soit plus gros que prévu sachant \( X \). J'améliore donc mes prédictions sur \( Y \) car je ne sous-estime pas la variance attendue à ce point là.
 
 \subsection{Notations}
 
@@ -231,50 +242,66 @@ Afin de simplifier la lecture, je réuni les notations et acronymes utilisés da
 		\toprule
 		\multicolumn{1}{c}{\textbf{Symbole}} & \multicolumn{1}{c}{\textbf{Définition}} & \multicolumn{1}{c}{\textbf{Unité}} \\
 		\( c \) & Circonférence à hauteur de poitrine & \si{\centi\metre} \\
-		\( \dc \) & Jeu de données Suisse & - \\
-		\( \de \) & Jeu de données Emerge (Oudin et 2009--2010) & - \\
-		\( \di \) & Jeu de données IFN & - \\
-		\( \E[] \) & Espérance (operateur donnant la valeur attendue d'une variable aléatoire) & divers \\
+		\( \dc \) & Jeu de données Suisse & divers \\
+		\( \de \) & Jeu de données Emerge (Oudin et campagnes 2009--2010) & divers \\
+		\( \di \) & Jeu de données IFN 1988--2007 pour le bois-fort tige & divers \\
 		\( h \) & Hauteur totale & \si{\metre} \\
 		\( \hdec \) & Hauteur à \qty{7}{\centi\metre} de diamètre (si pas de découpe et avant 2019, \( h \) sinon) ou à une décroissance brusque (\( \geqslant 10\% \) en \qty{1}{\metre}) & \si{\metre} \\
 		\( \Vbft \) & Volume bois-fort tige & \si{\cubic\metre} \\
 		\( \Vtot \) & Volume aérien total & \si{\cubic\metre} \\
-		\( X, \, Y \) & Variables explicatives et dépendante (parmi cinq choix), \textit{resp.} & - \\
+		\( X, \, Y \) & Variables explicatives et dépendante (parmi cinq choix), \textit{resp.} & divers \\
 		\( \alpha, \, \beta, \, \gamma \) & Paramètres & divers \\
-		\( \symbfup{\theta} \) & Vecteur de paramètres & divers \\
-		\( \mu \) & Moyenne (souvent une fonction des variables explicatives et des paramètres) & - \\
+		\( \symbfup{\theta}_k \) & Vecteur de paramètres liés à la variable \( k \) & divers \\
+		\( \mu \) & Moyenne (souvent une fonction des variables explicatives et des paramètres) & divers \\
 		\bottomrule
 	\end{tabular}
-	\caption{Notations utilisées dans ce document.\label{tab::notations}}
+	\caption{Notations utilisées dans ce document. Il n'est pas important dans cette note de distinguer \( \hdec \) de \( \hdec' \) (la variable de Florence).\label{tab::notations}}
 \end{table*}
 
-\chapter{Les cinq variables}
+\chapter{Discussions des trois choix possibles et des conséquences}
 
-\section{Bayésien séquentiel et modèle joint}
+\section{Estimation simultanée}
 
-Cette approche est pragmatique et se déroule en deux temps:
-\begin{enumerate}
-	\item Paramétrer \( \Vbft \) sur le jeu de donnée IFN, \( \di \) (déjà fait, rapport en cours d'écriture et relecture).
-	\item Paramétrer conjointement \( \Vbft \) et, un choix parmi ceux listé ci dessous, \textbf{après} étape 1, sur les jeux de données Emerge, \( \de \), et Suisse, \( \dc \). Le prior de \( \Vbft \) est le posterior obtenue à l'étape 1:
-\end{enumerate}
+La formule que j'envisage pour ce choix est:
+\begin{equation} \label{eq::simultanee}
+	\begin{aligned} \relax
+		\big[\thetaY, \, \thetaB, \, & \Sigmabf, \, \sigmaB \, \big| \, \di, \, \de, \, \dc \big] \propto \\
+			& \big[\di \, \big| \, \thetaB, \, \sigmaB \big] \times\\
+			& \big[\de, \, \dc \, \big| \, \thetaB, \, \thetaY, \, \Sigmabf \big] \times \\
+			& \big[\thetaB \big] \big[ \thetaY \big] \big[ \sigmaB \big] \big[ \Sigmabf \big]
+	\end{aligned}
+\end{equation}
+Cette formule est divisée en trois parties:
+\begin{itemize}
+	\item La première partie concerne le volume bois-fort tige avec le jeu de donnée IFN, \( \di \), et les paramètres à estimer sont \( \thetaB \) et \( \sigmaB \). La formulation de ce modèle est fixe et ne peut pas changer (modèle de Florence).
+	\item La deuxième partie concerne \textbf{conjointement} le volume bois-fort tige et le volume aérien total. Les paramètres à estimer sont \( \thetaB \) (conjointement avec la première partie\sidenote{Voir remarque \ref{box::biais}}), \( \thetaY \) qui concerne les paramètres de la variable sélectionnée \( Y \), et la matrice de covariance \( \Sigmabf \) (contenant trois paramètres: la variance du bois-fort tige \( \sigma_{\text{bft, em}} \)\sidenote{Non nécessairement égale à \( \sigmaB \) car les protocoles de mesures sont différents, et les arbres ont un profil plus régulié dans \( \de \) et \( \dc \)}, la variance de \( Y \), \( \sigma_Y \), et la correlation \( \rho \)).
+	\item La dernière partie sont les informations \textit{a priori} sur les paramètres.
+\end{itemize}
 
-\begin{rkbox}{Sequential Bayesian updating}
-	Stan ne sait pas faire du sequential Bayesian updating proprement. Voir les posts de \href{https://statmodeling.stat.columbia.edu/2025/05/15/using-stan-to-do-sequential-bayesian-updating/}{Andrew Gelman} et de \href{https://statmodeling.stat.columbia.edu/2025/05/13/chaining-bayes-priors-from-posteriors/}{Bob Carpenter} à ce sujet. Dans mon cas, les posteriors de paramètres sont gaussiens (du moins de ce que j'en ai vu!), donc assez simple, pas besoin de la méthode décrite dans le post de Bob Carpenter.
+\begin{rkbox}[label = box::biais]{Biais potentiels}
+	Le vecteur \( \thetaB \) est principalement estimé dans la première partie de l'équation \eqref{eq::simultanee}, mais attention: la seconde partie de l'équation peut potentiellement biaiser les résultats puisque \( \de \) et \( \dc \) sont biaisés vers des arbres élancés! Il faudra donc comparer les distributions postérieures des composantes de \( \thetaB \) avec les distributions actuelles.
 \end{rkbox}
 
-\section{Distribution bivariée \( \Gamma \)}
+Il y a deux manières de modéliser la structure de dépendance entre \( Y \) et \( \Vbft \):
+\begin{enumerate}
+	\item Une distribution bivariée gamma
+	\item Un copulas
+\end{enumerate}
+que je décris dans les deux sections ci-dessous.
 
-Il y a diverses distributions bivariées \( \Gamma \), chacune induisant une structure différente de dépendance entre les variables. Il faudra donc faire des tests. Le choix \ref{it::vtot} est automatiquement écarté car il n'est pas possible de garantir \( \Vbft < \Vtot \). De même, le choix \ref{it::myRatio} est aussi écarté car il nécessite une distribution Beta. Il reste donc les choix \ref{it::longuetaud}, \ref{it::ln} et \ref{it::houp}, ce qui implique qu'il n'y a pas de distribution analytique pour \( \Vtot \) (produit ou somme de distribution \( \Gamma \) selon nos choix). Donc là encore, \( \Vtot \) ne peut-être déterminé que par simulation.
+\subsection{Distributions bivariées}
 
-\section{Copulas}
+Puisque le volume bois-fort tige suit une loi gamma et que cette formule ne peut être changée\sidenote{Je pourrais changer pour une lognormale, mais ça donne plus de poids aux valeurs extrêmes (kurtosis)}, nous sommes limités à utiliser une loi bi-gamma. Il existe plusieurs distributions bi-gamma, chacune induisant une structure différente de dépendance entre les variables. Il faudra donc faire des tests afin de les comparer entre elles\sidenote{Ainsi qu'à une distribution lognormale multivariée si je change la distribution de \( \Vbft \) pour une lognormale}. A noter que la sélection \ref{it::vtot} est automatiquement écartée car il n'est pas possible de garantir \( \Vbft < \Vtot \). De même, la sélection \ref{it::myRatio} est aussi écartée car elle nécessite une distribution Beta. Il reste donc les variables \ref{it::longuetaud}, \ref{it::ln} et \ref{it::houp}, ce qui implique qu'il n'y a pas de distribution analytique pour \( \Vtot \) (produit ou somme de distribution \( \Gamma \) selon la variable sélectionnée). Donc \( \Vtot \) ne peut-être déterminé que par simulation.
 
-Les copulas sont des fonctions qui capturent la structure de dépendance entre variables aléatoires de manière indépendante de leurs distributions marginales individuelles. Là où les distributions bivariées (bigamma, multilognormale et multinormale par exemple) fixent la même loi marginale pour toutes les composantes et imposent une structure de dépendance, les copulas le font en deux niveaux et de manière flexible:
+\subsection{Copulas}
+
+Les copulas sont des fonctions qui capturent la structure de dépendance entre variables aléatoires de manière indépendante de leurs distributions marginales individuelles. Là où les distributions bivariées (bi-gamma et multivariée lognormale par exemple) fixent la même loi marginale pour toutes les composantes et imposent une structure de dépendance via une matrice, les copulas le font en deux niveaux et de manière flexible:
 \begin{itemize}
 	\item Chaque composante peut suivre une loi marginale univariée différente.
 	\item Le copulas vient capturer la dépendance entre les variables. Autrement dit, la dépendance est capturée via une fonction `au dessus' des marginales.
 \end{itemize}
 
-Il y a donc deux étapes:
+\noindent Il y a donc deux étapes:
 \begin{enumerate}
 	\item choisir les marginales.
 	\item choisir la famille de copulas qui correspond à la structure de dépendance observée \parencite{Nelsen2006}\sidenote{Voir particulièrement le chap. IV, p. 109 et la table 4.1 p. 116, ainsi que les figures 4.2--4.9 p. 120--122}.
@@ -284,16 +311,68 @@ Il y a donc deux étapes:
 	Cette structure de dépendance est la plus compliquée à mettre en \oe uvre car je ne sais pas vraiment comment le coder en R. Il y a des infos dans les posts de \href{https://bggj.is/posts/stan-copulas-1/}{bggj}.
 \end{rkbox}
 
-Tous les choix de \ref{it::vtot} à \ref{it::houp} sont codables avec les copulas sous réserve que le copula respecte l'ordre stochastique dans le cas du choix \ref{it::vtot} afin de garantir \( \Vbft < \Vtot \). Je n'ai aucune de quel copula est capable de ça.
+Toutes les variables de \ref{it::vtot} à \ref{it::houp} sont codables avec les copulas sous réserve que le copula respecte l'ordre stochastique dans le cas de la selection \ref{it::vtot} afin de garantir \( \Vbft < \Vtot \). Je n'ai aucune idée de quel copula est capable de ça, ce qui me pousse à éviter de modéliser \( \Vtot \) directement. Pour les ratios, j'envisage une `lower tail dependence', \ie les arbres ayant de faible volume bois-fort tige ont tendance à avoir une relation particulière pour les ratios.
 
-\section{\( Vbft \) comme prédicteur de \( \Vtot \)}
+\section{Estimation séquentielle dépendante}
 
-Je pourrais tenter \( \Vbft \) comme prédicteur de \( \Vtot \), mais dans ce cas il y a un risque de propagation d'erreur important, car \( \Vbft \) n'est pas mesuré mais simulé! Je ne recommande donc pas cette voie\dots
+Cette approche se déroule en deux temps:
+\begin{enumerate}
+	\item Paramétrer \( \Vbft \) sur le jeu de donnée IFN, \( \di \) (déjà fait\sidenote{Rapport en cours de relecture, tests des tarifs au niveau national à faire}).
+	\item Paramétrer conjointement \( \Vbft \) et une sélection \( Y \) parmi celles listée ci dessus (\ref{it::vtot}--\ref{it::houp}) \textbf{après} l'étape 1, sur les jeux de données Emerge, \( \de \), et Suisse, \( \dc \). Le prior de \( \Vbft \) est le posterior obtenue à l'étape 1 (mais voir remarque \ref{box::stanSeq}). Il faudra ici aussi vérifier qu'il n'y a pas de biais dans le volume bois-fort tige (voir remarque \ref{box::biais}).
+\end{enumerate}
+
+\begin{rkbox}[label = box::stanSeq]{Sequential Bayesian updating}
+	Stan ne sait pas faire du sequential Bayesian updating proprement. Voir les posts de \href{https://statmodeling.stat.columbia.edu/2025/05/15/using-stan-to-do-sequential-bayesian-updating/}{Andrew Gelman} et de \href{https://statmodeling.stat.columbia.edu/2025/05/13/chaining-bayes-priors-from-posteriors/}{Bob Carpenter} à ce sujet. Dans mon cas, les posteriors de paramètres sont gaussiens (du moins de ce que j'en ai vu!), donc assez simple, pas besoin de la méthode décrite dans le post de Bob Carpenter.
+\end{rkbox}
+
+La formule du modèle est donc l'équation \eqref{eq::simultanee}, mais sans la première partie qui est faite à part, et avec des priors qui sont issues de la première partie:
+\begin{equation} \label{eq::seqdep}
+	\begin{aligned} \relax
+		\big[\thetaY, \, \thetaB, \, & \Sigmabf, \, \sigmaB \, \big| \, \di, \, \de, \, \dc \big] \propto \\
+			& \big[\de, \, \dc \, \big| \, \thetaB, \, \thetaY, \, \Sigmabf \big] \times \\
+			& \big[ \thetaB \big] \big[ \thetaY \big] \big[ \sigmaB \big] \big[ \Sigmabf \big],
+	\end{aligned}
+\end{equation}
+avec les priors de \( \thetaB \) et \( \sigmaB \) provenant de la première étape:
+\[
+	\big[\thetaB, \, \sigmaB \, \big| \, \di \big] \propto \big[\di \, \big| \, \thetaB, \, \sigmaB \big] \times \big[ \thetaB \big] \big[ \sigmaB \big]
+\]
+
+Pour l'équation \eqref{eq::seqdep}, je peux reprendre les bivariées gamma ou les copulas déjà décrits.
+
+\section{Estimation séquentielle sans dépendance}
+
+Avec ce choix, je fais deux modèles séparés. Il s'agit de l'option la plus simple, mais qui permet tout de même d'assurer la hiérarchie des volumes, \( \Vbft < \Vtot \), selon la variable \( Y \) sélectionnée. C'est aussi le seul choix qui permet potentiellement\sidenote{Sous réserve que \( Y \) n'utilise pas \( \hdec \) comme variable prédictive} de réintroduire les \num{8210} individus d'Emerge supprimés dû à l'absence de renseignement sur le profils de ces arbres.
+
+% \section{\( \Vbft \) comme prédicteur de \( \Vtot \)}
+
+% Je pourrais tenter \( \Vbft \) comme prédicteur de \( \Vtot \), mais dans ce cas il y a un risque de propagation d'erreur important, car \( \Vbft \) n'est pas mesuré mais simulé! Je ne recommande donc pas cette voie\dots
 
 % \section{Modèle conditionnel}
 
-
 \chapter{Conclusion}
+
+J'ai listé dans ce document les différentes options que j'envisage pour modéliser le volume aérien total. Bien que modéliser la dépendance entre les variables \( Y \) et \( \Vbft \) soit important, les conséquences sont discutables:
+\begin{itemize}
+	\item artillerie lourde pour l'inventaire,
+	\item suppression de \num{8210} individus de la base Emerge,
+\end{itemize}
+mais offre aussi des avantages (meilleures estimations des paramètres et des incertitudes sur les volumes). \\
+
+Dans l'optique d'une publication scientifique, je suppose que le modèle conjoint est plus vendeur, quelque soit le choix de la méthode par la suite (simultanée ou séquentielle). Je penche plus pour la solution `Longuetaud séquentielle dépendante' (\ref{it::seqdep}.\ref{it::longuetaud}), avec un copula. En effet, il y a déjà une publication \parencite{Longuetaud2013}. La deuxième meilleure solution selon moi est d'utiliser le volume de houppier avec un copula. Cette solution a l'avantage de donner le volume de deux composantes d'un arbre, ce qui peut être intéressant\sidenote{C'était d'ailleurs un des objectifs du projet Emerge}. \\
+
+Enfin, il est possible d'enrichir notre jeu de données avec \cite{Tabacchi2011}\sidenote{\num{1200} arbres mesurés destructivement en Italie. Je pense pouvoir déduire un \( \hdec \) s'ils ont gardé les profils} et \cite{Schepaschenko2017} (pas sûr qu'ils aient gardé les profils et les mesures de volumes... C'est surtout biomasse!).
+
+\section{Décision après réunion du 29.01.2026}
+
+Après réunion, il a été décidé de:
+\begin{enumerate}
+	\item Choisir la solution la plus pragmatique: modéliser \( \Vtot \) séparément\sidenote{C'est donc le choix \ref{it::seqindep}.\ref{it::vtot}} de \( \Vbft \) et de voir si l'incohérence \( \Vtot < \Vbft \) survient. Si oui, dans quelles conditions (essence, diamètre, hauteur)? Afin de maximiser le nombre d'arbres français, il a été décidé de ne pas utiliser \( \hdec \)\sidenote{Estimée car non mesurée... Christine Deleuze a essayé et a relevé des incohérences avec les hauteurs de fourche (si l'on suppose que la fourche devrait mener à une découpe)} dans la modélisation de \( \Vtot \). S'il y a trop d'incohérence, il reste la modélisation par ratio dynamique (\ie prédit par des dimensions de l'arbre plutôt qu'une constante), qui permet d'assurer que la contrainte \( \Vbft < \Vtot \) est toujours vérifiée. On pourra se baser sur le ratio de \cite{Longuetaud2013} et l'améliorer (choix de distribution, différentes formule d'hétéroscédasticité, correction pour les petits arbres qui a tendance à exploser\sidenote{Voir \cite[Fig. 2]{Longuetaud2013}}).
+	\item Ce nouveau modèle de volume total sera idéalement utilisé par une stagiaire qui arrive au LIF en mars et qui collaborera avec Sélim\sidenote{Thésard de Nikola Besic}.
+	\item Dans l'idéal, le modèle final sera fini pour fin avril, afin de laisser du temps pour la rédaction d'un article.
+	\item L'article serait idéalement soumis fin août.
+	\item Selon le temps disponible, il sera possible d'étudier d'autres approches, tel un modèle conjoint via copula. Dans ce cas, selon la variable \( Y \) choisie\sidenote{Notation générique pour les variables parmis les choix \ref{it::vtot} à \ref{it::houp}}, il faudra choisir la bonne famille de copula \parencite[chapitres 4 pour les familles et 5 pour les descriptions de dépendance, qui reste le premier critère sur lequel baser son choix]{Nelsen2006}.
+\end{enumerate}
 
 \printbibliography
 
