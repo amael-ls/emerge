@@ -101,3 +101,91 @@ library(gt)
 ## Load functions
 source("./toolFunctions.R")
 ```
+
+```{r}
+#### Load datasets
+## Emerge
+# Path
+os = Sys.info()[['sysname']]
+mnt_point = "/mnt/local_share/"
+if (os == "Linux" || os == "Darwin")
+{
+	if (!dir.exists(mnt_point))
+		stop(paste0("The mounting point <", mnt_point, "> does not exist"))
+} else if (os == "Windows") {
+	stop("TO DO!!! No idea how that works on Windows!")
+} else {
+	stop(paste("Unknown Operating System:", os))
+}
+
+path_data = paste0(mnt_point, "/data/")
+if (!dir.exists(path_data))
+	stop(paste0("Folder <", path_data, "> does not exist! Did you run 01_prepare_data.qmd?"))
+
+opt = "_inra"
+
+# Loading Emerge data
+inra = readRDS(paste0(path_data, "nfi-inra_dt", opt, ".rds"))
+inra = inra[, .(speciesName_sci, tree_id = unique_id, fct_type, year, circumference_m, height, bole_volume_m3, total_volume_m3)]
+setkey(inra, speciesName_sci)
+
+# Loading Swiss data
+swiss = readRDS(paste0(mnt_point, "data/switzerland.rds"))
+swiss = swiss[, .(speciesName_sci, tree_id, fct_type, year, circumference_m, height,
+	bole_volume_m3 = bole_volume_cyl_m3, total_volume_m3)]
+setkey(swiss, speciesName_sci)
+
+## Modern Emerge data
+emerge = readRDS(paste0(mnt_point, "data/emerge_2009-2010.rds"))
+emerge[, year := as.integer(stri_replace_all(str = dataset, replacement = "", regex = "emerge_"))]
+emerge = emerge[, .(speciesName_sci, tree_id, fct_type, year, circumference_m, height,
+	bole_volume_m3 = bole_volume_conic_m3, total_volume_m3)]
+```
+
+```{r}
+#### Merge Emerge Oudin and modern with Swiss data
+full_data = rbindlist(l = list(
+	emerge = emerge,
+	inra = inra,
+	swiss = swiss),
+	idcol = "dataset")
+
+full_data[, year := as.integer(year)]
+
+## Set up three types of colours
+# Functional type colour
+full_data[, fct_col := ifelse(fct_type == "broadleaf", "#E76254", "#1E466E")]
+
+# Dataset type colour
+full_data[dataset == "emerge", orig_col := "#E76254"]
+full_data[dataset == "inra", orig_col := "#F7AA58"]
+full_data[dataset == "swiss", orig_col := "#1E466E"]
+
+# Dataset and functional type colour
+full_data[dataset == "emerge", both_col := ifelse(fct_type == "broadleaf", "#E76254", "#1E466E")]
+full_data[dataset == "inra", both_col := ifelse(fct_type == "broadleaf", "#F7AA58", "#528FAD")]
+full_data[dataset == "swiss", both_col := ifelse(fct_type == "broadleaf", "#FFE6B7", "#AADCE0")]
+
+ls_cols = c("#E76254", "#1E466E", "#F7AA58", "#528FAD", "#FFE6B7", "#AADCE0")
+names(ls_cols) = paste(rep(c("emerge", "inra", "swiss"), each = 2), c("broadleaf", "conifer"), sep = "-")
+
+## Set keys
+# full_data = full_data[circumference_m < 0.25]
+# full_data = full_data[circumference_m > 0.2]
+setkey(full_data, dataset, fct_type)
+
+for (dt in full_data[, unique(dataset)])
+	for (ty in full_data[, unique(fct_type)])
+	{
+		plot(full_data[.(dt, ty), circumference_m], full_data[.(dt, ty), log(total_volume_m3)],
+			col = full_data[.(dt, ty), both_col], pch = 19, cex = 0.5, xlab = "Circumference",
+			ylab = "Total volume", axes = FALSE, main = paste(dt, ty))
+		axis(1)
+		axis(2, las = 1)
+		abline(v = 0.07*pi, lty = "dashed", lwd = 0.8, col = "#A2A8A4")
+	}
+```
+
+<!--------------------------------------------------------------------------------------->
+<!---------------------------------    MAIN CONTENT    ---------------------------------->
+<!--------------------------------------------------------------------------------------->
