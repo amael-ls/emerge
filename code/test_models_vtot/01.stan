@@ -18,19 +18,15 @@ data {
 
 transformed data {
 	// Std. pred
-	real m1 = mean(circumference_m);
-	real s1 = sd(circumference_m);
-	real m2 = mean(height);
-	real s2 = sd(height);
-
-	vector [N] p1 = (circumference_m - m1)/s1;
-	vector [N] p2 = (circumference_m - m2)/s2;
+	vector [N] p1 = (circumference_m - mean(circumference_m))/sd(circumference_m);
+	vector [N] p2 = (height - mean(height))/sd(height);
 
 	// Form factor
 	vector [N] formTot = 4*pi()*total_volume_m3 ./ (circumference_m.^2 .* height) .* (1 - 1.3 ./ height).^2;
 }
 
 parameters {
+	real beta0;
 	real beta1;
 	real beta2;
 
@@ -39,12 +35,13 @@ parameters {
 }
 
 transformed parameters {
-	vector <lower = 0> [N] mu = exp(beta1*p1 + beta2*p2 + m1/s1 + m2/s2);
+	vector <lower = 0> [N] mu = exp(beta0 + beta1*p1 + beta2*p2);
 	vector <lower = 0> [N] sigma = sigma0 * (circumference_m.^2 .* height) .^ sigma_pow;
 }
 
 model {
 	// Priors
+	target += normal_lpdf(beta0 | 0, 5);
 	target += normal_lpdf(beta1 | 0, 5);
 	target += normal_lpdf(beta2 | 0, 5);
 
