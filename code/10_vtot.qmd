@@ -94,6 +94,7 @@ library(cmdstanr)
 	register_knitr_engine(override = TRUE)
 library(stringi)
 library(inventR)
+library(interp)
 library(gt)
 
 #### Tool functions
@@ -460,6 +461,7 @@ for (selected_sp in ls_species)
 for (selected_sp in ls_species)
 {
 	sp = check_dt[speciesName_sci == selected_sp, unique(species_code)]
+	filename = paste0("01_", stri_replace(str = selected_sp, regex = " ", replacement = "-"))
 
 	stanData_gen = list(
 		N_new = check_dt[speciesName_sci == selected_sp, .N],
@@ -468,78 +470,138 @@ for (selected_sp in ls_species)
 		taper_height_flo = florence_dt[sp][(type == "ajust"), hdecro],
 		taper_height_flo_new = check_dt[speciesName_sci == selected_sp, taper_height_flo],
 		height_new = check_dt[speciesName_sci == selected_sp, height],
-
 		bole_volume_m3_new = check_dt[speciesName_sci == selected_sp, bole_volume_m3],
 		total_volume_m3 = full_data[speciesName_sci == selected_sp, total_volume_m3],
 		total_volume_m3_new = check_dt[speciesName_sci == selected_sp, total_volume_m3]
 	)
 
-	aa = predictions(sp, selected_sp, stanData_gen, flopp_dt = florence_dt[sp],
-		tot_dt = full_data[speciesName_sci == selected_sp],
-		Nbft = florence_dt[sp][(type == "ajust"), .N],
-		Ntot = full_data[speciesName_sci == selected_sp, .N])
-
-	sim = genQ$generate_quantities(fit, data = stanData_gen,
-		seed = woodstock_seed, parallel_chains = min(n_chains, 4))
-
-	Vpred = apply(X = sim$draws("Vpred"), MARGIN = 3, FUN = mean)
-
-	rm(sim)
+	if (!file.exists(paste0(pathname, filename, "_pred.rds")))
+	{
+		aa = predictions(sp, selected_sp, stanData_gen, flopp_dt = florence_dt[sp],
+			tot_dt = full_data[speciesName_sci == selected_sp],
+			Nbft = florence_dt[sp][(type == "ajust"), .N],
+			Ntot = full_data[speciesName_sci == selected_sp, .N])
+		
+		saveRDS(aa, paste0(pathname, filename, "_pred.rds"))
+	} else {
+		aa = readRDS(paste0(pathname, filename, "_pred.rds"))
+	}
 
 	# Plot Vallet predicted vs mine predicted total volume
-	plot(stanData_gen$total_volume_m3_new, Vpred, pch = 19, cex = 0.5, col = "#FAB255",
+	plot(stanData_gen$total_volume_m3_new, aa$Vtot, pch = 19, cex = 0.5, col = "#FAB255",
 		xlab = "Predictions (Vallet)", ylab = "Predictions (mine)", axes = FALSE)
 	axis(1)
 	axis(2, las = 1)
 	abline(a = 0, b = 1, lwd = 3, col = "#CD212A")
 	
 	# Plot Morneau predicted vs mine predicted bole volume
-	plot(stanData_gen$bole_volume_m3_new, Vpred_bft, pch = 19, cex = 0.5, col = "#FAB255",
+	plot(stanData_gen$bole_volume_m3_new, aa$Vbft, pch = 19, cex = 0.5, col = "#FAB255",
 		xlab = "Predictions (Morneau)", ylab = "Predictions (mine)", axes = FALSE)
 	axis(1)
 	axis(2, las = 1)
 	abline(a = 0, b = 1, lwd = 3, col = "#CD212A")
 	
 	# Plot observed vs predicted volume
-	plot(Vpred_bft, Vpred_tot, pch = 19, cex = 0.5, col = "#FAB255",
+	plot(aa$Vbft, aa$Vtot, pch = 19, cex = 0.5, col = "#FAB255",
 		xlab = "Predicted bole volume", ylab = "Predicted total volume", axes = FALSE)
 	axis(1)
 	axis(2, las = 1)
 	abline(a = 0, b = 1, lwd = 3, col = "#CD212A")
 
-	any(Vpred_tot < Vpred_bft)
+	if (any(aa$Vtot < aa$Vbft))
+		print(paste("Arghh", round(100*sum(aa$Vtot < aa$Vbft)/length(aa$Vtot), 2), "% dissidents"))
 }
 
-ind = check_dt[speciesName_sci == "Pseudotsuga menziesii"][, which(bole_volume_m3 > 20)]
-Vpred_bft[ind]
-abline(h = 1.57, lwd = 0.5, col = "#A5A9A1")
-abline(v = 22.16, lwd = 0.5, col = "#A5A9A1")
-check_dt[speciesName_sci == "Pseudotsuga menziesii"][bole_volume_m3 > 20]
+selected_sp = "Pseudotsuga menziesii"
+ind = check_dt[speciesName_sci == selected_sp][, which(bole_volume_m3 > 20)]
+check_dt[speciesName_sci == selected_sp][ind]
 
+plot(stanData_gen$bole_volume_m3_new, aa$Vbft, pch = 19, cex = 0.5, col = "#FAB255",
+	xlab = "Predictions (Morneau)", ylab = "Predictions (mine)", axes = FALSE)
+axis(1)
+axis(2, las = 1)
+abline(a = 0, b = 1, lwd = 3, col = "#CD212A")
+abline(h = aa$Vbft[ind], lwd = 0.5, col = "#A5A9A1")
+abline(v = check_dt[speciesName_sci == selected_sp][ind, bole_volume_m3], lwd = 0.5, col = "#A5A9A1")
 
-c = check_dt[speciesName_sci == "Pseudotsuga menziesii"][bole_volume_m3 > 20, circumference_m]
-h = check_dt[speciesName_sci == "Pseudotsuga menziesii"][bole_volume_m3 > 20, height]
-hdec = check_dt[speciesName_sci == "Pseudotsuga menziesii"][bole_volume_m3 > 20, taper_height]
+c = check_dt[speciesName_sci == selected_sp][ind, circumference_m]
+h = check_dt[speciesName_sci == selected_sp][ind, height]
+hdec = check_dt[speciesName_sci == selected_sp][ind, taper_height] # Here same as hdec'!
+all(check_dt[speciesName_sci == selected_sp][ind, is_tapered])
 
-myF = exp(-0.82 - 0.02*c - 2.61*sqrt(c)/h - 0.08*sqrt(hdec)/(c^2*h) + 0.25*(1 - hdec/h))
+## Manyally predict Vbft, with average coeffcients
+myF = exp(-0.82 - 0.02*c - 2.61*sqrt(c)/hdec - 0.08*sqrt(hdec)/(c^2*h) + 0.25*(1 - hdec/h))
 myF*c^2*h/(4*pi*(1 - 1.3/h)^2)
 
 moF = 0.089 - 0.036*c + 0.48*sqrt(c)/h + 0.39*hdec/(hdec + 5.24) + 0.0014/c
 moF*c^2*h/(4*pi*(1 - 1.3/h)^2)
 0.2*c^2*h/(4*pi*(1 - 1.3/h)^2)
 
+florence_dt["64", range(c13)]
+florence_dt["64", range(htot)]
+florence_dt["64", range(hdecro)]
 
 bounds = unique(florence_dt["64"][, .(fnew_bft_min, fnew_bft_max, f_bft_lim)])
 params = coeff_dt_3["64", .(ess, is_taper, alpha, beta, gamma, f_max, k, rho, delta, epsilon)]
 if (is.na(params$rho))
 	params$rho = 1
 pred_morneau = params[.(sp, NA), alpha] +
-		params[.(sp, NA), beta]*c +
-		params[.(sp, NA), gamma]*sqrt(c)/h +
-		params[.(sp, NA), f_max]*hdec/(hdec + params[.(sp, NA), k]) +
-		params[.(sp, NA), delta]*1/c^params[.(sp, NA), epsilon]
+	params[.(sp, NA), beta]*c +
+	params[.(sp, NA), gamma]*sqrt(c)/h +
+	params[.(sp, NA), f_max]*hdec/(hdec + params[.(sp, NA), k]) +
+	params[.(sp, NA), delta]*1/c^params[.(sp, NA), epsilon]
 
 pred_morneau = pmax(pred_morneau, bounds[1, fnew_bft_min])
 pred_morneau = pmin(pred_morneau, bounds[1, fnew_bft_max])
 c^2*h/(4*pi) * pmin(pred_morneau/(1 - 1.3/h)^2, bounds[1, f_bft_lim])
+```
+
+#### Heatmaps
+
+Heatmap du douglas dans l'espace circonférence--hauteur.
+
+```{r}
+qq = unique(florence_dt[sp][type == "ajust", .(circumference_m = c13, height = htot, bole_volume_m3 = vbft)])
+check_dt[speciesName_sci == selected_sp, Vpred_bft := aa$Vbft]
+check_dt[speciesName_sci == selected_sp, Vpred_tot := aa$Vtot]
+ss = unique(check_dt[speciesName_sci == selected_sp][, .(circumference_m, height, bole_volume_m3,
+	Vpred_bft, Vpred_tot)])
+
+# Heatmap Vallet
+si = interp(x = qq[, circumference_m], y = qq[, height], z = qq[, bole_volume_m3],
+	method = "linear", duplicate = "mean")
+
+ind = which(qq[, circumference_m > 2.5 & height > 35])
+ind2 = which(ss[, circumference_m > 2.5 & height > 35])
+
+## Extract the colours from filled.contour
+nlevels = 20
+levels = pretty(range(si$z, finite = TRUE), nlevels)
+color.palette = colorRampPalette(met.brewer("Hiroshige", direction = -1))
+col = color.palette(length(levels) - 1)
+
+qq[, colour := col[cut(bole_volume_m3, breaks = levels, right = FALSE)]]
+ss[, colour := col[cut(Vpred_bft, breaks = levels, right = FALSE)]]
+
+ss[is.na(colour), range(Vpred_bft)] # Beyond max(levels) = 11.5
+ss[is.na(colour), colour := "#CD212A"] # Beyond max(levels) = 11.5
+
+filled.contour(si,
+	plot.axes = {
+		axis(1)
+		axis(2, las = 1)
+		contour(si, add = TRUE, lwd = 2, axes = NULL)
+		# points(qq[ind, circumference_m], qq[ind, height], pch = 21,
+		# 	col = "black", bg = qq[ind, colour], cex = 1.25)
+		points(ss[ind2, circumference_m], ss[ind2, height], pch = 21,
+			col = "black", bg = ss[ind2, colour], cex = 1.25)
+		abline(h = 35, lwd = 2, col = "#A5A9A1")
+		abline(v = 2.5, lwd = 2, col = "#A5A9A1")
+
+	}, xlab = "Circumference", ylab = "Height", frame.plot = FALSE,
+	xlim = 1.05*c(0, max(ss[, circumference_m], qq[, circumference_m])),
+	ylim = 1.05*c(0, max(ss[, height], qq[, height])),
+	color.palette = colorRampPalette(met.brewer("Hiroshige", direction = -1)),
+	main = "Enveloppe données ajustement volume BFT Douglas. Points = pred Florence++ sur DB IFN"
+)
 ```
