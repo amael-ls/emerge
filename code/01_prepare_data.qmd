@@ -345,6 +345,44 @@ I also clean the dataset `inra_arbres_profils`, which could be useful to estimat
 ```{r}
 setDT(inra_arbres_profils)
 
+## One tree has a circumference without bark 4 cm larger than with. I guess these numbers were switched
+if (inra_arbres_profils[circonf_sur_ecorce < circonf_sous_ecorce, .N] > 0)
+{
+	warning("The following trees have a circumference without bark larger than with:")
+	unique(inra_arbres_profils[circonf_sur_ecorce < circonf_sous_ecorce,
+		.(nom_fichier, circonf_sur_ecorce, circonf_sous_ecorce)])
+	
+	if (all(inra_arbres_profils[circonf_sur_ecorce < circonf_sous_ecorce,
+		(circonf_sous_ecorce - circonf_sur_ecorce)/circonf_sur_ecorce*100] < 10))
+	{
+		print("Differences lower than 10%. Switching the digits")
+		temp_circonf = inra_arbres_profils[circonf_sur_ecorce < circonf_sous_ecorce, circonf_sur_ecorce]
+		inra_arbres_profils[circonf_sur_ecorce < circonf_sous_ecorce,
+			circonf_sur_ecorce := circonf_sous_ecorce]
+		inra_arbres_profils[circonf_sur_ecorce < circonf_sous_ecorce,
+			circonf_sous_ecorce := temp_circonf]
+	} else {
+		stop("Some differences are larger than 10%. Please check and take decisions accordingly")
+	}
+}
+
+ls_pro = inra_arbres_profils[, unique(as.character(nom_fichier))]
+ls_inr = inra_arbres[, nom_fichier]
+
+sum(ls_pro %in% ls_inr)
+
+# tt = "20080930145307600_0003"
+# tt = "20081001111139261_0041"
+# tt = "20081001111139261_0042"
+# tt = "chene_8_0038"
+
+# inra_arbres[nom_fichier == tt, .(v_tronc_verif, v_fourche_verif, v_fourche2_verif, v_br_verif, v_menu_verif)]
+# inra_arbres_profils[nom_fichier == tt]
+
+# uu = "20090310151125_00014"
+# inra_arbres[nom_fichier == uu, .(v_tronc_verif, v_fourche_verif, v_fourche2_verif, v_br_verif, v_menu_verif)]
+# inra_arbres_profils[nom_fichier == uu]
+
 ## Keep only column of interest and rename them
 inra_arbres_profils = inra_arbres_profils[, 
 	.(nom_fichier, arbre, haut, v_bill, circonf_sur_ecorce, v_fourche, v_fourche2)]
@@ -359,6 +397,14 @@ setnames(inra_arbres_profils, new = c("unique_id", "tree_id", "at_height", "log_
 	"circumference_m", "main_fork_volume", "second_fork_volume"))
 
 saveRDS(inra_arbres_profils, paste0(mnt_point, "data/profiles_oudin.rds"))
+
+# # Scanned page from "La force de la mise [...]"", Deleuze et. al 2013.
+# inra_arbres_profils[nom_fichier == "pin_sylvestre_2_0031", .(haut, circonf_sur_ecorce, v_bill, v_br1, v_br2, v_br3)]
+# inra_arbres[nom_fichier == "pin_sylvestre_2_0031", .(c130, h_tot)]
+
+# inra_arbres_profils[nom_fichier == "20081001105825651_0021",
+# 	.(haut, circonf_sur_ecorce, v_bill, v_br1, v_br2, v_br3, qual_bill, obs, v_fourche, v_fourche2)]
+# inra_arbres[nom_fichier == "20081001105825651_0021", .(c130, h_tot, date, commentaires, niveau, h1, h_milieu)]
 ```
 
 ### Request of the French NFI data (using inventR package) {#sec-nfi_query}
