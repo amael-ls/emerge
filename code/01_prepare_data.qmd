@@ -235,7 +235,6 @@ The variable names are not necessarily unified (but the species names are, I che
 | h_tot           | htot | height             | Height in m                        |
 | total_volume_m3 | \-   | total_volume_m3    | Total above-ground volume          |
 | v_tronc         | v    | bole_volume_m3     | Volume bole up to 7 cm             |
-| v_courrone      | \-   | crown_volume_m3    | Total volume minus bole volume     |
 | genre           | \-   | genus              | Genus                              |
 | longitude       | xl   | \-                 | Coordinates in different proj      |
 | latitude        | yl   | \-                 | Coordinates in different proj      |
@@ -299,11 +298,17 @@ setDT(inra_arbres)
 setDT(codesforets)
 
 ## Compute (total) volume in m³, and format data
+# Rk: According to C. Deleuze, trees should always have v_menu_verif, so NA means "missing information".
+#	However, not all the trees have a fork, so v_fourche_verif = NA should be understood as a zero (and
+#	who knows, maybe sometimes too as a lack of information...)
 inra_arbres[, total_volume_m3 := (v_tronc_verif +
 	ifelse(is.na(v_fourche_verif), 0, v_fourche_verif) +
 	ifelse(is.na(v_fourche2_verif), 0, v_fourche2_verif) +
 	ifelse(is.na(v_br_verif), 0, v_br_verif) +
-	ifelse(is.na(v_menu_verif), 0, v_menu_verif))/1e3]
+	v_menu_verif)/1e3] # ifelse(is.na(v_menu_verif), 0, v_menu_verif))/1e3] # But trees should always have it, no?
+
+# Keep only trees with a total volume measured
+inra_arbres = inra_arbres[!is.na(total_volume_m3)]
 
 inra_arbres[, presence_NA := ifelse(is.na(v_fourche_verif) |
 	is.na(v_fourche2_verif) |
@@ -311,20 +316,20 @@ inra_arbres[, presence_NA := ifelse(is.na(v_fourche_verif) |
 	is.na(v_menu_verif), TRUE, FALSE)]
 
 inra_arbres[, v_tronc_verif := v_tronc_verif/1e3] # Conversion to m3
-inra_arbres[, v_courrone := total_volume_m3 - v_tronc_verif] # Volume of the crown, i.e., everything that is NOT trunk > 7 cm
+inra_arbres[, crown_volume_m3 := total_volume_m3 - v_tronc_verif] # Volume of everything that is NOT trunk > 7 cm
 inra_arbres[, circumference_m := c130/100]
 
 inra_arbres[, year := format(as.Date(date, "%Y-%m-%d"), "%Y")]
 
 ## Keep only column of interest and rename them
 inra_arbres = unique(inra_arbres[, .(nom_fichier, id_codesessences, circumference_m, h_tot,
-	total_volume_m3, v_tronc_verif, v_courrone, genre, id_codesforets, year, presence_NA)])
+	total_volume_m3, v_tronc_verif, crown_volume_m3, genre, id_codesforets, year, presence_NA)])
 inra_arbres = merge.data.table(inra_arbres, codesforets[, .(id, longitude, latitude)],
 	by.x = "id_codesforets", by.y = "id", all.x = TRUE)
 inra_arbres = merge.data.table(inra_arbres, codesessences[, .(essence, speciesName_sci, fct_type)],
 	by.x = "id_codesessences", by.y = "essence")
 
-inra_arbres = na.omit(inra_arbres)
+# inra_arbres = na.omit(inra_arbres) # Missing year, coordinate, circumference, ...
 
 setnames(inra_arbres, new = c("species_code_inra", "plot_id", "unique_id", "circumference_m", "height",
 	"total_volume_m3", "bole_volume_m3", "crown_volume_m3", "genus", "year", "presence_NA", "lon", "lat",
@@ -341,15 +346,17 @@ I also clean the dataset `inra_arbres_profils`, which could be useful to estimat
 setDT(inra_arbres_profils)
 
 ## Keep only column of interest and rename them
-inra_arbres_profils = unique(inra_arbres_profils[, .(nom_fichier, arbre, haut, v_bill, circonf_sur_ecorce)])
-inra_arbres_profils = inra_arbres_profils[!is.na(v_bill)]
+inra_arbres_profils = inra_arbres_profils[, 
+	.(nom_fichier, arbre, haut, v_bill, circonf_sur_ecorce, v_fourche, v_fourche2)]
+inra_arbres_profils = inra_arbres_profils[!is.na(v_bill)] # This will also make jumps in column "haut"
 inra_arbres_profils[, v_bill := v_bill/1e3] # Convert to cubic metre
 inra_arbres_profils[, circonf_sur_ecorce := circonf_sur_ecorce/1e2] # Convert to metre
 
 inra_arbres_profils[, nom_fichier := as.character(nom_fichier)]
 inra_arbres_profils[, arbre := as.character(arbre)]
 
-setnames(inra_arbres_profils, new = c("unique_id", "tree_id", "at_height", "log_volume_m3", "circumference_m"))
+setnames(inra_arbres_profils, new = c("unique_id", "tree_id", "at_height", "log_volume_m3",
+	"circumference_m", "main_fork_volume", "second_fork_volume"))
 
 saveRDS(inra_arbres_profils, paste0(mnt_point, "data/profiles_oudin.rds"))
 ```
@@ -386,7 +393,7 @@ nfi_data_am = exec_req(conn = db, req = "
 	WHERE
 		tree.CUBE = 'M' AND -- Tree volume measured rather than evaluated by a model
 		tree.MC IN ('4', '5') AND -- Circumference measured, and not diameter
-		(tree.DOM BETWEEN '0' AND '5') -- No pollarded nor heavily pruned tree
+		(tree.DOM BETWEEN '0' AND '5') -- Alive and no pollarded nor heavily pruned tree
 
 	ORDER BY
 		npp, a;", DT = TRUE)
@@ -432,6 +439,34 @@ nfi_data = rbindlist(list(nfi_data_am, nfi_data_nm))
 disconnect_db(db)
 ```
 
+A small check-up is necessary with these data, as there are some incoherence within! Note that contrary to Florence, I do not consider a tree with a diameter of log segment larger than ddec problematic in general (see for instance `npp == 08376N381-2----G` and `a == 10`, which has a ddec at 0.07, but a surdia of 0.08). I tolerate a tree that grows back up to 3 mm (could be the bark combined with a small error on measurement for instance) and a relative difference of 20%. Florence also removed trees such that the sum of their segment logs and hdec is larger than htot. I checked the concerned trees (13) and none of them raise a flag to me (the differences are peanuts): it could be an angle in the trunk that makes the sum larger than the total height, no?
+
+```{r}
+#| results: hold
+#| code-fold: show
+
+## Remove NAs coordinates
+nfi_data = nfi_data[!is.na(xl) & !is.na(yl)]
+
+## Trees with taper height shorter than 2.6 m with a diameter measured at 2.6 m...
+nfi_data = nfi_data[!(hdec <= 2.6 & !is.na(d26))]
+
+## Trees that should have a diameter measured at 2.6 m height
+nfi_data = nfi_data[!(hdec > 2.6 & is.na(d26))]
+
+## Remove trees with surdia largely superior to ddec (relatively) and with a difference of at least 3 mm
+nfi_data[, to_keep := TRUE]
+nfi_data[(surdia - ddec)/ddec*100 > 20 & surdia - ddec > 0.03, to_keep := FALSE]
+nfi_data = nfi_data[(to_keep)]
+nfi_data[, to_keep := NULL]
+
+## Remove trees with surdia largely superior to dmed (relatively) and with a difference of at least 3 mm
+nfi_data[, to_keep := TRUE]
+nfi_data[(surdia - dmed)/dmed*100 > 20 & surdia - dmed > 0.03, to_keep := FALSE]
+nfi_data = nfi_data[(to_keep)]
+nfi_data[, to_keep := NULL]
+```
+
 ::: {#nte-AM .callout-note}
 
 ## Ancient Method
@@ -444,7 +479,7 @@ Note that the Ancient Method (AM) was done by cycle rather than having points sa
 
 ## NAs
 
-There are some `NA` values for the `year` and `ddec` (taper diameter, taken near the taper height `hdec`) variables. I decided to keep these measurement instead of doing `na.omit`, especially for the year variable as it is mostly a useless info especially in ancient method (see @nte-AM).
+There are some `NA` values for the `year` and `ddec` (taper diameter, taken near the taper height `hdec`) variables. I decided to keep these measurements instead of doing `na.omit`, especially for the year variable as it is mostly a useless info especially in ancient method (see @nte-AM).
 
 :::
 
@@ -462,7 +497,7 @@ where $c_{\text{med}}$ is the median circumference measured at $h_{\text{dec}}/2
 #| echo: false
 #| fig-cap: Density of $c_{\text{med}} - c$
 #| label: fig-dens_cmed
-plot(density(nfi_data[hdec == 2.6, cmed - c13]), main = "", xlab = "Median minus breast height circumferences",
+plot(density(nfi_data[hdec == 2.6, (cmed - c13)/c13*100]), main = "", xlab = "Relative difference in percent",
 	lwd = 3, axes = FALSE)
 axis(1)
 axis(2, las =  1)
@@ -476,7 +511,7 @@ $$
 v_3 = \frac{\pi}{4}\sum_{n \geqslant 0} d^2 l
 $$
 
-In the data, I downloaded both $v$ and $v_{\text{tot}}$ which should be equal only when there is no cull. Otherwise, $v > v_{\text{tot}}$ since $v = (1 - r) v_{\text{tot}}$, $r$ being the cull. However, I found that these two variables are always equal and that the cull volume is always removed! My reconstruction of the volume does not remove the cull, and should be used later on to relate volume and circumference.
+In the data, I downloaded both $v$ and $v_{\text{tot}}$ which should be equal only when there is no cull. Otherwise, $v > v_{\text{tot}}$ since $v = (1 - r) v_{\text{tot}}$, $r$ being the cull. My reconstruction of the volume does not remove the cull, and should be used later on to relate volume and circumference.
 
 ```{r}
 #| results: hold
@@ -484,6 +519,16 @@ nfi_data[hdec < 2.6, v1 := cmed^2/(4*pi)*hdec] # Volume first part: from 0 to hd
 nfi_data[hdec >= 2.6, v1 := c13^2/(4*pi)*2.6] # Volume first part: from 0 to 2.6m high
 nfi_data[, v2 := pi/24*(d26^2 + 4*dmed^2 + ddec^2)*(hdec - 2.6)] # Volume 2nd part: from 2.6m to hdec
 nfi_data[, v3 := pi/4*sum(surdia^2*surlon), by = .(npp, a)] # Volume 3rd part: from hdec to diameter = 7cm
+
+# Compute hdec' (Florence's variable), if no log, then hdec = htot. Note that Florence also set ddec = 0
+nfi_data[, hdecro := hdec]
+nfi_data[(surlon == 0) | is.na(surlon), hdecro := htot]
+
+# plot(nfi_data[, hdec], nfi_data[, hdecro], pch = 19, cex = 0.35, xlab = "hdec", ylab = "hdecro",
+# 	axes = FALSE)
+# axis(1)
+# axis(2, las = 1)
+# abline(b = 1, lwd = 0.4, col = "#CD212A")
 
 nfi_data[, c("surlon", "surdia", "ns") := NULL]
 
@@ -513,7 +558,7 @@ nfi_data[, vtot := NULL]
 ## Change column names
 setnames(nfi_data, new = c("species_code_nfi", "plot_id", "tree_id", "circumference_m", "height",
 	"r", "taper_diameter", "taper_height", "x_lambert", "y_lambert", "department",
-	"cycle", "year", "bole_volume_m3", "genus", "speciesName_sci", "fct_type"))
+	"cycle", "year", "taper_height_flo", "bole_volume_m3", "genus", "speciesName_sci", "fct_type"))
 
 ## Densities of circumference and height for taper_height < 2.6
 plot(nfi_data[taper_height <= 2.6, density(height)], xlab = "Height", main = "", axes = FALSE, lwd = 3)
@@ -750,6 +795,14 @@ saveRDS(forest_dt_50, paste0(mnt_point, "data/nfi-inra_dt", add_name, ".rds"))
 saveRDS(ind_species_50, paste0(mnt_point, "data/ind_species_nfi-inra", add_name, ".rds"))
 ```
 
+## Create coherent table for species
+There is already `codesessences` provided in `EMERGE.RData`, but I had to do few corrections. Therefore, I decided to recreate a simplified table containing what I need.
+
+```{r}
+species_dt = unique(forest_dt[, .(speciesName_sci, species_code_inra, species_code_nfi)])
+saveRDS(species_dt, paste0(mnt_point, "data/species_dt.rds"))
+```
+
 ## Data for posterior checks
 
 After running a Bayesian model, it is important to do a 'predict' on new data to check that the model can generate sensible volumes. For this, I use the volume-measured trees dataset from 2009 and 2010, which I format in this section. There are three datasets for each year (here detailed for 2010):
@@ -956,7 +1009,7 @@ build_check_data = function(branches, profiles, trees, species, plots)
 		taper_height = hauteurdecoupe7_m, circumference_m = c130/100, twig_volume = v_menu_verif)],
 		by.x = "tree_id", by.y = "tree")
 
-	emerge = merge.data.table(emerge, species[, .(essence, speciesName_sci, fct_type)],
+	emerge = merge.data.table(emerge, species[, .(essence, nfi, speciesName_sci, fct_type)],
 		by.x = "id_codesessences", by.y = "essence", all.x = TRUE)
 
 	emerge = merge.data.table(emerge, plots[, .(id, longitude, latitude)],
@@ -971,6 +1024,10 @@ build_check_data = function(branches, profiles, trees, species, plots)
 	emerge[, total_volume_m3 := bole_volume_conic_m3 + ifelse(is.na(branch_volume), 0, branch_volume) +
 		ifelse(is.na(twig_volume), 0, twig_volume)]
 
+	# Change name nfi to sp_code
+	setnames(emerge, old = "nfi", new = "sp_code")
+
+	# Change colorder
 	setcolorder(emerge, c("tree_id", "speciesName_sci", "fct_type", "longitude", "latitude",
 		"circumference_m", "height", "taper_height"))
 
@@ -1015,13 +1072,13 @@ points(emerge[, circumference_m], emerge[, total_volume_m3], pch = 19,
 ```
 
 ## Felled trees across Switzwerland 
-Data similar to EMERGE has also been collected in Switzerland, spanning from 1888 and 1974 [@Didion2024]. It represents more than \num{40000} felled trees, with diameter measurements every two meters (when possible) up to the taper height of \qty{7}{\centi\metre}. All the trees have a diameter measured at \qty{1}{\metre}, \qty{3}{\metre}, \qty{5}{\metre}, and so on. The original data provided volumes, however the authors of @Didion2024 never succeded to reconstruct them fully (*personal comm.*). Therefore, they decided to let the reconstruction of the volume open. I reconstruct the bole volume using cylinders 
+Data similar to EMERGE has also been collected in Switzerland, spanning from 1888 and 1974 [@Didion2024]. It represents more than \num{40000} felled trees, with diameter measurements every two meters (when possible) up to the taper height of \qty{7}{\centi\metre}. All the trees have a diameter measured at \qty{1}{\metre}, \qty{3}{\metre}, \qty{5}{\metre}, and so on. The original data provided volumes, however the authors of @Didion2024 never succeded to reconstruct them fully (*personal comm.*). Therefore, they decided to let the reconstruction of the volume open. I reconstruct the bole volume using cylinders.
 
 ```{r}
 #### Reshape data
 ## Melt
-swiss_dt = melt(swiss_dt, measure = patterns("^DM[[:digit:]]"), variable.name = "diameter_height", value.name = "diameter",
-	variable.factor = FALSE)
+swiss_dt = melt(swiss_dt, measure = patterns("^DM[[:digit:]]"), variable.name = "diameter_height",
+	value.name = "diameter", variable.factor = FALSE)
 
 ## Define new variables, convert some to m, and rename some columns
 swiss_dt[, c("diameter", "dbh_m", "height", "L_coarsestemfinal", "L_top", "D_coarsestemfinal", "D_top") :=
@@ -1073,13 +1130,62 @@ swiss_dt[, crown_volume_m3 := V_coarsebranch + V_finebranch + top_volume_m3]
 # Total volume
 swiss_dt[, total_volume_m3 := bole_volume_cyl_m3 + crown_volume_m3]
 
+# dt_save = copy(swiss_dt)
+# swiss_dt = copy(dt_save)
+## Estimate taper height: the first height where a 10% decrease (at least) occurs in d within a metre
+# Subset cols of interest
+swiss_hdec = swiss_dt[, .(tree_id, diameter_height_m, diameter)]
+
+# Reorder the dataset per tree_id (which is unique) and diameter_height_m, although should be done (keys)
+setorder(swiss_hdec, tree_id, diameter_height_m)
+
+# Linear interpolation of the diameters (although volume computed with cylinders, was a minor difference)
+swiss_hdec[, interp_diam := (data.table::shift(diameter, type = "lead") + diameter)/2, by = tree_id]
+swiss_hdec[, interp_height := diameter_height_m + 1, by = tree_id]
+
+colA = c("diameter", "interp_diam")
+colB = c("diameter_height_m", "interp_height")
+swiss_hdec = melt(swiss_hdec, measure.vars = list(colA, colB), value.name = c("diameter", "at_height"))
+
+swiss_hdec[, variable := NULL]
+swiss_hdec = na.omit(swiss_hdec)
+
+setorder(swiss_hdec, tree_id, at_height)
+
+# Compute whether decrease 10% in diameter
+swiss_hdec[, dec_10pct_d := diameter / data.table::shift(diameter, type = "lag") <= 0.9, by = tree_id]
+
+# For each tree_id, keep only the first TRUE as TRUE, which will indicate taper height (hdec)
+swiss_hdec[, first_true := FALSE]
+
+swiss_hdec[dec_10pct_d == TRUE, 
+	first_true := .I == .I[1],  # mark only the first TRUE row within each group
+	by = tree_id]
+
+temp = swiss_hdec[(first_true), .(tree_id, hdec = at_height)]
+
+missing_dt = data.table(
+	tree_id = unique(swiss_hdec$tree_id)[!(unique(swiss_hdec$tree_id) %in% temp$tree_id)],
+	hdec = -Inf)
+
+swiss_hdec = rbindlist(list(temp, missing_dt))
+
 ## Keep only cols and rows of interest
 swiss_dt = unique(swiss_dt[, .(plot_id, year, tree_id, sp_code, dbh_m, height, bole_volume_cyl_m3,
 	crown_volume_m3, total_volume_m3)])
 
 ## Add circumference for ease
 swiss_dt[, circumference_m := pi*dbh_m]
+
+## Add the computed taper height
+swiss_dt = merge.data.table(x = swiss_dt, y = swiss_hdec, by = "tree_id")
+
+## Add hdec', the taper height of Florence
+swiss_dt[, hdecro := hdec] # hdecro equals hdec when there is a taper height...
+swiss_dt[is.infinite(hdecro), hdecro := height] # ... and equals htot otherwise
 ```
+
+The Swiss dataset does not contain the taper height, $h_{\text{dec}}$, so I estimated it based on the tree profiles. I use the standard definition: $h_{\text{dec}}$ corresponds to the first height where a 10% decrease (at least) occurs in circumference within a metre.
 
 Add species to the swiss data. Few species names are modified to match the French NFI names. For instance, *Pinus mugo Turra subsp. mugo* becomes *Pinus mugo*, while *Acer campestre, platanoides*, and *pseudoplatanus*, become *Acer sp.*. Note that for the second case, it creates two corresponding match: 'petit érable' (for *A. campestre*) and 'grand érable' (for the two others). There is unfortunately no way to distinguish them. Same for the three *Quercus petraea*, *robur*, and *rubra* that are grouped in the swiss EFM, while in France the group is *Quercus petraea*, *pubescens*, and *robur*.
 
@@ -1316,10 +1422,12 @@ legend(x = "topright", legend = c("Emerge", "NFI", "EFM"), fill = colours[c("inr
 
 #### Binding both forest_dt and swiss_dt
 ## Temporary data
-temp = rbind(forest_dt[, .(plot_id, tree_id, genus, circumference_m,
-		bole_volume_m3, crown_volume_m3, origin_data)],
-	swiss_dt[, .(plot_id, tree_id, genus, circumference_m,
-		bole_volume_m3 = bole_volume_cyl_m3, crown_volume_m3)], fill = TRUE)
+temp = rbind(forest_dt[, .(plot_id, tree_id, genus, speciesName_sci, circumference_m, height,
+		taper_height, taper_height_flo,
+		bole_volume_m3, crown_volume_m3, total_volume_m3, origin_data)],
+	swiss_dt[, .(plot_id, tree_id, genus, speciesName_sci, circumference_m, height,
+		taper_height = hdec, taper_height_flo = hdecro,
+		bole_volume_m3 = bole_volume_cyl_m3, crown_volume_m3, total_volume_m3)], fill = TRUE)
 
 ## Origin data and colours
 temp[is.na(origin_data), origin_data := "swiss"]
