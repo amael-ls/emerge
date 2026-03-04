@@ -169,6 +169,7 @@ library(MetBrewer)
 library(inventR)
 library(stringi)
 library(terra)
+library(TapeR)
 library(gt)
 ```
 
@@ -289,6 +290,47 @@ ref_speciesName_sci = codesessences[essence == 19, speciesName_sci]
 codesessences[essence == 22,
 	c("nomessence", "espece", "speciesName_sci") := .(ref_nomessence, ref_espece, ref_speciesName_sci)]
 ```
+
+Add species to the swiss data. Few species names are modified to match the French NFI names. For instance, *Pinus mugo Turra subsp. mugo* becomes *Pinus mugo*, while *Acer campestre, platanoides*, and *pseudoplatanus*, become *Acer sp.*. Note that for the second case, it creates two corresponding match: 'petit érable' (for *A. campestre*) and 'grand érable' (for the two others). There is unfortunately no way to distinguish them. Same for the three *Quercus petraea*, *robur*, and *rubra* that are grouped in the swiss EFM, while in France the *Quercus sp* group corresponds to *Quercus petraea*, *robur*, and *pubescens*.
+
+```{r}
+## Add species
+# Change colnames and keep columns of interest
+swiss_sp[, c("NFI main species", "N") := NULL]
+setnames(swiss_sp, old = c("Species ID", "Species name"),
+	new = c("sp_code_swiss", "speciesName_sci"))
+
+# Correct/modify few species to match codesessences
+swiss_sp[speciesName_sci == "Pinus mugo Turra subsp. mugo", speciesName_sci := "Pinus mugo"]
+swiss_sp[speciesName_sci == "Chamaecyparis", speciesName_sci := "Chamaecyparis sp."]
+swiss_sp[speciesName_sci == "Picea omorika", speciesName_sci := "Picea sp."] # There are only 14 individuals...
+swiss_sp[speciesName_sci == "Larix kaempferi (Lamb.) Carrière", speciesName_sci := "Larix kaempferi"]
+swiss_sp[speciesName_sci == "Quercus petraea, Q. robur, Q. rubra", speciesName_sci := "Quercus sp."] # 1821 individuals
+swiss_sp[speciesName_sci == "Fraxinus americana, F. excelsior", speciesName_sci := "Fraxinus sp."] # 141 individuals
+swiss_sp[speciesName_sci == "Acer campestre, A. platanoides, A. pseudoplatanus", speciesName_sci := "Acer sp."] # 90 indiv
+swiss_sp[speciesName_sci == "Juglans regia", speciesName_sci := "Juglans sp."] # 207 individuals
+swiss_sp[speciesName_sci == "Other broadleaves, incl. Sorbus spp and Tilia spp",
+	speciesName_sci := "Broadleaves sp."] # 9 individuals
+
+codesessences = merge.data.table(x = codesessences, y = swiss_sp, all.x = TRUE, by = "speciesName_sci")
+
+non_unique = codesessences[!is.na(sp_code_swiss)][, .N, by = sp_code_swiss][N > 1][, sort(sp_code_swiss)]
+
+# Drop the nfi codes from codesessences that are not present in forest_dt
+nfi_to_check = codesessences[sp_code_swiss %in% non_unique, nfi]
+nfi_to_dump = nfi_to_check[!(nfi_to_check %in% forest_dt$species_code_nfi)]
+codesessences = codesessences[!(nfi %in% nfi_to_dump)]
+
+# Drop the inra codes from codesessences that are not present in forest_dt
+inra_to_check = codesessences[sp_code_swiss %in% non_unique, essence]
+inra_to_dump = inra_to_check[!(inra_to_check %in% forest_dt$species_code_inra)]
+codesessences = codesessences[!(essence %in% inra_to_dump)]
+
+# Check there is no duplicates left
+non_unique = codesessences[!is.na(sp_code_swiss)][, .N, by = sp_code_swiss][N > 1][, sort(sp_code_swiss)]
+
+if (length(non_unique) != 0)
+	warning("There are still duplicates, which might create problems")
 
 ### Clean the datasets and compute new variables
 
@@ -1118,17 +1160,44 @@ points(emerge[, circumference_m], emerge[, total_volume_m3], pch = 19,
 ```
 
 ## Felled trees across Switzwerland 
-Data similar to EMERGE has also been collected in Switzerland, spanning from 1888 and 1974 [@Didion2024]. It represents more than \num{40000} felled trees, with diameter measurements every two meters (when possible) up to the taper height of \qty{7}{\centi\metre}. All the trees have a diameter measured at \qty{1}{\metre}, \qty{3}{\metre}, \qty{5}{\metre}, and so on. The original data provided volumes, however the authors of @Didion2024 never succeded to reconstruct them fully (*personal comm.*). Therefore, they decided to let the reconstruction of the volume open. I reconstruct the bole volume using cylinders.
+Data similar to EMERGE has also been collected in Switzerland, spanning from 1888 and 1974 [@Didion2024]. It represents more than \num{40000} felled trees, with diameter measurements every two meters (when possible) up to the taper height of \qty{7}{\centi\metre}. All the trees have a diameter measured at \qty{1}{\metre}, \qty{3}{\metre}, \qty{5}{\metre}, and so on. The original data provided volumes, however the authors of @Didion2024 never succeded to reconstruct them fully (*personal comm.*). Therefore, they decided to let the reconstruction of the volume open. I reconstruct the bole volume using Smalian's and Newton's formul\ae @West2015:
+
+$$
+\begin{aligned}
+	V_S &= \pi \ell (d_L^2 + d_U^2)/8, \text{ Smalian} \\
+	V_S &= \pi \ell (d_L^2 + 4 d_M^2 + d_U^2)/24, \text{ Newton},
+\end{aligned}
+$$
+où $\ell$ est la longueur de la section, et $d_L$, $d_M$, $d_U$ sont les Lower, Median, and Upper diameters de chaque section.
+
+J'utilise la formule de Newton pour la première section, de 0.65 à 1.3 m, où je considère que le diamètre à 1 m est médian (un peu faux, c'est 97.5 et non 100, mais bon on ne va pas chipoter pour 2.5 cm). De même pour la dernière section avant le top et le top. Toutes les autres sections sont évaluées avec la formule de Smalian avec une longeur de 2 m. Voir @Didion2024, Fig. 1 pour voir les mesures prises sur chaque arbre.
+
+Cependant, comme la mesure à 0.65 m n'est prise que sur un sous-échantillon, il va falloir imputer sur le reste, via un modèle par essence ou par groupe lorsque pas possible...
+
+Pour 495 individus, il n'y a que la mesure à 0.65 et le dbh! Ce sont des petits arbres allant de 0.7 cm à 8 cm de dbh seulement, mais de 14 m de haut tout de même pour certains! Je fais deux volumes pour ces arbres pour obtenir le volume total:
+
+1. Smalian sur ce que je vais appeler butt log, de 0.65 à 1.3 m de haut
+2. Cône de 1.3 m à height, via la formule $(h - 1.3) \pi \frac{dbh^2}{12} $
+
+Certains individus ont `D_coarsestemfinal = NA` (ce qui implique `D_top = NA`). Pour ces indivs, `L_coarsestemfinal = 0` sauf pour cinq indivs. J'enlève ces cinq indivs car il manque à chaque fois le dernier DM (DM3, ou DM5, etc). Pour tous les autres où `L_coarsestemfinal = 0`, alors celà veut dire que cette dernière bûche est traitée de manière standard!
 
 ```{r}
 #### Reshape data
 ## Melt
+swiss_dt = fread(filename_switzerland) # TEMPORARY
+
 swiss_dt = melt(swiss_dt, measure = patterns("^DM[[:digit:]]"), variable.name = "diameter_height",
 	value.name = "diameter", variable.factor = FALSE)
 
 ## Define new variables, convert some to m, and rename some columns
-swiss_dt[, c("diameter", "dbh_m", "height", "L_coarsestemfinal", "L_top", "D_coarsestemfinal", "D_top") :=
-	.(diameter/1e3, DBH/1e3, H_total/10, L_coarsestemfinal/10, L_top/10, D_coarsestemfinal/1e3, D_top/1e3)]
+swiss_dt[, c("diameter", "dbh_m", "height", "L_coarsestem", "L_coarsestemfinal", "L_top",
+		"D_coarsestemfinal", "D_top") :=
+	.(diameter/1e3, DBH/1e3, H_total/10, L_coarsestem/10, L_coarsestemfinal/10, L_top/10,
+		D_coarsestemfinal/1e3, D_top/1e3)]
+
+# Convert volumes to cubic metres
+swiss_dt[, c("V_coarsebranch", "V_finebranch", "V_finewoodytotal") :=
+	.(V_coarsebranch/1e3, V_finebranch/1e3, V_finewoodytotal/1e3)]
 
 swiss_dt[, c("Elevation", "NFI_PR", "StandAge", "StandComp", "TreeAge", "NFI_mainspecies", "DBH", "H_total") := NULL]
 
@@ -1143,22 +1212,15 @@ swiss_dt[diameter_height != "DM065",
 coords_swiss = vect(x = unique(swiss_dt[!is.na(lon) | !is.na(lat), .(plot_id, lon, lat)]), crs = "EPSG:4326")
 swiss_dt[, c("lon", "lat") := NULL]
 
-## Sort by tree id, and then diameter height (tree_id is already a unique identifier, no need for plot_id)
-setkey(swiss_dt, tree_id, diameter_height_m)
-
-## Set D_coarsestemfinal, L_coarsestemfinal, D_top, and L_top to 0 when NA
-swiss_dt[is.na(D_coarsestemfinal), D_coarsestemfinal := 0]
-swiss_dt[is.na(L_coarsestemfinal), L_coarsestemfinal := 0]
-swiss_dt[is.na(D_top), D_top := 0]
-swiss_dt[is.na(L_top), L_top := 0]
-
-swiss_dt[is.na(V_coarsebranch), V_coarsebranch := 0]
-swiss_dt[is.na(V_finebranch), V_finebranch := 0]
-swiss_dt[is.na(V_finewoodytotal), V_finewoodytotal := 0] # Includes the top of the tree, but is NA if V_finebranch = NA!
-
 ## Remove useless lines
 swiss_dt = swiss_dt[!is.na(diameter)] # Diameters that do not exist or where not given
+
+# Check that sp code is unique per tree_id
+range(swiss_dt[, length(unique(sp_code)), by = tree_id][, V1])
 swiss_dt = swiss_dt[!is.na(sp_code)] # Missing species information
+
+## Sort by tree id, and then diameter height (tree_id is already a unique identifier, no need for plot_id)
+setkey(swiss_dt, tree_id, diameter_height_m)
 
 ## Compute volumes
 # Volume trunk using cylindre formula with median diameter: log 0 to 2 --> DM1, log 2 to 4 --> DM3, etc...
@@ -1175,6 +1237,14 @@ swiss_dt[, crown_volume_m3 := V_coarsebranch + V_finebranch + top_volume_m3]
 
 # Total volume
 swiss_dt[, total_volume_m3 := bole_volume_cyl_m3 + crown_volume_m3]
+swiss_dt[, total_volume_m3_opt2 := whole_bole_volume_m3 + V_coarsebranch + V_finebranch]
+
+qq = unique(swiss_dt[sp_code == sp, .(tree_id, dbh_m, h7, bole_volume_m3,
+	bole_volume_cyl_m3, whole_bole_volume_m3, total_volume_m3, total_volume_m3_opt2)])
+
+plot(qq[, total_volume_m3], qq[, total_volume_m3_opt2], pch = 19,
+	xlab = "V tot ancienne version", ylab = "V tot nouvelle version")
+abline(a = 0, b = 1, lty = "dashed")
 
 # dt_save = copy(swiss_dt)
 # swiss_dt = copy(dt_save)
@@ -1233,47 +1303,8 @@ swiss_dt[is.infinite(hdecro), hdecro := height] # ... and equals htot otherwise
 
 The Swiss dataset does not contain the taper height, $h_{\text{dec}}$, so I estimated it based on the tree profiles. I use the standard definition: $h_{\text{dec}}$ corresponds to the first height where a 10% decrease (at least) occurs in circumference within a metre.
 
-Add species to the swiss data. Few species names are modified to match the French NFI names. For instance, *Pinus mugo Turra subsp. mugo* becomes *Pinus mugo*, while *Acer campestre, platanoides*, and *pseudoplatanus*, become *Acer sp.*. Note that for the second case, it creates two corresponding match: 'petit érable' (for *A. campestre*) and 'grand érable' (for the two others). There is unfortunately no way to distinguish them. Same for the three *Quercus petraea*, *robur*, and *rubra* that are grouped in the swiss EFM, while in France the group is *Quercus petraea*, *pubescens*, and *robur*.
-
+I now merge the swiss data with uniformised species.
 ```{r}
-## Add species
-# Change colnames and keep columns of interest
-swiss_sp[, c("NFI main species", "N") := NULL]
-setnames(swiss_sp, old = c("Species ID", "Species name"),
-	new = c("sp_code_swiss", "speciesName_sci"))
-
-# Correct/modify few species to match codesessences
-swiss_sp[speciesName_sci == "Pinus mugo Turra subsp. mugo", speciesName_sci := "Pinus mugo"]
-swiss_sp[speciesName_sci == "Chamaecyparis", speciesName_sci := "Chamaecyparis sp."]
-swiss_sp[speciesName_sci == "Picea omorika", speciesName_sci := "Picea sp."] # There are only 14 individuals...
-swiss_sp[speciesName_sci == "Larix kaempferi (Lamb.) Carrière", speciesName_sci := "Larix kaempferi"]
-swiss_sp[speciesName_sci == "Quercus petraea, Q. robur, Q. rubra", speciesName_sci := "Quercus sp."] # 1821 individuals
-swiss_sp[speciesName_sci == "Fraxinus americana, F. excelsior", speciesName_sci := "Fraxinus sp."] # 141 individuals
-swiss_sp[speciesName_sci == "Acer campestre, A. platanoides, A. pseudoplatanus", speciesName_sci := "Acer sp."] # 90 indiv
-swiss_sp[speciesName_sci == "Juglans regia", speciesName_sci := "Juglans sp."] # 207 individuals
-swiss_sp[speciesName_sci == "Other broadleaves, incl. Sorbus spp and Tilia spp",
-	speciesName_sci := "Broadleaves sp."] # 9 individuals
-
-codesessences = merge.data.table(x = codesessences, y = swiss_sp, all.x = TRUE, by = "speciesName_sci")
-
-non_unique = codesessences[!is.na(sp_code_swiss)][, .N, by = sp_code_swiss][N > 1][, sort(sp_code_swiss)]
-
-# Drop the nfi codes from codesessences that are not present in forest_dt
-nfi_to_check = codesessences[sp_code_swiss %in% non_unique, nfi]
-nfi_to_dump = nfi_to_check[!(nfi_to_check %in% forest_dt$species_code_nfi)]
-codesessences = codesessences[!(nfi %in% nfi_to_dump)]
-
-# Drop the inra codes from codesessences that are not present in forest_dt
-inra_to_check = codesessences[sp_code_swiss %in% non_unique, essence]
-inra_to_dump = inra_to_check[!(inra_to_check %in% forest_dt$species_code_inra)]
-codesessences = codesessences[!(essence %in% inra_to_dump)]
-
-# Check there is no duplicates left
-non_unique = codesessences[!is.na(sp_code_swiss)][, .N, by = sp_code_swiss][N > 1][, sort(sp_code_swiss)]
-
-if (length(non_unique) != 0)
-	warning("There are still duplicates, which might create problems")
-
 swiss_dt = merge.data.table(x = swiss_dt,
 	y = codesessences[!is.na(sp_code_swiss), .(sp_code_swiss, speciesName_sci, genus = genre, fct_type)],
 	by.x = "sp_code", by.y = "sp_code_swiss")
@@ -1642,4 +1673,218 @@ cor(ch_inra[.(unique(genus), "inra"), bole_volume_m3, nomatch = 0],
 
 cor(ch_inra[.(unique(genus), "swiss"), bole_volume_m3, nomatch = 0],
 	ch_inra[.(unique(genus), "swiss"), crown_volume_m3, nomatch = 0])
+```
+
+
+## Swiss stuff (DRAFT!)
+This is a draft on how to compute the volume of the Swiss data. At the end, I decided to use taper functions!
+```{r}
+## List individual that have is.na(D_coarsestemfinal) and L_coarsestemfinal == 0
+indiv_no_Lfinal = swiss_dt[is.na(D_coarsestemfinal) & (L_coarsestemfinal == 0), unique(tree_id)]
+# For these individuals, the last log is treated like standard logs since it is exacly 2 m long!
+
+# swiss_dt[is.na(V_coarsebranch), V_coarsebranch := 0]
+# swiss_dt[is.na(V_finebranch), V_finebranch := 0]
+# swiss_dt[is.na(V_finewoodytotal), V_finewoodytotal := 0] # Includes the top of the tree, but is NA if V_finebranch = NA!
+
+# Butt log volume, from 0.65 m to 1.3 m, with the median diameter at 1 m (I know, should be 0.975 m) or not
+ls_065 = swiss_dt[diameter_height == "DM065", tree_id] # Only a subsample has the 0.65 m diameter measured
+ls_no_065 = swiss_dt[!(tree_id %in% ls_065), unique(tree_id)] # Trees that do NOT have the 0.65 m diameter
+
+# Check that all the trees that do NOT have DM065 starts at DM1 (it is the case!)
+range(swiss_dt[.(ls_no_065), min(diameter_height_m), by = tree_id][, V1])
+
+# Check which trees having DM065 also have DM1
+ls_065_1 = swiss_dt[.(ls_065)][diameter_height_m == 1, unique(tree_id)]
+
+# Check which trees having DM065 has no DM1
+ls_065_no_1 = ls_065[!(ls_065 %in% ls_065_1)]
+
+# swiss_dt[.(ls_065_no_1), range(diameter_height_m)] # All the problematic trees
+# swiss_dt[.(ls_065_no_1), 100*range(dbh_m)] # DBH in cm of the problematic trees: 0.7 to 8cm!
+# swiss_dt[.(ls_065_no_1), range(height)] # Height in m of the problematic trees: up to 14 m!
+
+# Compute butt log of trees having both DM065 and DM1, and dbh (Newton)
+swiss_dt[.(ls_065_1), butt_log := pi*0.65*(diameter[1]^2 + diameter[2]^2 + dbh_m[1]^2)/24, by = tree_id]
+
+# Compute butt log of trees having only DM065, using Smalians with dbh
+swiss_dt[.(ls_065_no_1), butt_log := pi*0.65*(diameter[1]^2 + dbh_m[1]^2)/8, by = tree_id]
+
+## 2nd log volume...
+# ...for trees having DM3, 2nd log is from dbh to DM3. Using Smalian's formula:
+ls_3 = swiss_dt[diameter_height == "DM3", tree_id]
+swiss_dt[.(ls_3),
+	second_log := pi*1.7*(unique(dbh_m)^2 + .SD[diameter_height == "DM3", diameter]^2)/8,
+	by = tree_id]
+
+# ...for trees having their height equals to L_top (i.e., dbh <= 7cm), so no L_coarsestem nor DM3,
+#	and taller than 2.6 m (othewise D_top below dbh), 2nd log is from dbh to D_top. Using Smalian's formula:
+swiss_dt[(height == L_top) & (height > 2.6),
+	second_log := pi*(L_top/2 - 1.3)*(unique(dbh_m)^2 + unique(D_top)^2)/8,
+	by = tree_id] # No last log, cone directly
+
+no_second_log = swiss_dt[(height == L_top) & (height <= 2.6), unique(tree_id)] # After butt log, directly cone
+no_last_log = sort(c(no_second_log, swiss_dt[(height == L_top) & (height > 2.6), unique(tree_id)]))
+
+# ...for trees having no DM3, and L_coarsestem > 1.3, 2nd log is from dbh to 7cm. Using Smalian's formula:
+# List trees with their last log between 0.07 m D_top, such as tree_id = 39 or 13
+ls_7_Dtop = swiss_dt[is.na(second_log) & (L_coarsestem - 1.3 > 0), unique(tree_id)]
+swiss_dt[is.na(second_log) & (L_coarsestem - 1.3 > 0),
+	second_log := pi*(unique(L_coarsestem) - 1.3)*(unique(dbh_m)^2 + 0.07^2)/8,
+	by = tree_id] # Last log from Lcoarsestem to L_top/2 then cone
+
+# ...for trees having no DM3, and 0 < L_coarsestem < 1.3, 2nd log is from dbh to D top. Using Smalian's formula:
+no_last_log = sort(c(no_last_log,
+	swiss_dt[is.na(second_log) & (0 < L_coarsestem) & (L_coarsestem < 1.3), unique(tree_id)]))
+
+swiss_dt[is.na(second_log) & (0 < L_coarsestem) & (L_coarsestem < 1.3),
+	second_log := pi*unique(height - 1.3)/2*(unique(dbh_m)^2 + unique(D_top)^2)/8, by = tree_id] # No last log, then cone
+
+test = all.equal(swiss_dt[is.na(second_log), unique(tree_id)], no_second_log)
+if (test)
+	print("Ok, the only NAs in second log are individuals with cone directly after butt log")
+if (!test)
+	stop("Check second log, either some NAs or values were not planned!")
+
+## Last log volume...
+# ...for trees having a non-zero L_coarsestemfinal
+
+###############################################################################################################
+# Listing trees with mismatching height
+swiss_dt[, diff_height := round(L_coarsestemfinal + max(diameter_height_m) + L_top - height, 2), by = tree_id]
+swiss_dt[, table(diff_height)] # 0 is what I was expecting...
+
+swiss_dt = swiss_dt[diff_height > -3] # Remove individual 39643, 5.4 m bole, but only DM1...
+
+
+# WHAT FOLLOWS IS WRONG... By doing this, there are some NAs in D_coarsestemfinal!
+
+swiss_dt[, L_coarsestemfinal_modif := L_coarsestemfinal]
+swiss_dt[diff_height == -1, L_coarsestemfinal_modif := L_coarsestemfinal + 1]
+
+swiss_dt[L_coarsestemfinal_modif == 1, range(D_coarsestemfinal)]
+###############################################################################################################
+
+swiss_dt[L_coarsestemfinal != 0,
+	last_log := pi*L_coarsestemfinal*(diameter[.N]^2 + D_coarsestemfinal^2 + 0.07^2)/24,
+	by = tree_id]
+# Note that they all have D_coarsestemfinal > 0, but not necessarily D_coarsestemfinal > 0.07
+
+# Correction for the trees that have L_coarsestemfinal != 0 but should not have a last log, such as id = 4349
+swiss_dt[.(no_last_log), last_log := NA]
+
+# Correction for the trees that have their last log between dbh and 0.07 such as id = 39 or 13
+swiss_dt[.(ls_7_Dtop), last_log := pi*L_top/2*(0.07^2 + D_top^2)/8]
+
+# swiss_dt[.(ls_7_Dtop)][is.na(last_log)] # Tree 3904 has D_top = NA. Just remove it at the end!
+
+## Intermediate log volumes
+# List trees without intermediate logs
+no_intermediate_log = unique(c(no_second_log, ls_7_Dtop, no_last_log))
+
+if (!swiss_dt[.(ls_3)][is.na(last_log)][, all(L_coarsestemfinal == 0)])
+	stop("The is.na(last_log) among ls_3 is not equavalent to L_coarsestemfinal == 0")
+
+no_intermediate_log = sort(c(no_intermediate_log,
+	swiss_dt[.(ls_3)][, any(max(diameter_height_m) < 5), by = tree_id][(V1), tree_id]))
+
+intermediate_log = ls_3[!(ls_3 %in% no_intermediate_log)] # Trees with intermediate logs
+
+
+# copy_swiss = copy(swiss_dt)
+# swiss_dt = copy(copy_swiss)
+
+# ... First case scenario: No last log because L_coarsestemfinal = 0
+intermediate_log_no_last = swiss_dt[.(intermediate_log)][is.na(last_log)][, unique(tree_id)]
+
+swiss_dt[.(intermediate_log_no_last),
+	inter_log := pi*2*(diameter^2 + data.table::shift(diameter, n = -1, type = "lag")^2)/8,
+	by = tree_id]
+
+swiss_dt[.(intermediate_log_no_last),
+	inter_log := ifelse(diameter_height_m < 3, NA, inter_log)] # Remove log DM1 to DM3, already counted
+
+# ... Second case scenario: There is a last log with L_coarsestemfinal > 0
+intermediate_log_with_last = swiss_dt[.(intermediate_log)][!is.na(last_log)][, unique(tree_id)]
+
+swiss_dt[.(intermediate_log_with_last)]
+
+#### REPRENDRE ICI
+
+
+no_log_0 = swiss_dt[.(intermediate_log)][is.na(last_log)][check == 0][, unique(tree_id)]
+no_log_1 = swiss_dt[.(intermediate_log)][is.na(last_log)][check == 1][, unique(tree_id)]
+log_0 = swiss_dt[.(intermediate_log)][!is.na(last_log)][check == 0][, unique(tree_id)]
+log_1 = swiss_dt[.(intermediate_log)][!is.na(last_log)][check == 1][, unique(tree_id)]
+
+
+swiss_dt[, mamax := max(diameter_height_m), by = tree_id]
+swiss_dt[, diadiam := diameter[diameter_height_m == mamax], by = tree_id]
+swiss_dt[.(no_log_0), range(diadiam)]
+swiss_dt[.(no_log_1), range(diadiam)]
+swiss_dt[.(4), ]
+
+lala = swiss_dt[, unique(tree_id)]
+
+any(no_intermediate_log %in% ls_3)
+qq = c(ls_3, no_intermediate_log)
+
+all(qq %in% lala)
+all(lala %in% qq)
+
+
+
+swiss_dt[.(ls_3), any(is.na(last_log))]
+
+swiss_dt[.(ls_3)][is.na(last_log)][check == 0]
+swiss_dt[.(ls_3)][is.na(last_log)][check == 1]
+
+swiss_dt[.(ls_3)][!is.na(last_log)][check == 0]
+swiss_dt[.(ls_3)][!is.na(last_log)][check == 1]
+
+swiss_dt[.(ls_3)][is.na(last_log)][check == 0][, length(unique(tree_id))]
+swiss_dt[.(ls_3)][is.na(last_log)][check == 1][, length(unique(tree_id))]
+swiss_dt[.(ls_3)][!is.na(last_log)][check == 0][, length(unique(tree_id))]
+swiss_dt[.(ls_3)][!is.na(last_log)][check == 1][, length(unique(tree_id))]
+
+
+
+
+tt = swiss_dt[L_coarsestemfinal != 0, unique(tree_id)]
+swiss_dt[.(tt), any(D_coarsestemfinal < 0.07)]
+
+# swiss_dt[, lala := diameter[.N], by = tree_id]
+
+
+swiss_dt[, check := round(L_coarsestemfinal + 1 + max(diameter_height_m) + L_top - height, 2), by = tree_id]
+swiss_dt[, check2 := round(L_coarsestemfinal + max(diameter_height_m) + L_top - height, 2), by = tree_id]
+
+# check == 1.65 for trees like tree_id = 4349: L_coarsestem < 1.3, so only DM065, no DM1. Thus  + 1 + 0.65,
+#	despite there is no coarsestem
+
+swiss_dt[.(489)]
+
+swiss_dt[check == 1.65, ]
+
+swiss_dt[abs(check) > 1e-2]
+
+swiss_dt[, last_diam := max(diameter_height_m), by = tree_id]
+
+qq = swiss_dt[abs(check) > 1e-2, unique(tree_id)]
+all(no_last_log %in% qq)
+qq = qq[!(qq %in% no_last_log)]
+
+swiss_dt[.(qq)]
+
+swiss_dt[.(13382)]
+
+# Intermediate logs volume (i.e., from third log to log before the last)
+
+# swiss_dt[, inter_log := NULL]
+# swiss_dt[, check2 := NULL]
+# swiss_dt[, mamax := NULL]
+# swiss_dt[, diadiam := NULL]
+
+swiss_dt[.(4), .(tree_id, diameter_height, diameter)]
+swiss_dt[.(4), inter_log := pi*2*(diameter^2 + data.table::shift(diameter, n = -1, type = "lag")^2)/8]
 ```
