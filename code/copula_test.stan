@@ -17,15 +17,28 @@
 */
 
 functions {
-	real clayton_copula_lpdf(real u, real v, real theta)
+	real clayton_copula_lpdf(row_vector uv, real theta)
 	{
 		if (theta <= 0.0) 
 			reject("clayton_copula: theta must > 0");
 		
+		real u = uv[1];
+		real v = uv[2];
+		
 		real result = log1p(theta) - (theta + 1) * (log(u) + log(v)) -
-			(2*theta + 1)/theta * log(pow(u, - theta) + pow(v, - theta) - 1) // Check PDF, ð²C(u, v)/ðuðv
+			(2*theta + 1)/theta * log(pow(u, - theta) + pow(v, - theta) - 1); // Check PDF, ð²C(u, v)/ðuðv
 		return result;
 	}
+	
+	// real clayton_copula_lpdf(array[] vector[] uv, real theta) // Vectorised
+	// {
+	// 	if (theta <= 0.0) 
+	// 		reject("clayton_copula: theta must > 0");
+		
+	// 	real result = log1p(theta) - (theta + 1) * (log(uv[1]) + log(uv[2])) -
+	// 		(2*theta + 1)/theta * log(pow(u, - theta) + pow(v, - theta) - 1); // Check PDF, ð²C(u, v)/ðuðv
+	// 	return result;
+	// }
 }
 
 data {
@@ -34,7 +47,7 @@ data {
 
 	// Parameters priors Fbft
 	vector[7] mu_priors; // beta0 -> 4, sigma0, sigma_pow
-	vector[7] <lower = 0> sd_priors; // beta0 -> 4, sigma0, sigma_pow
+	vector <lower = 0> [7]sd_priors; // beta0 -> 4, sigma0, sigma_pow
 
 	// Explanatory variables
 	vector <lower = 0> [N] circumference_m;
@@ -86,7 +99,7 @@ transformed parameters {
 	vector <lower = 0> [N] mu = exp(beta0 + beta1*p1 + beta2*p2 + beta3*p3 + beta4*p4);
 	vector <lower = 0> [N] sigma = sigma0 * (circumference_m.^2 .* height) .^ sigma_pow;
 	
-	vector [N] mu_tot = alpha0 + alpha1*ptot;
+	vector [N] mu_tot = alpha0 + alpha1*ptot1;
 }
 
 model {
@@ -116,9 +129,9 @@ model {
 	target += lognormal_lpdf(total_volume_m3 | mu_tot, sigma_tot_vol);
 
 	// ... Copula
-	for (n in 1:N)
-		target += clayton_copula(gamma_cdf(fnewbft[i] | mu[i]^2/sigma[i]^2, mu[i]/sigma[i]^2),
-			lognormal_cdf(total_volume_m3[i] | mu_tot[i], sigma_tot_vol), theta);
+	for (i in 1:N)
+		target += clayton_copula_lpdf([gamma_cdf(fnewbft[i] | mu[i]^2/sigma[i]^2, mu[i]/sigma[i]^2),
+			lognormal_cdf(total_volume_m3[i] | mu_tot[i], sigma_tot_vol)] | theta);
 }
 
 
