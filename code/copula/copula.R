@@ -60,4 +60,25 @@ fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_c
 	max_treedepth = 12) # Ok it seems to work, YAHOO!
 
 #### Generate data
+## Compile model
+model_genQ = cmdstan_model("./copula_genQ.stan")
+
+## Prepare data
+stanData_gen = list(
+	N_new = N_indiv,
+	Fbft_new = uv[, Fbft],
+	Vtot_new = uv[, Vtot]
+)
+
+## Generate simulation
+sim = model_genQ$generate_quantities(fit, data = stanData_gen,
+	seed = 1969 - 08 - 18, parallel_chains = min(n_chains, 4))
+
+sim_Vtot = apply(X = sim$draws("sim_Vtot"), MARGIN = 3, FUN = mean)
+
+plot(sim_Vtot, stanData_gen$Vtot_new, pch = 19,
+	xlab = "Sim total volume", ylab = "Observed total volume", axes = FALSE)
+axis(1)
+axis(2, las = 1)
+abline(a = 0, b = 1, lwd = 4, col = "#CD212A")
 
