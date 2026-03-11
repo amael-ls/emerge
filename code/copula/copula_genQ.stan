@@ -36,6 +36,24 @@ functions {
 		}
 		return x;
 	}
+
+	real gamma_icdf2(real u, real shape, real rate) // The first version is unstable for N = 200!
+	{
+		real lo = 0.0;
+		// real hi = shape/rate + 100 * sqrt(shape)/rate; // generous upper bound
+		real hi = 2; // Unlikely that Fbft > 2 in real! But maybe a bit dangerous in the real scenario?
+		real mid;
+		
+		for (i in 1:20) // Dichotomy
+		{
+			mid = (lo + hi) / 2.0;
+			if (gamma_cdf(mid | shape, rate) < u)
+				lo = mid;
+			else
+				hi = mid;
+		}
+		return (lo + hi) / 2.0;
+	}
 }
 
 data {
@@ -62,6 +80,7 @@ parameters {
 
 generated quantities {
 	vector [N_new] sim_Fbft;
+	vector [N_new] sim_Fbft2;
 	vector [N_new] sim_Vtot;
 
 	{
@@ -80,6 +99,7 @@ generated quantities {
 			// Transform back (u, v)...
 			// ...For Fbft
 			sim_Fbft[i] = gamma_icdf(u, shape, rate);
+			sim_Fbft2[i] = gamma_icdf2(u, shape, rate);
 
 			// ...For Vtot
 			sim_Vtot[i] = lognormal_icdf(v, meanlog, sdlog);

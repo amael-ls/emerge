@@ -17,7 +17,7 @@ clayton = claytonCopula(param = 1.33, dim = 2)
 
 ## Simulate uniform pairs (i.e., in I², then I need to transform back to the real scales)
 set.seed(1969 - 08 - 18) # Woodstock seed
-N_indiv = 5000
+N_indiv = 200
 uv = as.data.table(rCopula(N_indiv, clayton))
 
 dim(uv) # N_indiv x 2
@@ -87,4 +87,7 @@ hist(sim$draws("sim_Vtot"), prob = TRUE, ylim = c(0, 0.125))
 curve(dlnorm(x, 2, 0.5), lwd = 4, col = "#CD212A", add = TRUE)
 
 hist(sim$draws("sim_Fbft"), prob = TRUE)
+curve(dgamma(x, shape = 3, rate = 6), lwd = 4, col = "#CD212A", add = TRUE)
+
+hist(sim$draws("sim_Fbft2"), prob = TRUE)
 curve(dgamma(x, shape = 3, rate = 6), lwd = 4, col = "#CD212A", add = TRUE)
