@@ -17,7 +17,7 @@ clayton = claytonCopula(param = 1.33, dim = 2)
 
 ## Simulate uniform pairs (i.e., in I², then I need to transform back to the real scales)
 set.seed(1969 - 08 - 18) # Woodstock seed
-N_indiv = 200
+N_indiv = 5000
 uv = as.data.table(rCopula(N_indiv, clayton))
 
 dim(uv) # N_indiv x 2
@@ -59,6 +59,15 @@ n_chains = 4
 fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4),
 	max_treedepth = 12) # Ok it seems to work, YAHOO!
 
+## Save results
+current_path = "./results/"
+if (!dir.exists(current_path))
+	dir.create(current_path)
+
+filename = paste0("res-", N_indiv)
+fit$save_output_files(dir = "./", basename = paste0(current_path, filename), random = FALSE)
+saveRDS(fit, paste0(current_path, filename, ".rds"))
+
 #### Generate data
 ## Compile model
 model_genQ = cmdstan_model("./copula_genQ.stan")
@@ -74,11 +83,8 @@ stanData_gen = list(
 sim = model_genQ$generate_quantities(fit, data = stanData_gen,
 	seed = 1969 - 08 - 18, parallel_chains = min(n_chains, 4))
 
-sim_Vtot = apply(X = sim$draws("sim_Vtot"), MARGIN = 3, FUN = mean)
+hist(sim$draws("sim_Vtot"), prob = TRUE, ylim = c(0, 0.125))
+curve(dlnorm(x, 2, 0.5), lwd = 4, col = "#CD212A", add = TRUE)
 
-plot(sim_Vtot, stanData_gen$Vtot_new, pch = 19,
-	xlab = "Sim total volume", ylab = "Observed total volume", axes = FALSE)
-axis(1)
-axis(2, las = 1)
-abline(a = 0, b = 1, lwd = 4, col = "#CD212A")
-
+hist(sim$draws("sim_Fbft"), prob = TRUE)
+curve(dgamma(x, shape = 3, rate = 6), lwd = 4, col = "#CD212A", add = TRUE)
