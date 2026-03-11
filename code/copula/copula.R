@@ -8,6 +8,7 @@ graphics.off()
 options(max.print = 500)
 
 library(data.table)
+library(cmdstanr)
 library(copula)
 
 #### Create fake data
@@ -38,8 +39,25 @@ plot(uv[, Fbft_rank], uv[, Vtot_rank], xlab = "Fbft rank", ylab = "Total rank",
 axis(1)
 axis(2)
 abline(a = 0, b = 1, col = "#CD212A", lty = "dashed", lwd = 4)
-
-# This is more or less my stuff with trees...
+# This is more or less my stuff with real trees...
 
 #### Fit a stan model on these data
+## Compile model
+model = cmdstan_model("./copula.stan")
+
+## Prepare data
+stanData = list(
+	N = N_indiv,
+	Fbft = uv[, Fbft],
+	Vtot = uv[, Vtot]
+)
+
+## Common variables
+n_chains = 4
+
+## Run model
+fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4),
+	max_treedepth = 12) # Ok it seems to work, YAHOO!
+
+#### Generate data
 
