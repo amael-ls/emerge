@@ -20,3 +20,44 @@ functions {
 		return result; // See page 132, notebook 3 IGN
 	}
 }
+
+data {
+	// Dimensions
+	int <lower = 0> N;
+
+	// Observation
+	vector[N] Fbft;
+	vector[N] Vtot;
+}
+
+parameters {
+	// Marginal of Fbft (gamma distrib)
+	real <lower = 0> shape;
+	real <lower = 0> rate;
+
+	// Marginal of Vtot (lognormal distrib)
+	real meanlog;
+	real <lower = 0> sdlog;
+	
+	// Copula parameter
+	real <lower = 0> theta; // Technically can go up to -1 but then non-strict generator...
+}
+
+model {
+	// Priors
+	target += gamma_lpdf(shape | 0.1, 0.1);
+	target += gamma_lpdf(rate | 0.1, 0.1);
+	target += normal_lpdf(meanlog | 0, 5);
+	target += gamma_lpdf(sdlog | 0.1, 0.1);
+	target += gamma_lpdf(theta | 1.5^2, 1.5); // mean of 1.5, var of 1
+
+	// Log-likelihood...
+	// ... Marginals
+	target += gamma_lpdf(Fbft | shape, rate);
+	target += lognormal_lpdf(Vtot | meanlog, sdlog);
+
+	// ... Copula
+	for (i in 1:N)
+		target += clayton_copula_lpdf([gamma_cdf(Fbft[i] | shape, rate),
+			lognormal_cdf(Vtot[i] | meanlog, sdlog)] | theta);
+}
