@@ -68,10 +68,10 @@ functions {
 
 		while (abs(err) > 1e-6 && i < max_iter)
 		{
-				err = gamma_p(shape, x * rate) - u;
-				x -= err / exp(gamma_lpdf(x | shape, rate));
-				x = fmax(x, 1e-10); // prevent x from going negative
-				i += 1;
+			err = gamma_p(shape, x * rate) - u;
+			x -= err / exp(gamma_lpdf(x | shape, rate));
+			x = fmax(x, 1e-10); // prevent x from going negative
+			i += 1;
 		}
 		return x;
 	}
