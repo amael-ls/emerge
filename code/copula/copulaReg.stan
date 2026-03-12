@@ -3,8 +3,8 @@
 		- Fbft is the form factor for bole volume
 		- Vtot is the total volume
 	
-	Here, Fbft follows a gamma distribution with fixed shape and rate, while
-	Vtot follows a lognormal distribution, with fixed meanlog and sdlog.
+	Here, Fbft follows a gamma distribution with shape and rate determined by lin reg beta0 and 1, while
+	Vtot follows a lognormal distribution, with meanlog and sdlog determined by lin reg alpha0 and 1.
 
 	My source of information for this script are:
 		1. Nelsen 2006, p. 116 -- 120
@@ -25,29 +25,47 @@ data {
 	// Dimensions
 	int <lower = 0> N;
 
+	// Predictor
+	vector <lower = 0> [N] circumference_m;
+
 	// Observation
-	vector[N] Fbft;
-	vector[N] Vtot;
+	vector <lower = 0> [N] Fbft;
+	vector <lower = 0> [N] Vtot;
 }
 
 parameters {
 	// Marginal of Fbft (gamma distrib)
-	real <lower = 0> shape;
-	real <lower = 0> rate;
+	real beta0;
+	real beta1;
+	
+	real <lower = 0> sdF;
 
 	// Marginal of Vtot (lognormal distrib)
-	real meanlog;
+	real alpha0;
+	real alpha1;
+
 	real <lower = 0> sdlog;
 	
 	// Copula parameter
 	real <lower = 0> theta; // Technically can go up to -1 but then non-strict generator...
 }
 
+transformed parameters {
+	vector [N] shape = exp(beta0 + beta1*circumference_m).^2/sdF^2;
+	vector [N] rate = exp(beta0 + beta1*circumference_m)/sdF^2;
+	
+	vector [N] meanlog = alpha0 + alpha1*log(circumference_m);
+}
+
 model {
 	// Priors
-	target += gamma_lpdf(shape | 0.1, 0.1);
-	target += gamma_lpdf(rate | 0.1, 0.1);
-	target += normal_lpdf(meanlog | 0, 5);
+	target += normal_lpdf(beta0 | 0, 1);
+	target += normal_lpdf(beta1 | 0, 1);
+
+	target += normal_lpdf(alpha0 | 0, 1);
+	target += normal_lpdf(alpha1 | 0, 1);
+
+	target += gamma_lpdf(sdF | 0.1, 0.1);
 	target += gamma_lpdf(sdlog | 0.1, 0.1);
 	target += gamma_lpdf(theta | 1.5^2, 1.5); // mean of 1.5, var of 1
 
@@ -58,6 +76,6 @@ model {
 
 	// ... Copula
 	for (i in 1:N)
-		target += clayton_copula_lpdf([gamma_cdf(Fbft[i] | shape, rate),
-			lognormal_cdf(Vtot[i] | meanlog, sdlog)] | theta);
+		target += clayton_copula_lpdf([gamma_cdf(Fbft[i] | shape[i], rate[i]),
+			lognormal_cdf(Vtot[i] | meanlog[i], sdlog)] | theta);
 }
