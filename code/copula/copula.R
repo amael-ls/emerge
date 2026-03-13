@@ -145,7 +145,8 @@ sigma_V = 0.13
 uv[, mu_V := alpha0 + alpha1*log(circumference_m)]
 
 ## Transform back to real scale using the marginals
-uv[, Fbft := qgamma(Fbft_unif, shape = mu_F^2/sigma_F^2, rate = mu_F/sigma_F^2)] # mean = mu_F
+# uv[, Fbft := qgamma(Fbft_unif, shape = mu_F^2/sigma_F^2, rate = mu_F/sigma_F^2)] # mean = mu_F
+uv[, Fbft := qlnorm(Fbft_unif, meanlog = mu_F, sdlog = sigma_F)] # mean = exp(mu_F + sigma_F/2)
 uv[, Vtot := qlnorm(Vtot_unif, meanlog = mu_V, sdlog = sigma_V)] # mean = mu_V
 
 ## Compute ranks
