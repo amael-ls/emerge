@@ -109,6 +109,7 @@ rm(list = ls())
 graphics.off()
 
 options(max.print = 50)
+source("../toolFunctions.R")
 
 #### Create fake data
 ## Define Clayton copula with theta = 1.33 (tau = 0.4)
@@ -116,7 +117,7 @@ clayton = claytonCopula(param = 1.33, dim = 2)
 
 ## Simulate uniform pairs (i.e., in I², then I need to transform back to the real scales)
 set.seed(1969 - 08 - 18) # Woodstock seed
-N_indiv = 200
+N_indiv = 800
 uv = as.data.table(rCopula(N_indiv, clayton))
 
 dim(uv) # N_indiv x 2
@@ -132,7 +133,7 @@ rm(florence_dt)
 beta0 = -0.84
 beta1 = -0.045
 
-sigma_F = 0.09
+sigma_F = 0.87
 
 uv[, mu_F := exp(beta0 + beta1*circumference_m)]
 
@@ -146,7 +147,8 @@ uv[, mu_V := alpha0 + alpha1*log(circumference_m)]
 
 ## Transform back to real scale using the marginals
 # uv[, Fbft := qgamma(Fbft_unif, shape = mu_F^2/sigma_F^2, rate = mu_F/sigma_F^2)] # mean = mu_F
-uv[, Fbft := qlnorm(Fbft_unif, meanlog = mu_F, sdlog = sigma_F)] # mean = exp(mu_F + sigma_F/2)
+uv[, Fbft := qgamma(Fbft_unif, shape = exp(sigma_F*circumference_m), rate = mu_F)] # mean = exp(mu_F + sigma_F/2)
+# uv[, Fbft := qlnorm(Fbft_unif, meanlog = mu_F, sdlog = sigma_F)] # mean = exp(mu_F + sigma_F/2)
 uv[, Vtot := qlnorm(Vtot_unif, meanlog = mu_V, sdlog = sigma_V)] # mean = mu_V
 
 ## Compute ranks
@@ -159,10 +161,10 @@ round(uv[, cor(Fbft, Vtot, method = "kendall")], 2) # That does not work
 round(uv[, cor(pgamma(Fbft, shape = mu_F^2/sigma_F^2, rate = mu_F/sigma_F^2),
 	plnorm(Vtot, meanlog = mu_V, sdlog = sigma_V), method = "kendall")], 2) # Should be ~0.40
 
-plot(uv[, Fbft], uv[, Vtot], xlab = "Fbft", ylab = "Total",
-	axes = FALSE, pch = 19, cex = 0.65, col = "#A1A1A155")
-axis(1)
-axis(2)
+# plot(uv[, Fbft], uv[, Vtot], xlab = "Fbft", ylab = "Total",
+# 	axes = FALSE, pch = 19, cex = 0.65, col = "#A1A1A155")
+# axis(1)
+# axis(2)
 
 #### Fit a stan model on these data
 ## Compile model
@@ -184,9 +186,20 @@ n_chains = 4
 fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4),
 	max_treedepth = 12)
 
+lazyTrace(fit$draws("beta0"), val1 = beta0)
+lazyTrace(fit$draws("beta1"), val1 = beta1)
+lazyTrace(fit$draws("sdF"), val1 = sigma_F)
 
 shape = apply(X = fit$draws("shape"), MARGIN = 3, FUN = mean)
 range(shape)
+
+rate = apply(X = fit$draws("rate"), MARGIN = 3, FUN = mean)
+range(rate)
+
+rarate = uv[, mu_F]
+
+plot(rarate, rate, pch = 19)
+abline(a = 0, b = 1) # Ha! A small systematic bias at least, the only time I tried...
 
 ## Save results
 current_path = "./results/"

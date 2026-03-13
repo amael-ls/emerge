@@ -26,7 +26,7 @@ data {
 	int <lower = 0> N;
 
 	// Provided parameter
-	real <lower = 0> theta;
+	// real <lower = 0> theta;
 
 	// Predictor
 	vector <lower = 0> [N] circumference_m;
@@ -50,14 +50,13 @@ parameters {
 	real <lower = 0> sdlog;
 	
 	// Copula parameter
-	// real <lower = 0> theta; // Technically can go up to -1 but then non-strict generator...
+	real <lower = 0> theta; // Technically can go up to -1 but then non-strict generator...
 }
 
 transformed parameters {
-	// vector [N] shape = square(exp(beta0 + -0.045*circumference_m))/0.09^2;
-	// vector [N] rate = exp(beta0 + -0.045*circumference_m)/0.09^2;
+	vector [N] shape = exp(sdF*circumference_m);
+	vector [N] rate = exp(beta0 + beta1*circumference_m);
 	
-	vector [N] meanlogF = exp(beta0 + beta1*circumference_m);
 	vector [N] meanlog = alpha0 + alpha1*log(circumference_m);
 }
 
@@ -69,21 +68,19 @@ model {
 	target += normal_lpdf(alpha0 | 0, 1);
 	target += normal_lpdf(alpha1 | 0, 1);
 
-	target += gamma_lpdf(sdF | 0.15^2/0.05^2, 0.15/0.05^2);
+	target += gamma_lpdf(sdF | 1.2, 1);
 	target += gamma_lpdf(sdlog | 0.15^2/0.05^2, 0.15/0.05^2);
-	// target += gamma_lpdf(theta | 1.5^2, 1.5); // mean of 1.5, var of 1
+	target += gamma_lpdf(theta | 1.5^2, 1.5); // mean of 1.5, var of 1
 
 	// Log-likelihood...
 	// ... Marginals
-	// target += gamma_lpdf(Fbft | shape, rate);
-	target += lognormal_lpdf(Fbft | meanlogF, sdF);
+	target += gamma_lpdf(Fbft | shape, rate);
 	target += lognormal_lpdf(Vtot | meanlog, sdlog);
 
 	// ... Copula
 	for (i in 1:N)
 	{
-		// real u = gamma_cdf(Fbft[i] | shape[i], rate[i]);
-		real u = lognormal_cdf(Fbft[i] | meanlogF[i], sdF);
+		real u = gamma_cdf(Fbft[i] | shape[i], rate[i]);
 		real v = lognormal_cdf(Vtot[i] | meanlog[i], sdlog);
 
 		target += clayton_copula_lpdf([u, v] | theta);
