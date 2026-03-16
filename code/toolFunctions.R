@@ -99,18 +99,27 @@ lazyTrace = function(draws, filename = NULL, ...)
 
 	ls_names = names(providedArgs)
 
-	val_ind = stri_detect(str = ls_names, regex = "val[[:digit:]]")
+	val_ind = stringi::stri_detect(str = ls_names, regex = "val[[:digit:]]")
 	xlab_ind = (ls_names == "xlab")
 	ylab_ind = (ls_names == "ylab")
 	main_ind = (ls_names == "main")
-	label_ind = stri_detect(str = ls_names, regex = "label")
-	iter_ind = stri_detect(str = ls_names, regex = "iter[[:digit:]]")
+	label_ind = stringi::stri_detect(str = ls_names, regex = "label")
+	iter_ind = stringi::stri_detect(str = ls_names, regex = "iter[[:digit:]]")
+	chain_ind = stringi::stri_detect(str = ls_names, regex = "chain_id")
 
 	scaling_ind = (ls_names == "scaling")
 	if (any(scaling_ind)) scaling = providedArgs[["scaling"]] else scaling = 1
 
 	if (any(label_ind))
 		par(mar = c(5, 4, 4, 4))
+
+	if (any(chain_ind)) chain_id = providedArgs[["chain_id"]] else chain_id = 1:n_chains
+
+	if (!all(1:n_chains %in% chain_id))
+	{
+		draws = draws[, chain_id, ]
+		n_chains = dim(draws)[2]
+	}
 
 	# Plot
 	if (!is.null(filename))
@@ -139,10 +148,10 @@ lazyTrace = function(draws, filename = NULL, ...)
 
 		if (any(label_ind))
 		{
-			num_vals = stri_sub(str = ls_names[val_ind], from = stri_locate(str = ls_names[val_ind], regex = "val")[, "end"] + 1)
+			num_vals = stringi::stri_sub(str = ls_names[val_ind], from = stringi::stri_locate(str = ls_names[val_ind], regex = "val")[, "end"] + 1)
 			for (label in ls_names[label_ind])
 			{
-				num_label = stri_sub(str = label, from = stri_locate(str = label, regex = "label")[, "end"] + 1)
+				num_label = stringi::stri_sub(str = label, from = stringi::stri_locate(str = label, regex = "label")[, "end"] + 1)
 				corresponding_val = (ls_names[val_ind])[num_vals == num_label]
 				axis(4, at = scaling*providedArgs[[corresponding_val]], providedArgs[[label]], las = 1)
 			}
@@ -200,7 +209,7 @@ lazyPosterior = function(draws, fun = NULL, expand_bounds = FALSE, filename = NU
 			!isTRUE(all.equal(fun, dexp)) &&
 			!isTRUE(all.equal(fun, dbeta))) # isFALSE will not work here, hence !isTRUE
 		{
-			stop("This function only accepts dnorm, dlnorm, dexp, dgamma, or dbeta as priors")
+			stop("This function only accepts dunif, dnorm, dlnorm, dgamma, dexp, or dbeta as priors")
 		}
 	}
 
@@ -232,7 +241,7 @@ lazyPosterior = function(draws, fun = NULL, expand_bounds = FALSE, filename = NU
 	max_x_ind = (ls_names == "max_x")
 
 	# Get values indices
-	val_ind = stri_detect(str = ls_names, regex = "val[[:digit:]]") 
+	val_ind = stringi::stri_detect(str = ls_names, regex = "val[[:digit:]]") 
 
 	# Get the scaling on the x-axis if provided
 	scaling_ind = (ls_names == "scaling")
