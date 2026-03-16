@@ -113,10 +113,16 @@ lazyTrace = function(draws, filename = NULL, ...)
 	if (any(label_ind))
 		par(mar = c(5, 4, 4, 4))
 
-	if (any(chain_ind)) chain_id = providedArgs[["chain_id"]] else chain_id = 1:n_chains
+	if (any(chain_ind)) chain_id = providedArgs[["chain_id"]] else chain_id = seq_len(n_chains)
 
-	if (!all(1:n_chains %in% chain_id))
+	if (!all(seq_len(n_chains) %in% chain_id))
 	{
+		if (!all(chain_id %in% seq_len(n_chains)))
+		{
+			warning("Some provided chain_id are beyond n_chains. Trimmed")
+			chain_id = chain_id[chain_id %in% seq_len(n_chains)]
+		}
+
 		draws = draws[, chain_id, ]
 		n_chains = dim(draws)[2]
 	}
@@ -133,12 +139,12 @@ lazyTrace = function(draws, filename = NULL, ...)
 		ylab = ifelse(any(ylab_ind), providedArgs[["ylab"]], ""),
 		main = ifelse(any(main_ind), providedArgs[["main"]], ""))
 
-	for (chain in 1:n_chains)
+	for (chain in seq_len(n_chains))
 	{
 		if (all(class(draws) %in% c("draws_array", "draws", "array")))
-			lines(1:n_iter, scaling*draws[, chain, ], type = "l", col = colours_str[chain])
+			lines(seq_len(n_iter), scaling*draws[, chain, ], type = "l", col = colours_str[chain])
 		if (is.array(draws) && !all(class(draws) %in% c("draws_array", "draws", "array")))
-			lines(1:n_iter, scaling*draws[, chain], type = "l", col = colours_str[chain])
+			lines(seq_len(n_iter), scaling*draws[, chain], type = "l", col = colours_str[chain])
 	}
 
 	if (any(val_ind))
@@ -566,7 +572,7 @@ lazyPosterior = function(draws, fun = NULL, expand_bounds = FALSE, filename = NU
 		colours_str_pol = paste0(colours_str, "66")
 		plot(0, type = "n", xlim = c(min_x, max_x), ylim = c(0, max_y), axes = FALSE,
 			xlab = ifelse(any(xlab_ind), providedArgs[["xlab"]], ""), ylab = "density", main = "")
-		for (i in 1:length_params)
+		for (i in seq_len(length_params))
 		{
 			lines(x = density_from_draws[[i]]$x, y = density_from_draws[[i]]$y, col = colours_str[i], lwd = 2)
 			polygon(density_from_draws[[i]], col = colours_str_pol[i])
@@ -714,7 +720,7 @@ pretty_summary = function(fit, params)
 		split_chains = vector(mode = "list", length = m)
 		for (cc in seq_len(fit$num_chains()))
 		{
-			split_chains[[2*cc - 1]] = draws[1:n, cc, current_var]
+			split_chains[[2*cc - 1]] = draws[seq_len(n), cc, current_var]
 			split_chains[[2*cc]] = draws[(n + 1):n_iter, cc, current_var]
 		}
 
