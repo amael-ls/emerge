@@ -84,9 +84,8 @@ library(MetBrewer)
 library(cmdstanr)
 	register_knitr_engine(override = TRUE)
 library(inventR)
-library(stringi)
 library(interp)
-library(DHARMa)
+# library(DHARMa)
 library(shape)
 library(loo)
 
@@ -209,10 +208,8 @@ if (!dir.exists(path_data))
 opt = "_full"
 
 ## Loading
-stanData = readRDS(paste0(path_data, "stanData_nfi-inra", opt, ".rds"))
 forest_dt = readRDS(paste0(path_data, "nfi-inra_dt", opt, ".rds"))
 ind_species = readRDS(paste0(path_data, "ind_species_nfi-inra", opt, ".rds"))
-check_data = readRDS(paste0(path_data, "emerge_2009-2010.rds"))
 
 colours = paste0(met.brewer("Egypt")[1:4])
 names(colours) = c("conifer", "broadleaf", "inra", "nfi")
@@ -231,3 +228,43 @@ forest_dt[origin_data == "nfi", origin_colour := colours["nfi"]]
 <!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
 
 ## Introduction
+
+This script try to parametrise the total volume in function of the bole volume, that is to say, to use the basic definition of allometry: the dimension of an organ $y$ is proportional to an organ $x$, such as in this power-law $y = a x^b$. Here, $y$ is the total volume and $x$ is the bole volume. In @Yang2024, they do it with above-ground biomass as $y$ and stem biomass as $x$. I expect to be able to apply the same type of functions to volume, as volume and biomass are related by wood density. It should be the same if wood density is constant between the crown and the bole, and only the scale should change! According to @Knapic2011 there is little variation within tree oaks, while there can be for pines @Repola2006.
+
+Here is an intuition on how the function from @Yang2024 works. The parameter $j$ influences the curvature of the function as claimed in the appendix S1 of that paper, but not intuitive: The lower $j$, the stepper the function! However, it is correct to assume that $j < 1$ as otherwise the function is first convex and then concave. So the stan code should reflect this constraint, although the model is perfectly defined for $j > 1$.
+
+```{r}
+#| label: fig-var_j
+#| fig-cap: Different shape of the function $r = \exp[j - kx] \left( \frac{kx}{j} \right)^j$ for k = 0.06 and j between 0 and 1.6. Dashed lines are for j > 1
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 8.142857
+
+f = function(x, j, k)
+	return (exp(j - k*x) * (k*x/j)^j)
+
+k = 0.06
+Homer = met.brewer("Homer1")
+curve(f(x, 0.2, k), from = 0, to = 25, lwd = 3, axes = FALSE, xlab = "SB", ylab = "r", col = Homer[1])
+axis(1)
+axis(2, las = 1)
+for (j in 2:8)
+	curve(f(x, j/5, k), add = TRUE, col = Homer[j], lwd = 3, lty = ifelse(j/5 < 1, 1, 2))
+legend(x = "bottomright", fill = met.brewer("Homer1"), legend = (1:8)/5, bty = "n")
+```
+
+```{r}
+#| label: fig-var_k
+#| fig-cap: Different shape of the function $r = \exp[j - kx] \left( \frac{kx}{j} \right)^j$ for j = 0.5 and k between 0.02 and 0.16.
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 8.142857
+
+j = 0.6
+curve(f(x, j, 0.02), from = 0, to = 25, lwd = 3, axes = FALSE, xlab = "SB", ylab = "r", col = Homer[1])
+axis(1)
+axis(2, las = 1)
+for (k in 2:8)
+	curve(f(x, j, k/50), add = TRUE, col = Homer[k], lwd = 3)
+legend(x = "bottomright", fill = met.brewer("Homer1"), legend = (1:8)/50, bty = "n")
+```
