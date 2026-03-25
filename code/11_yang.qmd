@@ -74,7 +74,7 @@ format:
 #| output: false
 
 #### Clear space and load packages
-# rm(list = ls())
+rm(list = ls())
 graphics.off()
 
 options(max.print = 500)
@@ -205,22 +205,28 @@ path_data = paste0(mnt_point, "data/")
 if (!dir.exists(path_data))
 	stop(paste0("Folder <", path_data, "> does not exist! Did you run 01_prepare_data.qmd?"))
 
-opt = "_full"
+opt = "_inra"
 
-## Loading
-forest_dt = readRDS(paste0(path_data, "nfi-inra_dt", opt, ".rds"))
-ind_species = readRDS(paste0(path_data, "ind_species_nfi-inra", opt, ".rds"))
+# Loading Emerge data
+inra = readRDS(paste0(path_data, "nfi-inra_dt", opt, ".rds"))
+inra = inra[, .(speciesName_sci, tree_id = unique_id, fct_type, year, circumference_m, height,
+	taper_height = taper_height_flo, bole_volume_m3, total_volume_m3)]
+setkey(inra, speciesName_sci)
 
-colours = paste0(met.brewer("Egypt")[1:4])
-names(colours) = c("conifer", "broadleaf", "inra", "nfi")
+# Loading Swiss data
+swiss = readRDS(paste0(mnt_point, "data/switzerland.rds"))
+swiss = swiss[, .(speciesName_sci, tree_id, fct_type, year, circumference_m, height, taper_height = hdecro,
+	bole_volume_m3, total_volume_m3)]
+setkey(swiss, speciesName_sci)
 
-forest_dt[fct_type == "broadleaf", fct_colour := colours["broadleaf"]]
-forest_dt[fct_type == "conifer", fct_colour := colours["conifer"]]
-forest_dt[origin_data == "inra", origin_colour := colours["inra"]]
-forest_dt[origin_data == "nfi", origin_colour := colours["nfi"]]
+## Modern Emerge data
+emerge = readRDS(paste0(mnt_point, "data/emerge_2009-2010.rds"))
+emerge[, year := as.integer(stringi::stri_replace_all(str = dataset, replacement = "", regex = "emerge_"))]
+emerge = emerge[, .(speciesName_sci, tree_id, fct_type, year, circumference_m, height, taper_height,
+	bole_volume_m3 = bole_volume_conic_m3, total_volume_m3)]
 
-## Add vernacular english names
-# vernacularNames = sci2comm(sci = forest_dt[, unique(speciesName_sci)], db = "itis")
+tree_dt = rbindlist(list(inra = inra, swiss = swiss, emerge = emerge), idcol = "origin")
+setkey(tree_dt, speciesName_sci)
 ```
 
 <!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
@@ -267,4 +273,175 @@ axis(2, las = 1)
 for (k in 2:8)
 	curve(f(x, j, k/50), add = TRUE, col = Homer[k], lwd = 3)
 legend(x = "bottomright", fill = met.brewer("Homer1"), legend = (1:8)/50, bty = "n")
+```
+
+```{r}
+#| label: fig-beta_distrib
+#| fig-cap: Different shapes of the beta distribution
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 8.142857
+
+curve(dbeta(x, shape1 = 5, shape2 = 2), from = 0, to = 1, lwd = 3, axes = FALSE, xlab = "x", ylab = "Beta pdf", col = Homer[1], ylim = c(0, 3.6))
+axis(1)
+axis(2, las = 1)
+
+curve(dbeta(x, shape1 = 8, shape2 = 2), add = TRUE, col = Homer[2], lwd = 3)
+
+curve(dbeta(x, shape1 = 8, shape2 = 1), add = TRUE, col = Homer[3], lwd = 3)
+
+curve(dbeta(x, shape1 = 5, shape2 = 5), add = TRUE, col = Homer[4], lwd = 3)
+
+curve(dbeta(x, shape1 = 1.5, shape2 = 1.5), add = TRUE, col = Homer[5], lwd = 3)
+
+curve(dbeta(x, shape1 = 2, shape2 = 5), add = TRUE, col = Homer[8], lwd = 3)
+
+curve(dbeta(x, shape1 = 2, shape2 = 8), add = TRUE, col = Homer[7], lwd = 3)
+
+curve(dbeta(x, shape1 = 1, shape2 = 8), add = TRUE, col = Homer[6], lwd = 3)
+
+legend(x = "topright", fill = met.brewer("Homer1")[c(1:5, 8, 7, 6)],
+	legend = c("5, 2", "8, 2", "8, 1", "5, 5", "1.5, 1.5", "2, 5", "2, 8", "1, 8"), bty = "n")
+
+curve(dbeta(x, shape1 = 8, shape2 = 1), from = 0, to = 1, lwd = 3, axes = FALSE,
+	xlab = "x", ylab = "Beta pdf", col = Homer[1], ylim = c(0, 3.6))
+axis(1)
+axis(2, las = 1)
+```
+
+## First run brute force!
+
+```{r}
+tree_dt[, any(is.na(bole_volume_m3))]
+tree_dt[is.na(bole_volume_m3), 100*circumference_m]
+tree_dt = tree_dt[!is.na(bole_volume_m3)]
+
+stanData = list(
+	N = tree_dt["Fagus sylvatica"][origin == "inra", .N],
+	SB = tree_dt["Fagus sylvatica"][origin == "inra", bole_volume_m3],
+	AGB = tree_dt["Fagus sylvatica"][origin == "inra", total_volume_m3]
+)
+
+model = cmdstan_model("./yang2024.stan")
+
+n_chains = 4
+
+fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4),
+	iter_warmup = 1500, iter_sampling = 500, max_treedepth = 10)
+
+## Save results
+savePath = "./yang/"
+if (!dir.exists(savePath))
+	dir.create(savePath)
+
+filename = "inra-Fagsyl_s-dgamma-large"
+fit$save_output_files(dir = savePath, basename = filename, random = FALSE)
+saveRDS(fit, paste0(savePath, filename, ".rds"))
+```
+
+```{r}
+lazyTrace(fit$draws("c"), main = "c")
+lazyTrace(fit$draws("j"), main = "j")
+lazyTrace(fit$draws("k"), main = "k")
+lazyTrace(fit$draws("m"), main = "m")
+lazyTrace(fit$draws("n"), main = "n")
+lazyTrace(fit$draws("s"), main = "s")
+
+library(bayesplot)
+
+params = getParams(model_cmdstan = fit, params_names = c("c", "j", "m", "k"), type = "all")
+div = posterior::subset_draws(fit$sampler_diagnostics(), variable = "divergent__")
+
+div_c = posterior::subset_draws(params[, , "c"], draw = which(div == 1))
+div_j = posterior::subset_draws(params[, , "j"], draw = which(div == 1))
+div_m = posterior::subset_draws(params[, , "m"], draw = which(div == 1))
+div_k = posterior::subset_draws(params[, , "k"], draw = which(div == 1))
+
+# Plot divergence for c and j
+plot(params[, , "c"], params[, , "j"], pch = 19, cex = 0.65, col = "#FAB255",
+	xlab = "c", ylab = "j", main = "c and j")
+points(div_c, div_j, pch = 18, col = "#0F7BA2")
+
+# Plot divergence for c and k
+plot(params[, , "c"], params[, , "k"], pch = 19, cex = 0.65, col = "#FAB255",
+	xlab = "c", ylab = "k", main = "c and k")
+points(div_c, div_k, pch = 18, col = "#0F7BA2")
+
+# Plot divergence for c and m
+plot(params[, , "c"], params[, , "m"], pch = 19, cex = 0.65, col = "#FAB255",
+	xlab = "c", ylab = "m", main = "c and m")
+points(div_c, div_m, pch = 18, col = "#0F7BA2")
+
+# Plot divergence for j and k
+plot(params[, , "j"], params[, , "k"], pch = 19, cex = 0.65, col = "#FAB255",
+	xlab = "j", ylab = "k", main = "j and k")
+points(div_j, div_k, pch = 18, col = "#0F7BA2")
+
+# Plot divergence for j and m
+plot(params[, , "j"], params[, , "m"], pch = 19, cex = 0.65, col = "#FAB255",
+	xlab = "j", ylab = "m", main = "j and m")
+points(div_j, div_m, pch = 18, col = "#0F7BA2")
+
+# Plot divergence for k and m
+plot(params[, , "k"], params[, , "m"], pch = 19, cex = 0.65, col = "#FAB255",
+	xlab = "k", ylab = "m", main = "k and m")
+points(div_k, div_m, pch = 18, col = "#0F7BA2")
+
+```
+
+```{r}
+fit$cmdstan_diagnose()
+```
+
+## Predictions ...
+### ... in ratio
+```{r}
+f = function(x, pars)
+{
+	# The vector of parameters, pars, is in this order:
+	# 1 -> c,
+	# 2 -> j,
+	# 3 -> k,
+	# 4 -> m,
+	# 5 -> n,
+	# 6 -> s
+	return ((pars["m"] - pars["c"]) * exp(pars["j"] - pars["k"]*x) * (pars["k"]*x/pars["j"])^pars["j"] +
+		pars["c"] - (pars["c"] - pars["n"])*exp(-pars["s"]*x));
+	# return ((pars[4] - pars[1]) * exp(pars[2] - pars[3]*x) * (pars[3]*x/pars[2])^pars[2] +
+	# 	pars[1] - (pars[1] - pars[5])*exp(-pars[6]*x));
+}
+
+paramsVec = getParams(model_cmdstan = fit, params_names = c("c", "j", "k", "m", "n", "s"), type = "mean")
+
+plot(stanData$SB, stanData$SB/stanData$AGB, pch = 19, cex = 0.65, col = "#A291AF33",
+	xlab = "SB", ylab = "r", axes = FALSE)
+curve(f(x, paramsVec), lwd = 4, add = TRUE)
+abline(v = paramsVec["j"]/paramsVec["k"], lty = "dashed", lwd = 0.6)
+abline(h = paramsVec["m"] - (paramsVec["c"] - paramsVec["n"])*exp(-paramsVec["s"]*paramsVec["j"]/paramsVec["k"]),
+	lty = "dashed")
+axis(1)
+axis(2, las = 1)
+
+# curve(f(x, paramsVec), lwd = 4, to = 8)
+# abline(v = paramsVec["j"]/paramsVec["k"], lty = "dashed")
+# abline(h = paramsVec["m"] - (paramsVec["c"] - paramsVec["n"])*exp(-paramsVec["s"]*paramsVec["j"]/paramsVec["k"]),
+# 	lty = "dashed")
+
+# (paramsVec["c"] - paramsVec["n"])*exp(-paramsVec["s"]*paramsVec["j"]/paramsVec["k"])
+
+# paramsVec["s"] - 3*paramsVec["k"]/paramsVec["j"]
+
+# lazyPosterior(fit$draws("c"), fun = dbeta, shape1 = 8, shape2 = 1)
+```
+
+### ... in volume
+
+```{r}
+vol_pred = apply(X = fit$draws("v_gen_mean"), MARGIN = 3, FUN = mean)
+
+plot(vol_pred, stanData$AGB, pch = 19, cex = 0.65, axes = FALSE,
+	xlab = "Above-ground volume (predicted)", ylab = "Above-ground volume (observed)")
+abline(a = 0, b = 1, lwd = 3, col = "#CD212A")
+axis(1)
+axis(2, las = 1)
 ```
