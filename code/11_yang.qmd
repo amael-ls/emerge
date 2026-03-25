@@ -1,0 +1,233 @@
+---
+title: "Simple tests of bole volume models"
+date: today
+author: Amaël Le Squin
+date-format: iso
+filters:
+  - fontawesome
+  - siunitx-quarto
+  - imagify
+imagify:
+  header-includes: |
+    \usepackage{pgfplots}
+    \pgfplotsset{compat=1.18}
+    \usepgfplotslibrary{fillbetween}
+    \usetikzlibrary{positioning}
+    \usetikzlibrary{calc}
+  pdf-engine: lualatex
+pdf-engine: lualatex
+keep-tex: true
+execute:
+  error: true
+  echo: false
+  warning: false
+  message: false
+bibliography: /home/ALe-Squin/work/library/bib_file/references.bib
+lightbox:
+  match: auto
+css: style.css
+knitr:
+  opts_chunk: 
+    dev: ragg_png
+    crop: null
+    out.width: "70%"
+    fig.width: 6
+    fig.asp: 0.618
+    fig.align: "center"
+format:
+  html:
+    toc: true
+    include-in-header: mathjax.html
+    code-fold: true
+    df-print: paged
+    number-sections: true
+    theme:
+      light: cerulean
+      dark: darkly
+    margin: 5% 0;
+  pdf:
+    mathspec: true
+    include-in-header:
+      - text: |
+          \usepackage{unicode-math}
+---
+
+<!-- New command -->
+\newcommand{\ie}{*i.e.,*}
+
+<!-- Math commands -->
+\newcommand{\Vbft}{V_{\text{BFT}}}
+\newcommand{\Fbft}{F_{\text{BFT}}}
+\newcommand{\Vtot}{V_{\text{tot}}}
+\newcommand{\Vzh}{V_{\text{Zhou}}}
+\newcommand{\hdec}{h_{\text{dec}}}
+\newcommand{\fmax}{f_{\text{max}}}
+
+<!-- Math operators -->
+<!-- \DeclareMathOperator{\ln}{ln} -->
+
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+<!-- ---------------------------   LOADING DATA, R CODE   --------------------------- -->
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+
+```{r}
+#| output: false
+
+#### Clear space and load packages
+# rm(list = ls())
+graphics.off()
+
+options(max.print = 500)
+
+library(data.table)
+library(MetBrewer)
+library(cmdstanr)
+	register_knitr_engine(override = TRUE)
+library(inventR)
+library(stringi)
+library(interp)
+library(DHARMa)
+library(shape)
+library(loo)
+
+## Tool function
+source("./toolFunctions.R")
+
+plot_sp = function(fit, sp, count, stanData, fun, args, forest = forest_dt[.(sp)], pred = FALSE,
+	n_subsample = 10, folder = NULL, add = TRUE, n_bins = 12, pal = "Hiroshige", selected_variable = NULL)
+{
+	# Get parameters
+	start = stanData[["start"]][count]
+	end = stanData[["end"]][count]
+	n_sampling = fit$metadata()$iter_sampling
+	n_chains = fit$num_chains()
+
+	if (n_chains != nrow(fit$metadata()$time))
+	{
+		warning("Some chains are missing probably because they could not start! Using the number of successful chains")
+		n_chains = nrow(fit$metadata()$time)
+	}
+
+	# Add colour to the measured points according to selected variable
+	if (!is.null(selected_variable))
+	{
+		if (!(selected_variable %in% colnames(forest)))
+			stop(paste0("'", selected_variable, "' is not a column of forest"))
+		
+		colours = MetBrewer::met.brewer(pal, n_bins)[1:n_bins]
+		forest[, colour_ind := as.numeric(cut(.SD[[selected_variable]], breaks = n_bins))] # Indices per category
+		forest[, colour := colours[colour_ind]] # Map selected variable to colour using indices
+	} else {
+		forest[, colour := "#3355AA33"] # Default colour
+	}
+
+	# Plot figure
+	if (!is.null(folder))
+		png(paste0("./", folder, "/", sp, ".png"))
+	
+	plot(forest[, bole_volume_m3], forest[, total_ratio], pch = 19, col = forest[, colour], axes = FALSE,
+		xlab = "Bole volume", ylab = "Ratio bole/tot volumes", lwd = 0, cex = 0.75,
+		main = ifelse(is.null(selected_variable), "", selected_variable))
+	if (!is.null(selected_variable))
+		legend("topright", legend = levels(forest[, cut(.SD[[selected_variable]], breaks = n_bins)]),
+			fill = colours, title = paste(selected_variable, "classes"))
+	axis(1)
+	axis(2, las = 1)
+
+	# fwrite(forest[, .(bole_volume_m3, total_ratio)],
+	# 	"../../../subventions/2025-ademe_graine/niko_doc/data/ratio.csv") # pgfplots Niko
+
+	# Plot prediction
+	if (pred)
+	{
+		sim = fit$draws("r_gen")[sample(x = 1:n_sampling, size = n_subsample, replace = FALSE), , start:end]
+		for (i in 1:forest[, .N])
+			points(rep(forest[i, bole_volume_m3], n_chains*n_subsample),
+				as.numeric(sim[, , i]), col = "#335577AA", pch = ".")
+	}
+
+	# Plot fitted curve
+	if (length(args) == 2 && all(c("k", "lambda") == args))
+	{
+		selected_params = c(paste0("k[", count, "]"), paste0("lambda[", count, "]"))
+		params = apply(X = fit$draws(args)[, , selected_params], MARGIN = 3, FUN = mean)
+
+		curve(fun(x, params[1], params[2]), col = "#CD212A", lwd = 2, add = add, n = 501)
+	}
+	
+	if (length(args) == 3 && all(c("beta_", "gamma", "b") == args))
+	{
+		selected_params = c(paste0("beta_[", count, "]"),
+			paste0("gamma[", count, "]"), paste0("b[", count, "]"))
+		params = apply(X = fit$draws(args)[, , selected_params], MARGIN = 3, FUN = mean)
+
+		curve(fun(x, 1, params[1], params[2], params[3]), col = "#CD212A", lwd = 2, n = 501, add = add)
+	}
+
+	if (length(args) == 3 && all(c("m", "k", "d") == args))
+	{
+		selected_params = c(paste0("m[", count, "]"), paste0("k[", count, "]"), paste0("d[", count, "]"))
+		params = apply(X = fit$draws(args)[, , selected_params], MARGIN = 3, FUN = mean)
+
+		curve(fun(x, params[1], params[2], params[3]), col = "#CD212A", lwd = 2, n = 501, add = add)
+	}
+
+	if (length(args) == 4 && all(c("alpha", "beta_", "gamma", "b") == args))
+	{
+		selected_params = c(paste0("alpha[", count, "]"), paste0("beta_[", count, "]"),
+			paste0("gamma[", count, "]"), paste0("b[", count, "]"))
+		params = apply(X = fit$draws(args)[, , selected_params], MARGIN = 3, FUN = mean)
+
+		curve(fun(x, params[1], params[2], params[3], params[4]), col = "#CD212A", lwd = 2, add = add, n = 501)
+	}
+	if (!is.null(folder))
+		dev.off()
+}
+```
+
+```{r}
+#| output: false
+
+#### Load the data
+## Path
+os = Sys.info()[['sysname']]
+mnt_point = "/mnt/local_share/"
+if (os == "Linux" || os == "Darwin")
+{
+	if (!dir.exists(mnt_point))
+		stop(paste0("The mounting point <", mnt_point, "> does not exist"))
+} else if (os == "Windows") {
+	stop("TO DO!!! No idea how that works on Windows!")
+} else {
+	stop(paste("Unknown Operating System:", os))
+}
+
+path_data = paste0(mnt_point, "data/")
+if (!dir.exists(path_data))
+	stop(paste0("Folder <", path_data, "> does not exist! Did you run 01_prepare_data.qmd?"))
+
+opt = "_full"
+
+## Loading
+stanData = readRDS(paste0(path_data, "stanData_nfi-inra", opt, ".rds"))
+forest_dt = readRDS(paste0(path_data, "nfi-inra_dt", opt, ".rds"))
+ind_species = readRDS(paste0(path_data, "ind_species_nfi-inra", opt, ".rds"))
+check_data = readRDS(paste0(path_data, "emerge_2009-2010.rds"))
+
+colours = paste0(met.brewer("Egypt")[1:4])
+names(colours) = c("conifer", "broadleaf", "inra", "nfi")
+
+forest_dt[fct_type == "broadleaf", fct_colour := colours["broadleaf"]]
+forest_dt[fct_type == "conifer", fct_colour := colours["conifer"]]
+forest_dt[origin_data == "inra", origin_colour := colours["inra"]]
+forest_dt[origin_data == "nfi", origin_colour := colours["nfi"]]
+
+## Add vernacular english names
+# vernacularNames = sci2comm(sci = forest_dt[, unique(speciesName_sci)], db = "itis")
+```
+
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+<!-- ---------------------------   MAIN CONTENT, R CODE   --------------------------- -->
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+
+## Introduction
