@@ -455,7 +455,7 @@ if (!file.exists(paste0(savePath, filename, ".rds")))
 
 plot_sp(fit, sp, stanData, chains = TRUE, sep_chains = TRUE, popol_plot = FALSE)
 
-pgfTrace(fit, sp, params = "c", modelsname = "yang2024-simplified")
+# pgfTrace(fit, sp, params = "c", modelsname = "yang2024-simplified")
 ```
 
 ### Our model
@@ -530,7 +530,7 @@ abline(a = 0, b = 1, lty = "dashed")
 axis(1)
 axis(2, las = 1)
 
-pgfTrace(fit, sp, params = "asym", modelsname = "amael")
+# pgfTrace(fit, sp, params = "asym", modelsname = "amael")
 ```
 
 ## Clayton's copula
@@ -586,4 +586,30 @@ if (!file.exists(paste0(savePath, filename, ".rds")))
 
 lazyPosterior(fit$draws("alpha0"), fun = dnorm, mean = 0, sd = 1)
 lazyPosterior(fit$draws("theta"), fun = dgamma, shape = 1.5^2, rate = 1.5)
+```
+
+```{r}
+sim_bole = apply(X = fit$draws("sim_bole_volume_m3"), MARGIN = 3, FUN = mean)
+sim_tot = apply(X = fit$draws("sim_total_volume_m3"), MARGIN = 3, FUN = mean)
+
+# Obs bole vs sim bole
+plot(sim_bole, stanData$bole_volume_m3, pch = 19, axes = FALSE,
+	xlab = "Simulated bole volume", ylab = "Observed bole volume")
+axis(1)
+axis(2, las = 1)
+abline(a = 0, b = 1, lwd = 3, col = "#CD212A", lty = "dashed")
+
+# Obs tot vs sim tot
+plot(sim_tot, stanData$total_volume_m3, pch = 19, axes = FALSE,
+	xlab = "Simulated above-ground volume", ylab = "Observed above-ground volume")
+axis(1)
+axis(2, las = 1)
+abline(a = 0, b = 1, lwd = 3, col = "#CD212A", lty = "dashed")
+
+# Sim tot vs bole, is it above the 1:1 line
+plot(sim_bole, sim_tot, pch = 19, axes = FALSE,
+	xlab = "Simulated bole volume", ylab = "Simulated above-ground volume")
+axis(1)
+axis(2, las = 1)
+abline(a = 0, b = 1, lwd = 3, col = "#CD212A", lty = "dashed")
 ```
