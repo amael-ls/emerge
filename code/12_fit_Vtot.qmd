@@ -613,3 +613,22 @@ axis(1)
 axis(2, las = 1)
 abline(a = 0, b = 1, lwd = 3, col = "#CD212A", lty = "dashed")
 ```
+
+## Trick of Henri
+
+To add +0.01 to V bft
+
+```{r}
+tree_dt[, ratio_henri := (bole_volume_m3 + 0.01)/total_volume_m3]
+sp = "Fagus sylvatica"
+plot(tree_dt[.(sp), circumference_m], tree_dt[.(sp), ratio_henri], pch = 19, axes = FALSE,
+	xlab = "Circumference", ylab = "Ratio henri", main = "Fagus sylvatica")
+points(tree_dt[.(sp)][bole_volume_m3 < 0.05, circumference_m],
+	tree_dt[.(sp)][bole_volume_m3 < 0.05, ratio_henri], pch = 19, col = "#FAB255")
+points(tree_dt[.(sp)][bole_volume_m3 < 0.02, circumference_m],
+	tree_dt[.(sp)][bole_volume_m3 < 0.02, ratio_henri], pch = 19, col = "#DD5129")
+axis(1)
+axis(2, las = 1)
+legend("topright", legend = c("+20%", "+50%"), fill = c("#FAB255", "#DD5129"), box.lwd = 0)
+
+```
