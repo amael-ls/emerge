@@ -1,0 +1,589 @@
+---
+title: "Fitting two models for Vtot"
+date: today
+author: Amaël Le Squin
+date-format: iso
+filters:
+  - fontawesome
+  - siunitx-quarto
+  - imagify
+imagify:
+  header-includes: |
+    \usepackage{pgfplots}
+    \pgfplotsset{compat=1.18}
+    \usepgfplotslibrary{fillbetween}
+    \usetikzlibrary{positioning}
+    \usetikzlibrary{calc}
+  pdf-engine: lualatex
+pdf-engine: lualatex
+keep-tex: true
+execute:
+  error: true
+  echo: false
+  warning: false
+  message: false
+bibliography: /home/ALe-Squin/work/library/bib_file/references.bib
+lightbox:
+  match: auto
+css: style.css
+knitr:
+  opts_chunk: 
+    dev: ragg_png
+    crop: null
+    out.width: "70%"
+    fig.width: 6
+    fig.asp: 0.618
+    fig.align: "center"
+format:
+  html:
+    toc: true
+    include-in-header: mathjax.html
+    code-fold: true
+    df-print: paged
+    number-sections: true
+    theme:
+      light: cerulean
+      dark: darkly
+    margin: 5% 0;
+  pdf:
+    mathspec: true
+    include-in-header:
+      - text: |
+          \usepackage{unicode-math}
+---
+
+<!-- New command -->
+\newcommand{\ie}{*i.e.,*}
+
+<!-- Math commands -->
+\newcommand{\Vbft}{V_{\text{BFT}}}
+\newcommand{\Fbft}{F_{\text{BFT}}}
+\newcommand{\Vtot}{V_{\text{tot}}}
+\newcommand{\Vzh}{V_{\text{Zhou}}}
+\newcommand{\hdec}{h_{\text{dec}}}
+\newcommand{\fmax}{f_{\text{max}}}
+
+<!-- Math operators -->
+<!-- \DeclareMathOperator{\ln}{ln} -->
+
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+<!-- ---------------------------   LOADING DATA, R CODE   --------------------------- -->
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+
+```{r}
+#| output: false
+
+#### Clear space and load packages
+rm(list = ls())
+graphics.off()
+
+options(max.print = 500)
+
+library(data.table)
+library(MetBrewer)
+library(cmdstanr)
+	register_knitr_engine(override = TRUE)
+
+## Tool function
+source("./toolFunctions.R")
+
+plot_sp = function(fit, sp, stanData, chains = FALSE, sep_chains = FALSE, popol_plot = FALSE)
+{
+	# Ratio equation
+	r = function(x, pars)
+		return ((pars["m"] - pars["c"]) * exp(1 - pars["k"]*x) * (pars["k"]*x) + pars["c"]);
+	
+	# Allometric equation
+	psi = function(x, pars)
+	{
+		r = (pars["m"] - pars["c"]) * exp(1 - pars["k"]*x) * pars["k"]*x + pars["c"]
+		return ( 1/pars["c"] * x^( 1 - (log(r) - log(pars["c"])) / log(x) ) )
+	}
+
+	pol = function(x, pars)
+		return (pars["beta1"]*x + pars["beta2"]*x^2 + pars["beta3"]*x^3 + pars["beta4"]*x^4)
+	
+	pol_ratio = function(x, pars)
+		return (1/(pars["beta1"] + pars["beta2"]*x + pars["beta3"]*x^2 + pars["beta4"]*x^3))
+
+	if (popol_plot)
+	{
+		# Extract mean values parameters
+		paramsVec = getParams(model_cmdstan = fit, params_names = c("beta1", "beta2", "beta3", "beta4"),
+			type = "mean")
+
+		Delta = 4*paramsVec["beta3"]^2 - 12*paramsVec["beta2"]*paramsVec["beta4"]
+		Delta = ifelse(Delta >= 0, Delta, NA)
+		P1 = (-2*paramsVec["beta3"] + sqrt(Delta))/(6*paramsVec["beta4"])
+		P2 = (-2*paramsVec["beta3"] - sqrt(Delta))/(6*paramsVec["beta4"])
+
+		# Plot fitting data and fitted curve (ratio)
+		plot(stanData$SB, stanData$AGB, pch = 19, cex = 0.65, col = "#A291AF33",
+			xlab = "SB", ylab = "r", axes = FALSE, main = sp)
+		curve(pol(x, paramsVec), lwd = 4, add = TRUE)
+		legend("bottomright", legend = paste("Chain", 1:4), fill = met.brewer("Egypt"))
+		abline(a = 0, b = 1, lty = "dashed")
+		axis(1)
+		axis(2, las = 1)
+		
+		plot(stanData$SB, stanData$SB/stanData$AGB, pch = 19, cex = 0.65, col = "#A291AF33",
+			xlab = "SB", ylab = "r", axes = FALSE, main = sp)
+		curve(pol_ratio(x, paramsVec), lwd = 4, add = TRUE)
+		legend("bottomright", legend = paste("Chain", 1:4), fill = met.brewer("Egypt"))
+		abline(v = P1, lty = "dashed")
+		abline(h = pol_ratio(P1, paramsVec), lty = "dashed")
+		abline(v = P2, lty = "dashed")
+		abline(h = pol_ratio(P2, paramsVec), lty = "dashed")
+		axis(1)
+		axis(2, las = 1)
+
+		return (list(P_est_1 = P1, P_est_2 = P2, fP1 = pol_ratio(P1, paramsVec), fP2 = pol_ratio(P2, paramsVec)))
+	}
+
+	# Plot chains of the three params
+	if (chains)
+	{
+		lazyTrace(fit$draws("c"), main = paste("c,", sp))
+		lazyTrace(fit$draws("k"), main = paste("k,", sp))
+		lazyTrace(fit$draws("m"), main = paste("m,", sp))
+	}
+
+	# Extract mean values parameters
+	paramsVec = getParams(model_cmdstan = fit, params_names = c("c", "k", "m"), type = "mean")
+
+	# Plot fitting data and fitted curve (ratio)
+	plot(stanData$SB, stanData$SB/stanData$AGB, pch = 19, cex = 0.65, col = "#A291AF33",
+		xlab = "SB", ylab = "r", axes = FALSE, main = sp)
+	curve(r(x, paramsVec), lwd = 4, add = TRUE)
+	legend("bottomright", legend = paste("Chain", 1:4), fill = met.brewer("Egypt"))
+	axis(1)
+	axis(2, las = 1)
+
+	if (sep_chains)
+	{
+		paramsVec1 = getParams(model_cmdstan = fit, params_names = c("c", "k", "m"), type = "chain", chain = 1)
+		paramsVec2 = getParams(model_cmdstan = fit, params_names = c("c", "k", "m"), type = "chain", chain = 2)
+		paramsVec3 = getParams(model_cmdstan = fit, params_names = c("c", "k", "m"), type = "chain", chain = 3)
+		paramsVec4 = getParams(model_cmdstan = fit, params_names = c("c", "k", "m"), type = "chain", chain = 4)
+		curve(r(x, paramsVec1), lwd = 4, add = TRUE, col = met.brewer("Egypt")[1])
+		curve(r(x, paramsVec2), lwd = 4, add = TRUE, col = met.brewer("Egypt")[2])
+		curve(r(x, paramsVec3), lwd = 4, add = TRUE, col = met.brewer("Egypt")[3])
+		curve(r(x, paramsVec4), lwd = 4, add = TRUE, col = met.brewer("Egypt")[4])
+	}
+
+	# Plot fitting data and fitted curve (above-ground volume)
+	plot(stanData$SB, stanData$AGB, pch = 19, cex = 0.65, col = "#A291AF33",
+		xlab = "Bole volume", ylab = "Above-ground volume", axes = FALSE, main = sp)
+	curve(psi(x, paramsVec), lwd = 4, add = TRUE)
+	abline(a = 0, b = 1, lty = "dashed")
+	axis(1)
+	axis(2, las = 1)
+
+	if (sep_chains)
+	{
+		curve(psi(x, paramsVec1), lwd = 4, add = TRUE, col = met.brewer("Egypt")[1])
+		curve(psi(x, paramsVec2), lwd = 4, add = TRUE, col = met.brewer("Egypt")[2])
+		curve(psi(x, paramsVec3), lwd = 4, add = TRUE, col = met.brewer("Egypt")[3])
+		curve(psi(x, paramsVec4), lwd = 4, add = TRUE, col = met.brewer("Egypt")[4])
+	}
+
+
+	# Results to return
+	params = getParams(model_cmdstan = fit, params_names = c("c", "m", "k"), type = "all")
+	div = posterior::subset_draws(fit$sampler_diagnostics(), variable = "divergent__")
+
+	if (all(div == 0))
+		return(list(is_div = FALSE))
+	
+	if (any(div != 0))
+		return (list(params = params, div = div, is_div = any(div != 0)))	
+}
+
+## Function to export traces data for pgfplots
+pgfTrace = function(fit, sp, params, modelsname)
+{
+	traces = setDT(posterior::as_draws_df(fit$draws(params)))[, c(".iteration", ".chain", ..params)]
+	setnames(traces, new = c("iter", "chain", "value"))
+	fwrite(x = traces,
+		file = paste0("traces_", stringi::stri_replace_all(str = sp, replacement = "-", regex = " "),
+		"_", modelsname, ".csv"))
+}
+```
+
+```{r}
+#| output: false
+
+#### Load the data
+## Path
+os = Sys.info()[['sysname']]
+mnt_point = "/mnt/local_share/"
+if (os == "Linux" || os == "Darwin")
+{
+	if (!dir.exists(mnt_point))
+		stop(paste0("The mounting point <", mnt_point, "> does not exist"))
+} else if (os == "Windows") {
+	stop("TO DO!!! No idea how that works on Windows!")
+} else {
+	stop(paste("Unknown Operating System:", os))
+}
+
+path_data = paste0(mnt_point, "data/")
+if (!dir.exists(path_data))
+	stop(paste0("Folder <", path_data, "> does not exist! Did you run 01_prepare_data.qmd?"))
+
+opt = "_inra"
+
+# Loading Emerge data
+inra = readRDS(paste0(path_data, "nfi-inra_dt", opt, ".rds"))
+inra = inra[, .(speciesName_sci, tree_id = unique_id, fct_type, year, circumference_m, height,
+	taper_height = taper_height_flo, bole_volume_m3, total_volume_m3)]
+
+inra[, .(min_c = min(circumference_m), max_c = max(circumference_m)), by = speciesName_sci]
+
+# Loading Swiss data
+swiss = readRDS(paste0(mnt_point, "data/switzerland.rds"))
+swiss = swiss[, .(speciesName_sci, tree_id, fct_type, year, circumference_m, height, taper_height = hdecro,
+	bole_volume_m3, total_volume_m3)]
+
+swiss = swiss[circumference_m >= 0.17] # To harmonise with Oudin's data and Emerge, 0.17 seems a good one!
+
+## Modern Emerge data
+emerge = readRDS(paste0(mnt_point, "data/emerge_2009-2010.rds"))
+emerge[, year := as.integer(stringi::stri_replace_all(str = dataset, replacement = "", regex = "emerge_"))]
+emerge = emerge[, .(speciesName_sci, tree_id, fct_type, year, circumference_m, height, taper_height,
+	bole_volume_m3 = bole_volume_conic_m3, total_volume_m3)]
+
+## Merge three datasets
+tree_dt = rbindlist(list(inra = inra, swiss = swiss, emerge = emerge), idcol = "origin")
+tree_dt = tree_dt[!is.na(bole_volume_m3)] # Remove NAs, check why Swiss has some
+
+setkey(tree_dt, speciesName_sci)
+
+tree_dt[, year := as.integer(year)]
+
+## Add colours based on origin
+tree_dt[origin == "emerge", orig_col := "#E76254"]
+tree_dt[origin == "inra", orig_col := "#F7AA58"]
+tree_dt[origin == "swiss", orig_col := "#1E466E"]
+
+## Compute ratio
+tree_dt[, ratio := bole_volume_m3/total_volume_m3]
+
+## Remove strange ratio, i.e., some years contains a high range of ratios near 1
+tree_dt[ratio >= 0.99, hist(year)]
+
+N_per_year = tree_dt[, .(N_tot = .N), by = year][order(year)]
+
+lala = tree_dt[ratio >= 0.99, .N, by = year]
+lala = merge.data.table(lala, N_per_year, by = "year")
+lala[, perc := round(N/N_tot*100, 1)]
+
+strange_years = lala[perc > 30, year]
+
+lala = tree_dt[(ratio >= 0.99) & (year %in% strange_years)]
+lala[, .N, by = origin]
+plot(lala[, circumference_m], lala[, total_volume_m3])
+
+
+tree_dt[(ratio >= 0.99) & (year %in% strange_years), orig_col := "#43B284"]
+
+plot(tree_dt[, circumference_m], tree_dt[, total_volume_m3], pch = 19, col = tree_dt[, orig_col])
+
+points(tree_dt[orig_col == "#43B284", circumference_m], tree_dt[orig_col == "#43B284", total_volume_m3], pch = 19, col = "#43B284")
+
+tree_dt = tree_dt[!((ratio >= 0.99) & (year %in% strange_years))]
+```
+
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+<!-- ---------------------------   MAIN CONTENT, R CODE   --------------------------- -->
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+
+## Introduction
+
+This script parametrises the total volume with two models. The first one is taken from @Yang2024, and is expected to work with volumes despite it was done on biomass, simply because we heuristically assume a constant density within the tree. This often made assumption holds for *Quercus* [@Knapic2011], but not for *Pinus* [@Repola2006].
+
+## Simplified model of @Yang2024
+
+In this model, the above-ground volume is derived from the bole volume as an allometric function. Basically, allometry assumes that the dimension of an organ $y$ is proportional to an organ $x$, following a power-law $y = a x^b$. Here, $y$ is the total volume and $x$ is the bole volume.
+
+In @Yang2024, the allometry is applied to above-ground biomass as $y$ and stem biomass as $x$. I expect to be able to apply the same type of functions to volume, as volume and biomass are related by wood density. It should be the same if wood density is constant between the crown and the bole, and only the scale should change! According to @Knapic2011 there is little variation within tree oaks, while there can be for pines @Repola2006.
+
+In this section, I use the simplified model from @Yang2024, equation S4:
+
+$$
+	r = (m - c)kx \exp[1 - kx] + c
+$$
+
+and then use the allometric equation:
+
+$$
+	\Vtot = \frac{1}{c} x^{1 - [\ln(r) - \ln(c)]/\ln(\Vbft)}
+$$
+
+```{r}
+## Compile model
+model = cmdstan_model("./yang2024_simplified.stan")
+
+## Common variables
+n_chains = 4
+
+savePath = "./yang/"
+if (!dir.exists(savePath))
+	dir.create(savePath)
+
+ls_species = tree_dt[, .N, by = speciesName_sci][N > 150, sort(speciesName_sci)]
+
+for (sp in ls_species)
+{
+	print(paste(" Running species", sp))
+	filename = paste0(sp, "_simplified")
+
+	stanData = list(
+		N = tree_dt[.(sp)][, .N],
+		SB = tree_dt[.(sp)][, bole_volume_m3],
+		AGB = tree_dt[.(sp)][, total_volume_m3]
+	)
+
+	if (!file.exists(paste0(savePath, filename, ".rds")))
+	{
+		fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4),
+			iter_warmup = 1500, iter_sampling = 1000, max_treedepth = 10)
+
+		## Save results
+		fit$save_output_files(dir = savePath, basename = filename, random = FALSE)
+		saveRDS(fit, paste0(savePath, filename, ".rds"))
+	} else {
+		fit = readRDS(paste0(savePath, filename, ".rds"))
+	}
+
+	plot_sp(fit = fit, sp = sp, stanData = stanData, chains = TRUE)
+}
+```
+
+
+## Polynomial fit
+
+```{r}
+pol4 = function(x, b1, b2, b3, b4)
+	return (x/(b1*x + b2*x^2 + b3*x^3 + b4*x^4))
+
+curve(pol4(x, 1, 1, 2, 1), from = -1.5, to = 0.5, axes = FALSE, xlab = "x", ylab = "y")
+abline(v = -1)
+abline(h = pol4(-1, 1, 1, 2, 1), lty = "dashed")
+abline(v = -1/3)
+abline(h = pol4(-1/3, 1, 1, 2, 1), lty = "dashed")
+axis(1)
+axis(2, las = 1)
+```
+
+```{r}
+## Compile model
+model_pol = cmdstan_model("./yang2024_polynomial.stan")
+
+## Common variables
+n_chains = 4
+
+savePath = "./yang/"
+if (!dir.exists(savePath))
+	dir.create(savePath)
+
+ls_species = tree_dt[, .N, by = speciesName_sci][N > 150, sort(speciesName_sci)]
+
+for (sp in ls_species)
+{
+	print(paste(" Running species", sp))
+	filename = paste0(sp, "_polynomial")
+
+	stanData = list(
+		N = tree_dt[.(sp)][, .N],
+		SB = tree_dt[.(sp)][, bole_volume_m3],
+		AGB = tree_dt[.(sp)][, total_volume_m3]
+	)
+
+	if (!file.exists(paste0(savePath, filename, ".rds")))
+	{
+		fit = model_pol$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4),
+			iter_warmup = 1500, iter_sampling = 1000, max_treedepth = 10)
+
+		## Save results
+		fit$save_output_files(dir = savePath, basename = filename, random = FALSE)
+		saveRDS(fit, paste0(savePath, filename, ".rds"))
+	} else {
+		fit = readRDS(paste0(savePath, filename, ".rds"))
+	}
+
+	plot_sp(fit = fit, sp = sp, stanData = stanData, chains = TRUE, popol_plot = TRUE)
+}
+```
+
+## Case study of *Larix decidua*
+
+### Model from @Yang2024
+```{r}
+## Compile the model
+larix = cmdstan_model("./yang2024_simplified.stan") # Simplified model, but c provided
+
+## Common variables
+n_chains = 4
+
+savePath = "./yang/"
+if (!dir.exists(savePath))
+	dir.create(savePath)
+
+sp = "Larix decidua"
+
+print(paste(" Running species", sp))
+filename = paste0(sp, "_simplified")
+
+stanData = list(
+	N = tree_dt[.(sp)][, .N],
+	SB = tree_dt[.(sp)][, bole_volume_m3],
+	AGB = tree_dt[.(sp)][, total_volume_m3]
+)
+
+if (!file.exists(paste0(savePath, filename, ".rds")))
+{
+	fit = larix$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4),
+		iter_warmup = 1500, iter_sampling = 1000, max_treedepth = 10)
+
+	## Save results
+	fit$save_output_files(dir = savePath, basename = filename, random = FALSE)
+	saveRDS(fit, paste0(savePath, filename, ".rds"))
+} else {
+	fit = readRDS(paste0(savePath, filename, ".rds"))
+}
+
+plot_sp(fit, sp, stanData, chains = TRUE, sep_chains = TRUE, popol_plot = FALSE)
+
+pgfTrace(fit, sp, params = "c", modelsname = "yang2024-simplified")
+```
+
+### Our model
+$$
+	r(x) = \alpha + \exp[-\beta*x](\gamma x + \delta)
+$$
+```{r}
+## Compile model
+larix = cmdstan_model("./larix.stan") # Different function
+
+## Common variables
+filename = paste0(sp, "_amael")
+
+stanData = list(
+	N = tree_dt[.(sp)][, .N],
+	SB = tree_dt[.(sp)][, bole_volume_m3],
+	AGB = tree_dt[.(sp)][, total_volume_m3]
+)
+
+if (!file.exists(paste0(savePath, filename, ".rds")))
+{
+	fit = larix$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4),
+		iter_warmup = 1500, iter_sampling = 1000, max_treedepth = 10)
+
+	## Save results
+	fit$save_output_files(dir = savePath, basename = filename, random = FALSE)
+	saveRDS(fit, paste0(savePath, filename, ".rds"))
+} else {
+	fit = readRDS(paste0(savePath, filename, ".rds"))
+}
+
+## Posteriors and chains
+lazyTrace(fit$draws("asym"))
+lazyTrace(fit$draws("b"))
+lazyTrace(fit$draws("c"))
+lazyTrace(fit$draws("d"))
+
+# Extract mean values parameters
+paramsVec = getParams(model_cmdstan = fit, params_names = c("asym", "b", "c", "d"), type = "mean")
+
+# Ratio equation
+amael = function(x, pars)
+	return (pars["asym"] + exp(-pars["b"]*x) * (pars["c"]*x + pars["d"]));
+
+# Allometric equation
+psi = function(x, pars)
+{
+	r = amael(x, pars)
+	return ( 1/pars["asym"] * x^( 1 - (log(r) - log(pars["asym"])) / log(x) ) )
+}
+
+# Plot fitting data and fitted curve (ratio)
+plot(stanData$SB, stanData$SB/stanData$AGB, pch = 19, cex = 0.65, col = "#A291AF33",
+	xlab = "SB", ylab = "r", axes = FALSE, main = sp)
+curve(amael(x, paramsVec), lwd = 4, add = TRUE)
+axis(1)
+axis(2, las = 1)
+
+# Plot fitting data and fitted curve (above-ground volume)
+plot(stanData$SB, stanData$AGB, pch = 19, cex = 0.65, col = "#A291AF33",
+	xlab = "Bole volume", ylab = "Above-ground volume", axes = FALSE, main = sp)
+curve(psi(x, paramsVec), lwd = 4, add = TRUE)
+abline(a = 0, b = 1, lty = "dashed")
+axis(1)
+axis(2, las = 1)
+
+# Plot obs vs pred (above-ground volume)
+v_pred = apply(X = fit$draws("v_gen_mean"), MARGIN = 3, FUN = mean)
+plot(v_pred, stanData$AGB, pch = 19, cex = 0.65, col = "#A291AF33",
+	xlab = "Predicted AGV", ylab = "Observed AGV", axes = FALSE, main = sp)
+abline(a = 0, b = 1, lty = "dashed")
+axis(1)
+axis(2, las = 1)
+
+pgfTrace(fit, sp, params = "asym", modelsname = "amael")
+```
+
+## Clayton's copula
+
+```{r}
+## Compile the model
+copula = cmdstan_model("./copula_noUpdate_Fbft.stan") # Simplified model, but c provided
+
+## Common variables
+n_chains = 4
+
+savePath = "./copula_res/"
+if (!dir.exists(savePath))
+	dir.create(savePath)
+
+sp = "Abies alba"
+
+print(paste(" Running species", sp))
+filename = paste0(sp, "_copula_noUpdate")
+
+## Load results Flo++ model (Form factor BFT)
+sp_code = "61"
+Fbft = readRDS(paste0("../../gohon_florence/", sp_code, "/florence-gamma_heterosked.rds"))
+
+params = getParams(model_cmdstan = Fbft, params_names = c(paste0("beta", 0:4), "sigma0", "sigma_pow"),
+	type = "mean")
+rm(Fbft)
+
+## Stan data, USING !is.na(taper_height), WAITING FOR the estimation fo taper height in Inra data
+stanData = list(
+	N = tree_dt[.(sp)][!is.na(taper_height), .N],
+	params_Fbft = params,
+
+	circumference_m = tree_dt[.(sp)][!is.na(taper_height), circumference_m],
+	taper_height_flo = tree_dt[.(sp)][!is.na(taper_height), taper_height],
+	height = tree_dt[.(sp)][!is.na(taper_height), height],
+
+	bole_volume_m3 = tree_dt[.(sp)][!is.na(taper_height), bole_volume_m3],
+	total_volume_m3 = tree_dt[.(sp)][!is.na(taper_height), total_volume_m3]
+)
+
+if (!file.exists(paste0(savePath, filename, ".rds")))
+{
+	fit = copula$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4),
+		iter_warmup = 1500, iter_sampling = 1000, max_treedepth = 10)
+
+	## Save results
+	fit$save_output_files(dir = savePath, basename = filename, random = FALSE)
+	saveRDS(fit, paste0(savePath, filename, ".rds"))
+} else {
+	fit = readRDS(paste0(savePath, filename, ".rds"))
+}
+
+lazyPosterior(fit$draws("alpha0"), fun = dnorm, mean = 0, sd = 1)
+lazyPosterior(fit$draws("theta"), fun = dgamma, shape = 1.5^2, rate = 1.5)
+```
