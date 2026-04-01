@@ -109,6 +109,42 @@ functions {
 		vector [N] sigma = pars[i, j, 6] * (c.^2 .* h) .^ pars[i, j, 7];
 		return gamma_rng(mu .^2 ./ sigma.^2, mu ./ sigma.^2);
 	}
+
+	real C_u(real u, real t, real theta) // Conditional distrib of v given u, given Clayton copula
+	{
+		return u*pow(pow(u, theta) + pow(t, -theta/(theta + 1)) - 1, -1/theta);
+	}
+
+	real gamma_icdf2(real u, real shape, real rate) // The first version is unstable for 'small' N! uncertainty??
+	{
+		real lo = 0.0;
+		real hi = 2; // Unlikely that Fbft > 2 in real! But maybe a bit dangerous in the real scenario?
+		real mid;
+		
+		for (i in 1:20) // Dichotomy
+		{
+			mid = (lo + hi) / 2.0;
+			if (gamma_cdf(mid | shape, rate) < u)
+				lo = mid;
+			else
+				hi = mid;
+		}
+		return (lo + hi) / 2.0;
+	}
+
+	real lognormal_icdf(real p, real mu, real sigma) // inverse CDF lognormal
+	{
+		// Code from https://spinkney.github.io/helpful_stan_functions/group__qf.html
+		/*
+		if (is_nan(p) || p < 0 || p > 1) 
+			reject("lognormal_icdf: p must be between 0 and 1; ", "found p = ", p);
+		if (is_nan(mu) || is_inf(mu)) 
+			reject("lognormal_icdf: mu must be finite; ", "found mu = ", mu);
+		if (is_nan(sigma) || is_inf(sigma) || sigma <= 0) 
+			reject("lognormal_icdf: sigma must be finite and > 0; ", "found sigma = ", sigma);
+		*/
+		return exp(mu + sigma * inv_Phi(p));
+	}
 }
 
 data {
@@ -185,22 +221,37 @@ model {
 			lognormal_cdf(total_volume_m3[i] | mu_tot[i], sigma_tot_vol)] | theta);
 }
 
-/*
 generated quantities {
-	vector [N] proba_inf;
 	vector [N] sim_bole_volume_m3;
+	vector [N] sim_total_volume_m3;
 
 	{
+		// Average simulated bole
+		matrix[N, 2] shape_rate = shape_rate_mean(circumference_m, height, taper_height_flo, params_Fbft);
+
+		// Clayton's copula variables
+		real u;
+		real t;
+		real v;
+
+		// Intermediate variables		
 		real Fbft;
+
 		for (i in 1:N)
 		{
-			proba_inf[i] = gamma_cdf(fnewbft[i] | exp(log_shape[i]), exp(log_rate[i]));
-			// This is the proba that Y_i < fnewbft[i] given parameters shape and rate
+			// Sim Clayton's copula
+			u = uniform_rng(0, 1);
+			t = uniform_rng(0, 1);
+			v = C_u(u, t, theta);
 
-			Fbft = gamma_rng(exp(log_shape[i]), exp(log_rate[i]));
+			// Transform back (u, v)...
+			// ...For bole volume
+			Fbft = gamma_icdf2(u, shape_rate[i, 1], shape_rate[i, 2]);
 			sim_bole_volume_m3[i] = Fbft * circumference_m[i]^2 * height[i] / 
 				(4*pi()) / (1 - 1.3/height[i])^2;
+
+			// ...For total volume
+			sim_total_volume_m3[i] = lognormal_icdf(v, mu_tot[i], sigma_tot_vol);
 		}
 	}
 }
-*/
