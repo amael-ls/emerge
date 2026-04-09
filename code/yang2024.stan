@@ -23,46 +23,48 @@ functions {
 data {
 	// Dimensions
 	int <lower = 1> N; // Number of trees
-	// int <lower = 1, upper = N> G; // Number of genus
-	// array[G] int <lower = 1, upper = N> start; // Genus index start
-	// array[G] int <lower = 1, upper = N> end; // Genus index end
 
 	// Predictors
-	vector[N] SB;
+	vector[N] bole_volume_m3;
 
 	// Data
-	vector[N] AGB;
+	vector[N] total_volume_m3;
 }
 
 transformed data {
-	vector[N] ratio = SB ./ AGB;
+	vector[N] ratio = bole_volume_m3 ./ total_volume_m3;
 }
 
 parameters {
 	// Parameters of the 'bumpy' function r_yang_6
-	real <lower = 0, upper = 1> c;
-	real <lower = 0, upper = 1> j; // Model still defined for j > 1, but it adds an unrealistic inflexion point
+	real <lower = 0, upper = 1> c_beta;
+	real <lower = 0> j; // Model still defined for j > 1, but it adds an unrealistic inflexion point
 	real <lower = 0> k;
-	real <lower = 0, upper = 1> m;
+	real <lower = 0, upper = 1> m_beta;
 	real <lower = 0, upper = 1> n;
-	real <lower = 0> s;
+	real <lower = 0> s_multiplier;
 
 	real <lower = 0> phi; // Precision (well kind of...)
 }
 
 transformed parameters {
-	vector [N] shape1 = phi*r_yang_6(SB, [c, j, k, m, n, s]);
-	vector [N] shape2 = phi*(1 - r_yang_6(SB, [c, j, k, m, n, s]));
+	real c = 0.6 + 0.4*c_beta; // Forces c to be between 0.6 and 1
+	real m = 0.8 + 0.2*m_beta; // Forces m to be between 0.8 and 1
+	real s = (5 + s_multiplier)*k/j; // Force s to be at least 5
+	vector [N] shape1 = phi*r_yang_6(bole_volume_m3, [c, j, k, m, n, s]);
+	vector [N] shape2 = phi*(1 - r_yang_6(bole_volume_m3, [c, j, k, m, n, s]));
 }
 
 model{
 	// Prior linear regression
-	target += beta_lpdf(c | 8, 1); // Left skewed
-	target += beta_lpdf(j | 8, 1); // Left skewed
-	target += beta_lpdf(k | 1, 8); // Right skewed
-	target += beta_lpdf(m | 8, 1); // Left skewed
+	target += beta_lpdf(c_beta | 3, 3); // Centred
+	target += normal_lpdf(j | 1, 0.1);
+	target += gamma_lpdf(k | 2, 10); // Right skewed
+	target += beta_lpdf(m_beta | 3, 3); // Centred
 	target += beta_lpdf(n | 1, 8); // Right skewed
-	target += gamma_lpdf(s | 3, 0.5); // Right skewed
+	target += gamma_lpdf(s_multiplier | 1.5, 0.5); // Right skewed
+
+	target += gamma_lpdf(phi | 3, 0.5); // Right skewed
 	
 	// Likelihood
 	target += beta_lpdf(ratio | shape1, shape2);
@@ -75,6 +77,7 @@ generated quantities {
 	vector[N] v_gen_mean;
 
 	for (i in 1:N)
-		v_gen[i] = 1/c * SB[i]^( 1 - (log(r_gen[i]) - log(c)) / log(SB[i]) );
-	v_gen_mean = 1/c * SB .^ ( 1 - (log(r_yang_6(SB, [c, j, k, m, n, s])) - log(c)) ./ log(SB) );
+		v_gen[i] = 1/c * bole_volume_m3[i]^( 1 - (log(r_gen[i]) - log(c)) / log(bole_volume_m3[i]) );
+	v_gen_mean = 1/c * bole_volume_m3 .^
+		( 1 - (log(r_yang_6(bole_volume_m3, [c, j, k, m, n, s])) - log(c)) ./ log(bole_volume_m3) );
 }
