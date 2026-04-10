@@ -702,7 +702,6 @@ div = plot_sp(fit, sp, simplif = FALSE, n_bins = 4, pal = "Hiroshige", selected_
 	print_plot = FALSE)
 
 plot_divergences(fit, div[["loc"]], simplif = FALSE)
-
 ```
 
 ## Simplified run for species that have multimodal likelihood
@@ -715,7 +714,7 @@ Some species have multimodal likelihood due to the merge of intermediate stage w
 ## Compile model
 model = cmdstan_model("./yang2024_submodel.stan")
 
-for (sp in c("Fraxinus excelsior", "Larix decidua"))
+for (sp in c("Fraxinus excelsior", "Larix decidua", "Pinus laricio"))
 {
 	print(paste("Running", sp))
 	
@@ -742,7 +741,7 @@ for (sp in c("Fraxinus excelsior", "Larix decidua"))
 	}
 
 	div = plot_sp(fit, sp, simplif = TRUE, n_bins = 4, pal = "Hiroshige", selected_variable = "height",
-		print_plot = FALSE)
+		print_plot = TRUE)
 
 	if (div[["any_div"]])
 		warning(paste("Divergences for", sp))
