@@ -93,7 +93,7 @@ library(loo)
 source("./toolFunctions.R")
 
 plot_sp = function(fit, sp, forest = tree_dt[.(sp)], pred = TRUE, simplif = FALSE,
-	n_bins = 4, pal = "Hiroshige", selected_variable = NULL)
+	n_bins = 4, pal = "Hiroshige", selected_variable = NULL, print_plot = TRUE)
 {
 	# Get parameters
 	n_sampling = fit$metadata()$iter_sampling
@@ -124,14 +124,14 @@ plot_sp = function(fit, sp, forest = tree_dt[.(sp)], pred = TRUE, simplif = FALS
 		paramsVec = getParams(model_cmdstan = fit, params_names = c("c", "j", "k", "m", "n", "s"), type = "mean")
 	} else {
 		paramsVec_simplif = getParams(model_cmdstan = fit,
-			params_names = c("alpha", "beta", "beta", "gamma", "delta"), type = "mean")
+			params_names = c("alpha", "beta_", "gamma", "delta"), type = "mean")
 		paramsVec = c(
-			c = paramsVec_simplif["alpha"],
+			c = unname(paramsVec_simplif["alpha"]),
 			j = 1,
-			k = paramsVec_simplif["beta"],
-			m = exp(-1)*paramsVec_simplif["gamma"]/paramsVec_simplif["beta"] + paramsVec_simplif["alpha"],
-			n = paramsVec_simplif["delta"] + paramsVec_simplif["alpha"],
-			s = paramsVec_simplif["beta"]
+			k = unname(paramsVec_simplif["beta_"]),
+			m = unname(exp(-1)*paramsVec_simplif["gamma"]/paramsVec_simplif["beta_"] + paramsVec_simplif["alpha"]),
+			n = unname(paramsVec_simplif["delta"] + paramsVec_simplif["alpha"]),
+			s = unname(paramsVec_simplif["beta_"])
 		)
 	}
 
@@ -148,10 +148,23 @@ plot_sp = function(fit, sp, forest = tree_dt[.(sp)], pred = TRUE, simplif = FALS
 		return ( 1/pars["c"] * x^( 1 - (log(r) - log(pars["c"])) / log(x) ) )
 	}
 
+	# Check rhats
+	pars_names = names(paramsVec)
+	if (simplif)
+		pars_names = c("alpha", "beta_", "gamma", "delta")
+	rhats = rhat(object = fit, pars = pars_names)
+
+	# Divergence check up
+	params = getParams(model_cmdstan = fit, params_names = pars_names, type = "all")
+	div = posterior::subset_draws(fit$sampler_diagnostics(), variable = "divergent__")
+
+	if (!print_plot)
+		return (list(any_div = any(div != 0), div, rhats = rhats))
+
 	# Plot figure r vs bole and fitted curve
 	plot(forest[, bole_volume_m3], forest[, r], pch = 19, col = forest[, colour], axes = FALSE,
 		xlab = "Bole volume", ylab = "Ratio bole/tot volumes", lwd = 0, cex = 0.75,
-		main = ifelse(is.null(selected_variable), "", selected_variable))
+		main = ifelse(is.null(selected_variable), sp, paste(sp, "(", selected_variable, ")")))
 	if (!is.null(selected_variable))
 		legend("topright", fill = colours, title = paste(selected_variable, "classes"),
 			legend = levels(forest[, cut(.SD[[selected_variable]], breaks = n_bins, dig.lab = 1)]))
@@ -164,7 +177,8 @@ plot_sp = function(fit, sp, forest = tree_dt[.(sp)], pred = TRUE, simplif = FALS
 	{
 		sim = apply(X = fit$draws("v_gen_mean"), MARGIN = 3, FUN = mean)
 		plot(sim, forest[, total_volume_m3], pch = 19, col = forest[, colour], axes = FALSE,
-			xlab = "Predicted total volume", ylab = "Observed total volume")
+			xlab = "Predicted total volume", ylab = "Observed total volume",
+			main = ifelse(is.null(selected_variable), sp, paste(sp, "(", selected_variable, ")")))
 		if (!is.null(selected_variable))
 			legend("topright", fill = colours, title = paste(selected_variable, "classes"),
 				legend = levels(forest[, cut(.SD[[selected_variable]], breaks = n_bins, dig.lab = 1)]))
@@ -173,7 +187,8 @@ plot_sp = function(fit, sp, forest = tree_dt[.(sp)], pred = TRUE, simplif = FALS
 		axis(2, las = 1)
 		
 		plot(forest[, bole_volume_m3], forest[, total_volume_m3], pch = 19, col = forest[, colour],
-			axes = FALSE, xlab = "Observed bole volume", ylab = "Observed total volume")
+			axes = FALSE, xlab = "Observed bole volume", ylab = "Observed total volume",
+			main = ifelse(is.null(selected_variable), sp, paste(sp, "(", selected_variable, ")")))
 		if (!is.null(selected_variable))
 			legend("topright", fill = colours, title = paste(selected_variable, "classes"),
 				legend = levels(forest[, cut(.SD[[selected_variable]], breaks = n_bins, dig.lab = 1)]))
@@ -184,33 +199,128 @@ plot_sp = function(fit, sp, forest = tree_dt[.(sp)], pred = TRUE, simplif = FALS
 	}
 
 	# Plot chains if any rhat problem
-	pars_names = names(paramsVec)
-	if (simplif)
-		pars_names = c("alpha", "beta", "gamma", "delta")
-	rhats = rhat(object = fit, pars = pars_names)
-
 	if (any(rhats > 1.05))
 	{
 		if (!simplif)
 		{
-			lazyTrace(fit$draws("c"), main = "c")
-			lazyTrace(fit$draws("j"), main = "j")
-			lazyTrace(fit$draws("k"), main = "k")
-			lazyTrace(fit$draws("m"), main = "m")
-			lazyTrace(fit$draws("n"), main = "n")
-			lazyTrace(fit$draws("s"), main = "s")
+			lazyTrace(fit$draws("c"), main = paste0(sp, ", c"))
+			lazyTrace(fit$draws("j"), main = paste0(sp, ", j"))
+			lazyTrace(fit$draws("k"), main = paste0(sp, ", k"))
+			lazyTrace(fit$draws("m"), main = paste0(sp, ", m"))
+			lazyTrace(fit$draws("n"), main = paste0(sp, ", n"))
+			lazyTrace(fit$draws("s"), main = paste0(sp, ", s"))
+
+			paramsVec1 = getParams(model_cmdstan = fit, params_names = c("c", "j", "k", "m", "n", "s"),
+				type = "chain", chain = 1)
+			paramsVec2 = getParams(model_cmdstan = fit, params_names = c("c", "j", "k", "m", "n", "s"),
+				type = "chain", chain = 2)
+			paramsVec3 = getParams(model_cmdstan = fit, params_names = c("c", "j", "k", "m", "n", "s"),
+				type = "chain", chain = 3)
+			paramsVec4 = getParams(model_cmdstan = fit, params_names = c("c", "j", "k", "m", "n", "s"),
+				type = "chain", chain = 4)
 		} else {
 			lazyTrace(fit$draws("alpha"), main = "alpha")
-			lazyTrace(fit$draws("beta"), main = "beta")
+			lazyTrace(fit$draws("beta_"), main = "beta_")
 			lazyTrace(fit$draws("gamma"), main = "gamma")
 			lazyTrace(fit$draws("delta"), main = "delta")
+
+			paramsVec_simplif = getParams(model_cmdstan = fit, params_names = c("alpha", "beta_", "gamma", "delta"),
+				type = "chain", chain = 1)
+			paramsVec1 = c(
+				c = paramsVec_simplif["alpha"],
+				j = 1,
+				k = paramsVec_simplif["beta_"],
+				m = exp(-1)*paramsVec_simplif["gamma"]/paramsVec_simplif["beta_"] + paramsVec_simplif["alpha"],
+				n = paramsVec_simplif["delta"] + paramsVec_simplif["alpha"],
+				s = paramsVec_simplif["beta_"]
+			)
+			paramsVec_simplif = getParams(model_cmdstan = fit, params_names = c("alpha", "beta_", "gamma", "delta"),
+				type = "chain", chain = 2)
+			paramsVec2 = c(
+				c = paramsVec_simplif["alpha"],
+				j = 1,
+				k = paramsVec_simplif["beta_"],
+				m = exp(-1)*paramsVec_simplif["gamma"]/paramsVec_simplif["beta_"] + paramsVec_simplif["alpha"],
+				n = paramsVec_simplif["delta"] + paramsVec_simplif["alpha"],
+				s = paramsVec_simplif["beta_"]
+			)
+			paramsVec_simplif = getParams(model_cmdstan = fit, params_names = c("alpha", "beta_", "gamma", "delta"),
+				type = "chain", chain = 3)
+			paramsVec3 = c(
+				c = paramsVec_simplif["alpha"],
+				j = 1,
+				k = paramsVec_simplif["beta_"],
+				m = exp(-1)*paramsVec_simplif["gamma"]/paramsVec_simplif["beta_"] + paramsVec_simplif["alpha"],
+				n = paramsVec_simplif["delta"] + paramsVec_simplif["alpha"],
+				s = paramsVec_simplif["beta_"]
+			)
+			paramsVec_simplif = getParams(model_cmdstan = fit, params_names = c("alpha", "beta_", "gamma", "delta"),
+				type = "chain", chain = 4)
+			paramsVec4 = c(
+				c = paramsVec_simplif["alpha"],
+				j = 1,
+				k = paramsVec_simplif["beta_"],
+				m = exp(-1)*paramsVec_simplif["gamma"]/paramsVec_simplif["beta_"] + paramsVec_simplif["alpha"],
+				n = paramsVec_simplif["delta"] + paramsVec_simplif["alpha"],
+				s = paramsVec_simplif["beta_"]
+			)
 		}
+		plot(forest[, bole_volume_m3], forest[, r], pch = 19, axes = FALSE, lwd = 0,
+			xlab = "Bole volume", ylab = "Ratio bole/tot volumes", main = sp)
+		curve(r_func(x, paramsVec), add = TRUE, lwd = 3)
+		curve(r_func(x, paramsVec1), lwd = 3, add = TRUE, col = met.brewer("Egypt")[1])
+		curve(r_func(x, paramsVec2), lwd = 3, add = TRUE, col = met.brewer("Egypt")[2])
+		curve(r_func(x, paramsVec3), lwd = 3, add = TRUE, col = met.brewer("Egypt")[3])
+		curve(r_func(x, paramsVec4), lwd = 3, add = TRUE, col = met.brewer("Egypt")[4])
+		axis(1)
+		axis(2, las = 1)
 	}
 
-	# Divergence check up
-	params = getParams(model_cmdstan = fit, params_names = pars_names, type = "all")
-	div = posterior::subset_draws(fit$sampler_diagnostics(), variable = "divergent__")
 	return (list(any_div = any(div != 0), div, rhats = rhats))
+}
+
+plot_divergences = function(fit, div)
+{
+	# params = getParams(model_cmdstan = fit, params_names = c("c", "j", "m", "k"), type = "all")
+# div = posterior::subset_draws(fit$sampler_diagnostics(), variable = "divergent__")
+
+# if (any(div != 0))
+# {
+# 	div_c = posterior::subset_draws(params[, , "c"], draw = which(div == 1))
+# 	div_j = posterior::subset_draws(params[, , "j"], draw = which(div == 1))
+# 	div_m = posterior::subset_draws(params[, , "m"], draw = which(div == 1))
+# 	div_k = posterior::subset_draws(params[, , "k"], draw = which(div == 1))
+
+# 	# Plot divergence for c and j
+# 	plot(params[, , "c"], params[, , "j"], pch = 19, cex = 0.65, col = "#FAB255",
+# 		xlab = "c", ylab = "j", main = "c and j")
+# 	points(div_c, div_j, pch = 18, col = "#0F7BA2")
+
+# 	# Plot divergence for c and k
+# 	plot(params[, , "c"], params[, , "k"], pch = 19, cex = 0.65, col = "#FAB255",
+# 		xlab = "c", ylab = "k", main = "c and k")
+# 	points(div_c, div_k, pch = 18, col = "#0F7BA2")
+
+# 	# Plot divergence for c and m
+# 	plot(params[, , "c"], params[, , "m"], pch = 19, cex = 0.65, col = "#FAB255",
+# 		xlab = "c", ylab = "m", main = "c and m")
+# 	points(div_c, div_m, pch = 18, col = "#0F7BA2")
+
+# 	# Plot divergence for j and k
+# 	plot(params[, , "j"], params[, , "k"], pch = 19, cex = 0.65, col = "#FAB255",
+# 		xlab = "j", ylab = "k", main = "j and k")
+# 	points(div_j, div_k, pch = 18, col = "#0F7BA2")
+
+# 	# Plot divergence for j and m
+# 	plot(params[, , "j"], params[, , "m"], pch = 19, cex = 0.65, col = "#FAB255",
+# 		xlab = "j", ylab = "m", main = "j and m")
+# 	points(div_j, div_m, pch = 18, col = "#0F7BA2")
+
+# 	# Plot divergence for k and m
+# 	plot(params[, , "k"], params[, , "m"], pch = 19, cex = 0.65, col = "#FAB255",
+# 		xlab = "k", ylab = "m", main = "k and m")
+# 	points(div_k, div_m, pch = 18, col = "#0F7BA2")
+# }
 }
 ```
 
@@ -570,410 +680,60 @@ for (sp in ls_species)
 		saveRDS(fit, paste0(savePath, filename, ".rds"))
 	}
 
-	# plot_sp(fit, sp, simplif = FALSE, n_bins = 4, pal = "Hiroshige", selected_variable = "height")
+	div = plot_sp(fit, sp, simplif = FALSE, n_bins = 4, pal = "Hiroshige", selected_variable = "height",
+		print_plot = FALSE)
+
+	if (div[["any_div"]])
+		warning(paste("Divergences for", sp))
 }
 ```
 
-### Graphics to check the run
-
-```{r}
-#| label: fig-pred-allom
-#| fig-cap: Predictions of above-ground volume in function of bole volume and the parametrised fitting curve
-#| fig-asp: 1
-#| out-width: 95%
-#| fig-width: 8.142857
-
-psi = function(x, pars)
-{
-	r = (pars["m"] - pars["c"]) * exp(pars["j"] - pars["k"]*x) * (pars["k"]*x/pars["j"])^pars["j"] +
-		pars["c"] - (pars["c"] - pars["n"])*exp(-pars["s"]*x)
-
-	return ( 1/pars["c"] * x^( 1 - (log(r) - log(pars["c"])) / log(x) ) )
-}
-
-
-paramsVec = getParams(model_cmdstan = fit, params_names = c("c", "j", "k", "m", "n", "s"), type = "mean")
-
-plot(stanData$bole_volume_m3, stanData$total_volume_m3, pch = 19, cex = 0.65, axes = FALSE,
-	col = tree_dt[sp, colour], xlab = "Bole volume", ylab = "Above-ground volume")
-curve(psi(x, paramsVec), lwd = 4, add = TRUE)
-abline(a = 0, b = 1, lty = "dashed")
-axis(1)
-axis(2, las = 1)
-```
+I found there are divergences for *Pinus laricio*. This is a warning to remove this species! Here are a bit more investigations
 
 ```{r}
 
-lazyTrace(fit$draws("c"), main = "c")
-lazyTrace(fit$draws("j"), main = "j")
-lazyTrace(fit$draws("k"), main = "k")
-lazyTrace(fit$draws("m"), main = "m")
-lazyTrace(fit$draws("n"), main = "n")
-lazyTrace(fit$draws("s"), main = "s")
-
-params = getParams(model_cmdstan = fit, params_names = c("c", "j", "m", "k"), type = "all")
-div = posterior::subset_draws(fit$sampler_diagnostics(), variable = "divergent__")
-
-if (any(div != 0))
-{
-	div_c = posterior::subset_draws(params[, , "c"], draw = which(div == 1))
-	div_j = posterior::subset_draws(params[, , "j"], draw = which(div == 1))
-	div_m = posterior::subset_draws(params[, , "m"], draw = which(div == 1))
-	div_k = posterior::subset_draws(params[, , "k"], draw = which(div == 1))
-
-	# Plot divergence for c and j
-	plot(params[, , "c"], params[, , "j"], pch = 19, cex = 0.65, col = "#FAB255",
-		xlab = "c", ylab = "j", main = "c and j")
-	points(div_c, div_j, pch = 18, col = "#0F7BA2")
-
-	# Plot divergence for c and k
-	plot(params[, , "c"], params[, , "k"], pch = 19, cex = 0.65, col = "#FAB255",
-		xlab = "c", ylab = "k", main = "c and k")
-	points(div_c, div_k, pch = 18, col = "#0F7BA2")
-
-	# Plot divergence for c and m
-	plot(params[, , "c"], params[, , "m"], pch = 19, cex = 0.65, col = "#FAB255",
-		xlab = "c", ylab = "m", main = "c and m")
-	points(div_c, div_m, pch = 18, col = "#0F7BA2")
-
-	# Plot divergence for j and k
-	plot(params[, , "j"], params[, , "k"], pch = 19, cex = 0.65, col = "#FAB255",
-		xlab = "j", ylab = "k", main = "j and k")
-	points(div_j, div_k, pch = 18, col = "#0F7BA2")
-
-	# Plot divergence for j and m
-	plot(params[, , "j"], params[, , "m"], pch = 19, cex = 0.65, col = "#FAB255",
-		xlab = "j", ylab = "m", main = "j and m")
-	points(div_j, div_m, pch = 18, col = "#0F7BA2")
-
-	# Plot divergence for k and m
-	plot(params[, , "k"], params[, , "m"], pch = 19, cex = 0.65, col = "#FAB255",
-		xlab = "k", ylab = "m", main = "k and m")
-	points(div_k, div_m, pch = 18, col = "#0F7BA2")
-}
 ```
 
-```{r}
-# if (any(div != 0))
-# 	fit$cmdstan_diagnose()
-```
+## Simplified run for species that have multimodal likelihood
 
-## Predictions ...
-### ... in ratio
-```{r}
-#| label: fig-pred-ratio
-#| fig-cap: Predictions of ratio with non-uniqueness
-#| fig-asp: 1
-#| out-width: 95%
-#| fig-width: 8.142857
-
-f = function(x, pars)
-{
-	# The vector of parameters, pars, is in this order:
-	# 1 -> c,
-	# 2 -> j,
-	# 3 -> k,
-	# 4 -> m,
-	# 5 -> n,
-	# 6 -> s
-	return ((pars["m"] - pars["c"]) * exp(pars["j"] - pars["k"]*x) * (pars["k"]*x/pars["j"])^pars["j"] +
-		pars["c"] - (pars["c"] - pars["n"])*exp(-pars["s"]*x));
-}
-
-paramsVec = getParams(model_cmdstan = fit, params_names = c("c", "j", "k", "m", "n", "s"), type = "mean")
-paramsVec1 = getParams(model_cmdstan = fit, params_names = c("c", "j", "k", "m", "n", "s"),
-	type = "chain", chain = 1)
-paramsVec2 = getParams(model_cmdstan = fit, params_names = c("c", "j", "k", "m", "n", "s"),
-	type = "chain", chain = 2)
-paramsVec3 = getParams(model_cmdstan = fit, params_names = c("c", "j", "k", "m", "n", "s"),
-	type = "chain", chain = 3)
-paramsVec4 = getParams(model_cmdstan = fit, params_names = c("c", "j", "k", "m", "n", "s"),
-	type = "chain", chain = 4)
-
-plot(stanData$bole_volume_m3, stanData$bole_volume_m3/stanData$total_volume_m3, pch = 19, cex = 0.65,
-	col = tree_dt[sp, colour], xlab = "Bole volume", ylab = "r", axes = FALSE)
-curve(f(x, paramsVec), lwd = 4, add = TRUE)
-curve(f(x, paramsVec_fr), lwd = 4, add = TRUE, col = ls_colours["fr_comp"])
-curve(f(x, paramsVec_ch), lwd = 4, add = TRUE, col = ls_colours["ch_comp"])
-curve(f(x, paramsVec1), lwd = 4, add = TRUE, col = met.brewer("Egypt")[1])
-curve(f(x, paramsVec2), lwd = 4, add = TRUE, col = met.brewer("Egypt")[2])
-curve(f(x, paramsVec3), lwd = 4, add = TRUE, col = met.brewer("Egypt")[3])
-curve(f(x, paramsVec4), lwd = 4, add = TRUE, col = met.brewer("Egypt")[4])
-abline(v = paramsVec["j"]/paramsVec["k"], lty = "dashed", lwd = 0.6)
-abline(h = paramsVec["m"] - (paramsVec["c"] - paramsVec["n"])*exp(-paramsVec["s"]*paramsVec["j"]/paramsVec["k"]),
-	lty = "dashed")
-legend("bottomright", legend = paste("Chain", 1:4), fill = met.brewer("Egypt"))
-axis(1)
-axis(2, las = 1)
-
-# curve(f(x, paramsVec), lwd = 4, to = 8)
-# abline(v = paramsVec["j"]/paramsVec["k"], lty = "dashed")
-# abline(h = paramsVec["m"] - (paramsVec["c"] - paramsVec["n"])*exp(-paramsVec["s"]*paramsVec["j"]/paramsVec["k"]),
-# 	lty = "dashed")
-
-# (paramsVec["c"] - paramsVec["n"])*exp(-paramsVec["s"]*paramsVec["j"]/paramsVec["k"])
-
-# paramsVec["s"] - 3*paramsVec["k"]/paramsVec["j"]
-
-# lazyPosterior(fit$draws("c"), fun = dbeta, shape1 = 8, shape2 = 1)
-
-## Save results
-params_dt = as.data.table(x = paramsVec, keep.rownames = "parameter")
-params_dt = merge.data.table(params_dt, as.data.table(x = paramsVec1, keep.rownames = "parameter"),
-	by = "parameter")
-params_dt = merge.data.table(params_dt, as.data.table(x = paramsVec2, keep.rownames = "parameter"),
-	by = "parameter")
-params_dt = merge.data.table(params_dt, as.data.table(x = paramsVec3, keep.rownames = "parameter"),
-	by = "parameter")
-params_dt = merge.data.table(params_dt, as.data.table(x = paramsVec4, keep.rownames = "parameter"),
-	by = "parameter")
-
-setnames(params_dt, old = paste0("paramsVec", c("", 1:4)), new = c("avg", paste0("chain", 1:4)))
-fwrite(params_dt, "~/work/writing/article_allometry/data/params_Larix-decidua_yang2024.csv")
-
-fwrite(data.table(bole_volume_m3 = stanData$SB, ratio = stanData$SB/stanData$AGB),
-	"~/work/writing/article_allometry/data/larix-decidua_data.csv")
-```
-
-### ... in volume
-
-```{r}
-#| label: fig-pred-volume
-#| fig-cap: Predictions in volume
-#| fig-asp: 1
-#| out-width: 95%
-#| fig-width: 8.142857
-
-vol_pred = apply(X = fit$draws("v_gen_mean"), MARGIN = 3, FUN = mean)
-
-plot(vol_pred, stanData$AGB, pch = 19, cex = 0.65, axes = FALSE,
-	xlab = "Above-ground volume (predicted)", ylab = "Above-ground volume (observed)")
-abline(a = 0, b = 1, lwd = 3, col = "#CD212A")
-axis(1)
-axis(2, las = 1)
-```
-
-```{r}
-#| label: fig-pred-volume-chains
-#| fig-cap: Predictions in volume, per chain
-#| fig-asp: 1
-#| out-width: 95%
-#| fig-width: 8.142857
-
-vol_pred1 = apply(X = fit$draws("v_gen_mean")[, 1, ], MARGIN = 3, FUN = mean)
-vol_pred2 = apply(X = fit$draws("v_gen_mean")[, 2, ], MARGIN = 3, FUN = mean)
-vol_pred3 = apply(X = fit$draws("v_gen_mean")[, 3, ], MARGIN = 3, FUN = mean)
-vol_pred4 = apply(X = fit$draws("v_gen_mean")[, 4, ], MARGIN = 3, FUN = mean)
-
-plot(vol_pred1, stanData$AGB, pch = 19, axes = FALSE, col = met.brewer("Egypt")[1],
-	xlab = "Above-ground volume (predicted)", ylab = "Above-ground volume (observed)")
-points(vol_pred2, stanData$AGB, pch = 19, cex = 0.65, col = met.brewer("Egypt")[2])
-points(vol_pred3, stanData$AGB, pch = 19, cex = 0.45, col = met.brewer("Egypt")[3])
-points(vol_pred4, stanData$AGB, pch = 19, cex = 0.25, col = met.brewer("Egypt")[4])
-abline(a = 0, b = 1, lwd = 3)
-legend("bottomright", legend = paste("Chain", 1:4), fill = met.brewer("Egypt"))
-axis(1)
-axis(2, las = 1)
-```
-
-
-
-
-## Simplified run brute force!
+Some species have multimodal likelihood due to the merge of intermediate stage with "adult" stage. For this species, a simpler sub-model is required, defined by @eq-yang2024_noIntermediate.
 
 ```{r}
 # tree_dt[, any(is.na(bole_volume_m3))]
 # tree_dt[is.na(bole_volume_m3), 100*circumference_m]
 ## Compile model
-model = cmdstan_model("./yang2024_simplified.stan")
+model = cmdstan_model("./yang2024_submodel.stan")
 
-## Prepare data
-tree_dt = tree_dt[!is.na(bole_volume_m3)]
-
-stanData = list(
-	N = tree_dt["Fagus sylvatica"][origin == "inra", .N],
-	SB = tree_dt["Fagus sylvatica"][origin == "inra", bole_volume_m3],
-	AGB = tree_dt["Fagus sylvatica"][origin == "inra", total_volume_m3]
-)
-
-## Common variables
-n_chains = 4
-
-savePath = "./yang/"
-if (!dir.exists(savePath))
-	dir.create(savePath)
-
-filename = "inra-Fagsyl_simplified"
-
-## Run model
-if (file.exists(paste0(savePath, filename, ".rds")))
+for (sp in c("Fraxinus excelsior", "Larix decidua"))
 {
-	fit = readRDS(paste0(savePath, filename, ".rds"))
-} else {
-	fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4),
-		iter_warmup = 1500, iter_sampling = 500, max_treedepth = 10)
+	print(paste("Running", sp))
+	
+	# Subset to targeted species for stanData
+	stanData = list(
+		N = tree_dt[.(sp)][, .N],
+		bole_volume_m3 = tree_dt[.(sp)][, bole_volume_m3],
+		total_volume_m3 = tree_dt[.(sp)][, total_volume_m3]
+	)
 
-	## Save results
-	fit$save_output_files(dir = savePath, basename = filename, random = FALSE)
-	saveRDS(fit, paste0(savePath, filename, ".rds"))
+	filename = paste0(stri_replace(str = sp, regex = " ", replacement = "-"), "_submodel")
+
+	## Run model
+	if (file.exists(paste0(savePath, filename, ".rds")))
+	{
+		fit = readRDS(paste0(savePath, filename, ".rds"))
+	} else {
+		fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4),
+			iter_warmup = 1500, iter_sampling = 1000, max_treedepth = 10)
+
+		## Save results
+		fit$save_output_files(dir = savePath, basename = filename, random = FALSE)
+		saveRDS(fit, paste0(savePath, filename, ".rds"))
+	}
+
+	div = plot_sp(fit, sp, simplif = TRUE, n_bins = 4, pal = "Hiroshige", selected_variable = "height",
+		print_plot = FALSE)
+
+	if (div[["any_div"]])
+		warning(paste("Divergences for", sp))
 }
-```
-
-```{r}
-#| label: fig-pred-allom-simplif
-#| fig-cap: Predictions of above-ground volume in function of bole volume and the parametrised fitting curve
-#| fig-asp: 1
-#| out-width: 95%
-#| fig-width: 8.142857
-
-psi = function(x, pars)
-{
-	r = (pars["m"] - pars["c"]) * exp(1 - pars["k"]*x) * pars["k"]*x + pars["c"]
-
-	return ( 1/pars["c"] * x^( 1 - (log(r) - log(pars["c"])) / log(x) ) )
-}
-
-paramsVec = getParams(model_cmdstan = fit, params_names = c("c", "k", "m"), type = "mean")
-
-# ff = function(x)
-# 	return (10.24*exp(-3.74*x))
-
-# curve(ff, from = 0, to = 5)
-
-plot(stanData$SB, stanData$AGB, pch = 19, cex = 0.65, col = "#A291AF33",
-	xlab = "Bole volume", ylab = "Above-ground volume", axes = FALSE)
-curve(psi(x, paramsVec), lwd = 4, add = TRUE)
-abline(a = 0, b = 1, lty = "dashed")
-axis(1)
-axis(2, las = 1)
-```
-
-```{r}
-lazyTrace(fit$draws("c"), main = "c")
-lazyTrace(fit$draws("k"), main = "k")
-lazyTrace(fit$draws("m"), main = "m")
-
-lazyPosterior(fit$draws("phi0"), fun = dgamma, shape = 3, rate = 0.1)
-lazyPosterior(fit$draws("phi1"), fun = dnorm, mean = 3, sd = 1)
-
-params = getParams(model_cmdstan = fit, params_names = c("c", "m", "k"), type = "all")
-div = posterior::subset_draws(fit$sampler_diagnostics(), variable = "divergent__")
-
-if (any(div != 0))
-{
-	div_c = posterior::subset_draws(params[, , "c"], draw = which(div == 1))
-	div_m = posterior::subset_draws(params[, , "m"], draw = which(div == 1))
-	div_k = posterior::subset_draws(params[, , "k"], draw = which(div == 1))
-
-	# Plot divergence for c and k
-	plot(params[, , "c"], params[, , "k"], pch = 19, cex = 0.65, col = "#FAB255",
-		xlab = "c", ylab = "k", main = "c and k")
-	points(div_c, div_k, pch = 18, col = "#0F7BA2")
-
-	# Plot divergence for c and m
-	plot(params[, , "c"], params[, , "m"], pch = 19, cex = 0.65, col = "#FAB255",
-		xlab = "c", ylab = "m", main = "c and m")
-	points(div_c, div_m, pch = 18, col = "#0F7BA2")
-
-	# Plot divergence for k and m
-	plot(params[, , "k"], params[, , "m"], pch = 19, cex = 0.65, col = "#FAB255",
-		xlab = "k", ylab = "m", main = "k and m")
-	points(div_k, div_m, pch = 18, col = "#0F7BA2")
-}
-```
-
-```{r}
-if (any(div != 0))
-	fit$cmdstan_diagnose()
-```
-
-## Predictions ...
-### ... in ratio
-```{r}
-#| label: fig-pred-ratio-simplif
-#| fig-cap: Predictions of ratio, simplified model
-#| fig-asp: 1
-#| out-width: 95%
-#| fig-width: 8.142857
-
-f = function(x, pars)
-{
-	# The vector of parameters, pars, is in this order:
-	# 1 -> c,
-	# 2 -> k,
-	# 3 -> m,
-	return ((pars["m"] - pars["c"]) * exp(1 - pars["k"]*x) * (pars["k"]*x) + pars["c"]);
-}
-
-paramsVec = getParams(model_cmdstan = fit, params_names = c("c", "k", "m"), type = "mean")
-paramsVec1 = getParams(model_cmdstan = fit, params_names = c("c", "k", "m"), type = "chain", chain = 1)
-paramsVec2 = getParams(model_cmdstan = fit, params_names = c("c", "k", "m"), type = "chain", chain = 2)
-paramsVec3 = getParams(model_cmdstan = fit, params_names = c("c", "k", "m"), type = "chain", chain = 3)
-paramsVec4 = getParams(model_cmdstan = fit, params_names = c("c", "k", "m"), type = "chain", chain = 4)
-
-plot(stanData$SB, stanData$SB/stanData$AGB, pch = 19, cex = 0.65, col = "#A291AF33",
-	xlab = "Bole volume", ylab = "r", axes = FALSE)
-curve(f(x, paramsVec), lwd = 4, add = TRUE)
-curve(f(x, paramsVec1), lwd = 4, add = TRUE, col = met.brewer("Egypt")[1])
-curve(f(x, paramsVec2), lwd = 4, add = TRUE, col = met.brewer("Egypt")[2])
-curve(f(x, paramsVec3), lwd = 4, add = TRUE, col = met.brewer("Egypt")[3])
-curve(f(x, paramsVec4), lwd = 4, add = TRUE, col = met.brewer("Egypt")[4])
-abline(v = paramsVec["j"]/paramsVec["k"], lty = "dashed", lwd = 0.6)
-abline(h = paramsVec["m"] - (paramsVec["c"] - paramsVec["n"])*exp(-paramsVec["s"]*paramsVec["j"]/paramsVec["k"]),
-	lty = "dashed")
-legend("bottomright", legend = paste("Chain", 1:4), fill = met.brewer("Egypt"))
-axis(1)
-axis(2, las = 1)
-
-# curve(f(x, paramsVec), lwd = 4, to = 8)
-# abline(v = paramsVec["j"]/paramsVec["k"], lty = "dashed")
-# abline(h = paramsVec["m"] - (paramsVec["c"] - paramsVec["n"])*exp(-paramsVec["s"]*paramsVec["j"]/paramsVec["k"]),
-# 	lty = "dashed")
-
-# (paramsVec["c"] - paramsVec["n"])*exp(-paramsVec["s"]*paramsVec["j"]/paramsVec["k"])
-
-# paramsVec["s"] - 3*paramsVec["k"]/paramsVec["j"]
-
-# lazyPosterior(fit$draws("c"), fun = dbeta, shape1 = 8, shape2 = 1)
-```
-
-### ... in volume
-
-```{r}
-#| label: fig-pred-volume-simplif
-#| fig-cap: Predictions in volume
-#| fig-asp: 1
-#| out-width: 95%
-#| fig-width: 8.142857
-
-vol_pred = apply(X = fit$draws("v_gen_mean"), MARGIN = 3, FUN = mean)
-
-plot(vol_pred, stanData$AGB, pch = 19, cex = 0.65, axes = FALSE,
-	xlab = "Above-ground volume (predicted)", ylab = "Above-ground volume (observed)")
-abline(a = 0, b = 1, lwd = 3, col = "#CD212A")
-axis(1)
-axis(2, las = 1)
-```
-
-```{r}
-#| label: fig-pred-volume-chains-simplif
-#| fig-cap: Predictions in volume, per chain
-#| fig-asp: 1
-#| out-width: 95%
-#| fig-width: 8.142857
-
-vol_pred1 = apply(X = fit$draws("v_gen_mean")[, 1, ], MARGIN = 3, FUN = mean)
-vol_pred2 = apply(X = fit$draws("v_gen_mean")[, 2, ], MARGIN = 3, FUN = mean)
-vol_pred3 = apply(X = fit$draws("v_gen_mean")[, 3, ], MARGIN = 3, FUN = mean)
-vol_pred4 = apply(X = fit$draws("v_gen_mean")[, 4, ], MARGIN = 3, FUN = mean)
-
-plot(vol_pred1, stanData$AGB, pch = 19, axes = FALSE, col = met.brewer("Egypt")[1],
-	xlab = "Above-ground volume (predicted)", ylab = "Above-ground volume (observed)")
-points(vol_pred2, stanData$AGB, pch = 19, cex = 0.65, col = met.brewer("Egypt")[2])
-points(vol_pred3, stanData$AGB, pch = 19, cex = 0.45, col = met.brewer("Egypt")[3])
-points(vol_pred4, stanData$AGB, pch = 19, cex = 0.25, col = met.brewer("Egypt")[4])
-abline(a = 0, b = 1, lwd = 3)
-legend("bottomright", legend = paste("Chain", 1:4), fill = met.brewer("Egypt"))
-axis(1)
-axis(2, las = 1)
 ```
