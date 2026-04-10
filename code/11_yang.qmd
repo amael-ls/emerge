@@ -92,8 +92,8 @@ library(loo)
 ## Tool function
 source("./toolFunctions.R")
 
-plot_sp = function(fit, sp, count, fun, args, forest = tree_dt[.(sp)], pred = FALSE, simplif = FALSE,
-	n_subsample = 10, add = TRUE, n_bins = 12, pal = "Hiroshige", selected_variable = NULL)
+plot_sp = function(fit, sp, forest = tree_dt[.(sp)], pred = TRUE, simplif = FALSE,
+	n_bins = 4, pal = "Hiroshige", selected_variable = NULL)
 {
 	# Get parameters
 	n_sampling = fit$metadata()$iter_sampling
@@ -148,8 +148,7 @@ plot_sp = function(fit, sp, count, fun, args, forest = tree_dt[.(sp)], pred = FA
 		return ( 1/pars["c"] * x^( 1 - (log(r) - log(pars["c"])) / log(x) ) )
 	}
 
-	# Plot figure
-
+	# Plot figure r vs bole and fitted curve
 	plot(forest[, bole_volume_m3], forest[, r], pch = 19, col = forest[, colour], axes = FALSE,
 		xlab = "Bole volume", ylab = "Ratio bole/tot volumes", lwd = 0, cex = 0.75,
 		main = ifelse(is.null(selected_variable), "", selected_variable))
@@ -160,7 +159,7 @@ plot_sp = function(fit, sp, count, fun, args, forest = tree_dt[.(sp)], pred = FA
 	axis(1)
 	axis(2, las = 1)
 
-	# Plot prediction
+	# Plot predictions
 	if (pred)
 	{
 		sim = apply(X = fit$draws("v_gen_mean"), MARGIN = 3, FUN = mean)
@@ -185,6 +184,33 @@ plot_sp = function(fit, sp, count, fun, args, forest = tree_dt[.(sp)], pred = FA
 	}
 
 
+	# Plot chains if any rhat problem
+	pars_names = names(paramsVec)
+	if (simplif)
+		pars_names = c("alpha", "beta", "gamma", "delta")
+	rhats = rhat(object = fit, pars = pars_names)
+	any(rhats > 1.05)
+	{
+		if (!simplif)
+		{
+			lazyTrace(fit$draws("c"), main = "c")
+			lazyTrace(fit$draws("j"), main = "j")
+			lazyTrace(fit$draws("k"), main = "k")
+			lazyTrace(fit$draws("m"), main = "m")
+			lazyTrace(fit$draws("n"), main = "n")
+			lazyTrace(fit$draws("s"), main = "s")
+		} else {
+			lazyTrace(fit$draws("alpha"), main = "alpha")
+			lazyTrace(fit$draws("beta"), main = "beta")
+			lazyTrace(fit$draws("gamma"), main = "gamma")
+			lazyTrace(fit$draws("delta"), main = "delta")
+		}
+	}
+
+	# Divergence check up
+	params = getParams(model_cmdstan = fit, params_names = pars_names, type = "all")
+	div = posterior::subset_draws(fit$sampler_diagnostics(), variable = "divergent__")
+	return (list(any_div = any(div != 0), div))
 }
 ```
 
@@ -542,6 +568,8 @@ if (file.exists(paste0(savePath, filename, ".rds")))
 	fit$save_output_files(dir = savePath, basename = filename, random = FALSE)
 	saveRDS(fit, paste0(savePath, filename, ".rds"))
 }
+
+plot_sp(fit, sp, simplif = FALSE, n_bins = 4, pal = "Hiroshige", selected_variable = "height")
 ```
 
 ### Graphics to check the run
