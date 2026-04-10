@@ -81,11 +81,11 @@ options(max.print = 500)
 
 library(data.table)
 library(MetBrewer)
+library(bayesplot)
 library(cmdstanr)
 	register_knitr_engine(override = TRUE)
 library(inventR)
 library(interp)
-# library(DHARMa)
 library(shape)
 library(loo)
 
@@ -209,13 +209,13 @@ opt = "_inra"
 
 # Loading Emerge data
 inra = readRDS(paste0(path_data, "nfi-inra_dt", opt, ".rds"))
-inra = inra[, .(speciesName_sci, tree_id = unique_id, fct_type, year, circumference_m, height,
+inra = inra[, .(speciesName_sci, tree_id = unique_id, plot_id, fct_type, year, circumference_m, height,
 	taper_height = taper_height_flo, bole_volume_m3, total_volume_m3)]
 setkey(inra, speciesName_sci)
 
 # Loading Swiss data
 swiss = readRDS(paste0(mnt_point, "data/switzerland.rds"))
-swiss = swiss[, .(speciesName_sci, tree_id, fct_type, year, circumference_m, height, taper_height = hdecro,
+swiss = swiss[, .(speciesName_sci, tree_id, plot_id, fct_type, year, circumference_m, height, taper_height = hdecro,
 	bole_volume_m3, total_volume_m3)]
 setkey(swiss, speciesName_sci)
 
@@ -225,8 +225,26 @@ emerge[, year := as.integer(stringi::stri_replace_all(str = dataset, replacement
 emerge = emerge[, .(speciesName_sci, tree_id, fct_type, year, circumference_m, height, taper_height,
 	bole_volume_m3 = bole_volume_conic_m3, total_volume_m3)]
 
-tree_dt = rbindlist(list(inra = inra, swiss = swiss, emerge = emerge), idcol = "origin")
-setkey(tree_dt, speciesName_sci)
+## Bind everything
+tree_dt = rbindlist(list(inra = inra, swiss = swiss, emerge = emerge), idcol = "origin", fill = TRUE)
+
+# Add colours France vs Swiss
+ls_colours = met.brewer("Egypt")[1:4]
+names(ls_colours) = c("fr_comp", "fr", "ch_comp", "ch")
+tree_dt[, colour := ls_colours["fr"]] # Inra and Emerge, in blue
+tree_dt[origin == "swiss", colour := ls_colours["ch"]] # Swiss, in yellow
+
+# Remove NAs
+tree_dt = tree_dt[!is.na(bole_volume_m3)]
+
+# Remove species with less than 150 individuals
+tree_dt[, n_indiv := .N, by = speciesName_sci]
+tree_dt = tree_dt[n_indiv > 150]
+
+tree_dt[, .N, by = .(speciesName_sci, colour)][order(speciesName_sci)]
+
+# Set key to sort by species and colour (i.e., France vs Switzerland)
+setkey(tree_dt, speciesName_sci, colour)
 ```
 
 <!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
@@ -237,7 +255,11 @@ setkey(tree_dt, speciesName_sci)
 
 This script try to parametrise the total volume in function of the bole volume, that is to say, to use the basic definition of allometry: the dimension of an organ $y$ is proportional to an organ $x$, such as in this power-law $y = a x^b$. Here, $y$ is the total volume and $x$ is the bole volume. In @Yang2024, they do it with above-ground biomass as $y$ and stem biomass as $x$. I expect to be able to apply the same type of functions to volume, as volume and biomass are related by wood density. It should be the same if wood density is constant between the crown and the bole, and only the scale should change! According to @Knapic2011 there is little variation within tree oaks, while there can be for pines @Repola2006.
 
-Here is an intuition on how the function from @Yang2024 works. The parameter $j$ influences the curvature of the function as claimed in the appendix S1 of that paper, but not intuitive: The lower $j$, the stepper the function! However, it is correct to assume that $j < 1$ as otherwise the function is first convex and then concave. So the stan code should reflect this constraint, although the model is perfectly defined for $j > 1$.
+Here is an intuition on how the function @eq-yang2024 from @Yang2024, works.
+$$
+	r = (m - c) \exp[j - kx] \left( \frac{kx}{j} \right)^j + c - (c - n)\exp[-sx]
+$${#eq-yang2024}
+The parameter $j$ influences the curvature of the function as claimed in the appendix S1 of that paper, but not intuitive: The lower $j$, the stepper the function! However, it is correct to assume that $j < 1$ as otherwise the function is first convex and then concave. So the stan code should reflect this constraint, although the model is perfectly defined for $j > 1$.
 
 ```{r}
 #| label: fig-var_j
@@ -251,7 +273,7 @@ f = function(x, j, k)
 
 k = 0.06
 Homer = met.brewer("Homer1")
-curve(f(x, 0.2, k), from = 0, to = 25, lwd = 3, axes = FALSE, xlab = "SB", ylab = "r", col = Homer[1])
+curve(f(x, 0.2, k), from = 0, to = 25, lwd = 3, axes = FALSE, xlab = "Bole volume", ylab = "r", col = Homer[1])
 axis(1)
 axis(2, las = 1)
 for (j in 2:8)
@@ -267,7 +289,7 @@ legend(x = "bottomright", fill = met.brewer("Homer1"), legend = (1:8)/5, bty = "
 #| fig-width: 8.142857
 
 j = 0.6
-curve(f(x, j, 0.02), from = 0, to = 25, lwd = 3, axes = FALSE, xlab = "SB", ylab = "r", col = Homer[1])
+curve(f(x, j, 0.02), from = 0, to = 25, lwd = 3, axes = FALSE, xlab = "Bole volume", ylab = "r", col = Homer[1])
 axis(1)
 axis(2, las = 1)
 for (k in 2:8)
@@ -276,13 +298,86 @@ legend(x = "bottomright", fill = met.brewer("Homer1"), legend = (1:8)/50, bty = 
 ```
 
 ```{r}
+#| label: fig-var_s
+#| fig-cap: Different shape of the function @eq-yang2024 for j = 0.5, k = , m = , n = , c = and s between 0.02 and 0.16.
+#| fig-subcap:
+#|   - "For Mammea"
+#|   - "For Triplochiton"   
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 4
+#| layout-ncol: 2
+
+f = function(x, c, j, k, m, n, s)
+	return ((m - c)*exp(j - k*x) * (k*x/j)^j + c - (c - n)*exp(-s*x))
+
+# Values for Mammea taken from Yang et al. 2024
+m = 0.65
+n = 0.4
+c = 0.6
+P = 150
+j = 1 - 0.5*exp(-0.001*P)
+k = 0.004557
+print(paste("s =", round(10/P, 3)))
+
+curve(f(x, c, j, k, m, n, 10/P), from = 0, to = 500, lwd = 3, axes = FALSE, xlab = "Bole volume", ylab = "r", col = Homer[1])
+axis(1)
+axis(2, las = 1)
+for (s in 2:8)
+	curve(f(x, c, j, k, m, n, s*10/P), add = TRUE, col = Homer[s], lwd = 3)
+legend(x = "bottomright", fill = met.brewer("Homer1"), legend = round((1:8)*10/P, 3), bty = "n")
+
+
+curve(f(x, c, j, k, m, n, 10/P), from = 500, to = 2000, lwd = 3, axes = FALSE, xlab = "Bole volume",
+	ylab = "r", col = Homer[1])
+axis(1)
+axis(2, las = 1)
+for (s in 2:8)
+	curve(f(x, c, j, k, m, n, s*10/P), add = TRUE, col = Homer[s], lwd = 3)
+legend(x = "bottomright", fill = met.brewer("Homer1"), legend = round((1:8)*10/P, 3), bty = "n")
+```
+
+*Larix decidua* seems to be a particular case of the the model @eq-yang2024. It seems to be a simpler convex function with only two stages in its ratio rather than three: First an sharp increase, as for any other species, which corresponds to the juvenile stage, and then a stable phase, which is the asymptotic ratio of adults. There seems to be no intermediate stage. By adding some constraints, and choosing $s = k$ since the intermediate stage merged with the stable stage, and $j = 1$, we get the following type of function:
+
+$$
+	r = \alpha + \exp[-\beta x](\gamma x + \delta)
+$${#eq-yang2024_noIntermediate}
+
+```{r}
+#| label: fig-subcase
+#| fig-cap: Particular case of the generic function @eq-yang2024, that reduces to @eq-yang2024_noIntermediate when $j = 1$, $s = k$, $c = \alpha$, $k = \beta$, $m = e^{-1}\frac{\gamma}{\beta} + \alpha$, and $n = \delta + \alpha$.
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 8.142857
+
+alpha = 0.85
+beta = 0.02
+gamma = -0.01
+delta = -0.7
+
+j = 1
+s = beta
+c = alpha
+k = beta
+m = exp(-1)*gamma/k + alpha
+n = delta + alpha
+
+curve(f(x, c, j, k, m, n, s), from = 0, to = 500, lwd = 3, axes = FALSE, xlab = "Bole volume", ylab = "r", col = Homer[1])
+axis(1)
+axis(2, las = 1)
+```
+
+Lastly, I use some beta priors in my model. As I am not that familiar with this distribution, it worth it to have some basic plots (Fig. @fig-beta_distrib).
+
+```{r}
 #| label: fig-beta_distrib
 #| fig-cap: Different shapes of the beta distribution
 #| fig-asp: 1
 #| out-width: 95%
 #| fig-width: 8.142857
 
-curve(dbeta(x, shape1 = 5, shape2 = 2), from = 0, to = 1, lwd = 3, axes = FALSE, xlab = "x", ylab = "Beta pdf", col = Homer[1], ylim = c(0, 3.6))
+curve(dbeta(x, shape1 = 5, shape2 = 2), from = 0, to = 1, lwd = 3, axes = FALSE, xlab = "x",
+	ylab = "Beta pdf", col = Homer[1], ylim = c(0, 3.6))
 axis(1)
 axis(2, las = 1)
 
@@ -302,44 +397,179 @@ curve(dbeta(x, shape1 = 1, shape2 = 8), add = TRUE, col = Homer[6], lwd = 3)
 
 legend(x = "topright", fill = met.brewer("Homer1")[c(1:5, 8, 7, 6)],
 	legend = c("5, 2", "8, 2", "8, 1", "5, 5", "1.5, 1.5", "2, 5", "2, 8", "1, 8"), bty = "n")
+```
 
-curve(dbeta(x, shape1 = 8, shape2 = 1), from = 0, to = 1, lwd = 3, axes = FALSE,
-	xlab = "x", ylab = "Beta pdf", col = Homer[1], ylim = c(0, 3.6))
-axis(1)
-axis(2, las = 1)
+## Check the overlap of the ratio data
+The Swiss data have an abnormal number of ratio values near one... It happens on very concentrated years and plots, which makes me think 
+```{r}
+library(terra)
+swiss_coords = vect(paste0(mnt_point, "data/coords_switzerland"))
+
+tree_dt[, r := bole_volume_m3/total_volume_m3]
+
+aa = tree_dt[origin != "swiss"][r > 0.98][, .N, by = .(plot_id, year)]
+bb = tree_dt[origin != "swiss"][, .(n_tot = .N), by = .(plot_id, year)]
+
+aa = merge.data.table(aa, bb, by = c("plot_id", "year"))
+aa[, prop := round(100*N/n_tot, 1)]
+aa[, mean(prop)] # In average for plots having trees with r > 0.98, it is 10% of the indiv that are concerned
+
+ls_pb = tree_dt[origin == "swiss"][r > 0.98][, .N, by = .(plot_id, year)]
+n_indiv = tree_dt[origin == "swiss"][, .(n_tot = .N), by = .(plot_id, year)]
+
+ls_pb = merge.data.table(ls_pb, n_indiv, by = c("plot_id", "year"))
+ls_pb[, prop := round(100*N/n_tot, 1)]
+
+ls_pb[prop > 20]
+
+ls_pb[N > 20, sum(N)]*100/ls_pb[, sum(N)]
+ls_pb[N > 50][order(year)]
+
+pb_66 = ls_pb[N > 50, unique(plot_id)] # 2/3rd of the problematic trees come from theses plots
+
+setkey(ls_pb, plot_id, year)
+
+ls_pb_10p = ls_pb[prop > 10, .(plot_id, year)] # "01015004"
+ls_pb[ls_pb_10p]
+tree_dt[plot_id %in% ls_pb_10p$plot_id, .N, by = speciesName_sci]
+
+switzerland = project(vect(paste0(mnt_point, "data/shapefiles/switzerland/CHE_adm0.shp")), swiss_coords)
+
+## Plots
+swiss_cols = met.brewer("Egypt")[1:4]
+names(swiss_cols) = unique(swiss_coords$region)
+swiss_coords$colour = swiss_cols[swiss_coords$region]
+
+plot(switzerland, lwd = 2, axes = FALSE)
+points(swiss_coords, pch = 20, cex = 0.55)
+points(swiss_coords[swiss_coords$plot_id %in% ls_pb_10p$plot_id],
+	col = swiss_coords[swiss_coords$plot_id %in% ls_pb_10p$plot_id]$colour,
+	pch = 4, cex = 3)
+
+plot(switzerland, lwd = 2, axes = FALSE)
+points(swiss_coords, pch = 20, cex = 0.55)
+points(swiss_coords[swiss_coords$plot_id %in% pb_66],
+	col = swiss_coords[swiss_coords$plot_id %in% pb_66]$colour,
+	pch = 4, cex = 4)
+
+dt = as.data.table(swiss_coords[swiss_coords$plot_id %in% pb_66])
+
+swiss_coords[(swiss_coords$plot_id %in% ls_pb_10p$plot_id) & (swiss_coords$year %in% ls_pb_10p$year)]
+
+plot(tree_dt[((plot_id %in% ls_pb_10p$plot_id) & (year %in% ls_pb_10p$year) & (r > 0.98)), bole_volume_m3],
+	tree_dt[((plot_id %in% ls_pb_10p$plot_id) & (year %in% ls_pb_10p$year) & (r > 0.98)), r],
+	pch = 19, xlab = "Bole volume", ylab = "Ratio")
+
+plot(tree_dt[((plot_id %in% ls_pb_10p$plot_id) & (year %in% ls_pb_10p$year) & (r > 0.98)), circumference_m],
+	tree_dt[((plot_id %in% ls_pb_10p$plot_id) & (year %in% ls_pb_10p$year) & (r > 0.98)), r],
+	pch = 19, xlab = "Circumference", ylab = "Ratio")
+
+100*tree_dt[((plot_id %in% ls_pb_10p$plot_id) & (year %in% ls_pb_10p$year))][r > 0.98, .N]/
+	tree_dt[((plot_id %in% ls_pb_10p$plot_id) & (year %in% ls_pb_10p$year))][, .N]
+```
+
+## Removing some trees from the Swiss data
+
+As demonstrated in the previous section, the overlap is not that good for some very particular plots where many trees have a ratio greater than 0.98! I decided to remove trees with a ratio $r > 0.98$ and belonging to plots with more than 10% of such trees.
+
+```{r}
+tree_dt_copy = copy(tree_dt)
+tree_dt = tree_dt[!((plot_id %in% ls_pb_10p$plot_id) & (year %in% ls_pb_10p$year) & (r > 0.98))]
+# tree_dt[plot_id == "01015004"]
+```
+
+I also decided to remove comletely *Fagus sylvatica* as we have many in France and the two populations do not overlap well nor does it extend the data range (contrary to *Larix decidua* for instance).
+
+```{r}
+tree_dt = tree_dt[!((speciesName_sci == "Fagus sylvatica") & (origin == "swiss"))]
+```
+
+```{r}
+ls_species = tree_dt[, unique(speciesName_sci)]
+for (sp in ls_species)
+{
+	plot(tree_dt_copy[sp, bole_volume_m3], tree_dt_copy[sp, bole_volume_m3/total_volume_m3],
+		col = tree_dt_copy[sp, colour], xlab = "Bole volume", ylab = "r", axes = FALSE, pch = 19,
+		cex = 0.85, main = sp)
+	axis(1)
+	axis(2, las = 1)
+	plot(tree_dt[sp, bole_volume_m3], tree_dt[sp, bole_volume_m3/total_volume_m3], col = tree_dt[sp, colour],
+		xlab = "Bole volume", ylab = "r", axes = FALSE, pch = 19, cex = 0.85, main = sp)
+	axis(1)
+	axis(2, las = 1)
+}
 ```
 
 ## First run brute force!
 
 ```{r}
-tree_dt[, any(is.na(bole_volume_m3))]
-tree_dt[is.na(bole_volume_m3), 100*circumference_m]
-tree_dt = tree_dt[!is.na(bole_volume_m3)]
-
-stanData = list(
-	N = tree_dt["Fagus sylvatica"][origin == "inra", .N],
-	SB = tree_dt["Fagus sylvatica"][origin == "inra", bole_volume_m3],
-	AGB = tree_dt["Fagus sylvatica"][origin == "inra", total_volume_m3]
-)
-
+## Compile model
 model = cmdstan_model("./yang2024.stan")
 
+## Prepare data
+# Choose species
+sp = "Fagus sylvatica"
+
+# Subset to targeted species for stanData
+stanData = list(
+	N = tree_dt[.(sp)][, .N],
+	bole_volume_m3 = tree_dt[.(sp)][, bole_volume_m3],
+	total_volume_m3 = tree_dt[.(sp)][, total_volume_m3]
+)
+
+## Common variables
 n_chains = 4
 
-fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4),
-	iter_warmup = 1500, iter_sampling = 500, max_treedepth = 10)
-
-## Save results
 savePath = "./yang/"
 if (!dir.exists(savePath))
 	dir.create(savePath)
 
-filename = "inra-Fagsyl_s-dgamma-large"
-fit$save_output_files(dir = savePath, basename = filename, random = FALSE)
-saveRDS(fit, paste0(savePath, filename, ".rds"))
+filename = stri_replace(str = sp, regex = " ", replacement = "-")
+
+## Run model
+if (file.exists(paste0(savePath, filename, ".rds")))
+{
+	fit = readRDS(paste0(savePath, filename, ".rds"))
+} else {
+	fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4),
+		iter_warmup = 1500, iter_sampling = 1000, max_treedepth = 10)
+
+	## Save results
+	fit$save_output_files(dir = savePath, basename = filename, random = FALSE)
+	saveRDS(fit, paste0(savePath, filename, ".rds"))
+}
+```
+
+### Graphics to check the run
+
+```{r}
+#| label: fig-pred-allom
+#| fig-cap: Predictions of above-ground volume in function of bole volume and the parametrised fitting curve
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 8.142857
+
+psi = function(x, pars)
+{
+	r = (pars["m"] - pars["c"]) * exp(pars["j"] - pars["k"]*x) * (pars["k"]*x/pars["j"])^pars["j"] +
+		pars["c"] - (pars["c"] - pars["n"])*exp(-pars["s"]*x)
+
+	return ( 1/pars["c"] * x^( 1 - (log(r) - log(pars["c"])) / log(x) ) )
+}
+
+
+paramsVec = getParams(model_cmdstan = fit, params_names = c("c", "j", "k", "m", "n", "s"), type = "mean")
+
+plot(stanData$bole_volume_m3, stanData$total_volume_m3, pch = 19, cex = 0.65, axes = FALSE,
+	col = tree_dt[sp, colour], xlab = "Bole volume", ylab = "Above-ground volume")
+curve(psi(x, paramsVec), lwd = 4, add = TRUE)
+abline(a = 0, b = 1, lty = "dashed")
+axis(1)
+axis(2, las = 1)
 ```
 
 ```{r}
+
 lazyTrace(fit$draws("c"), main = "c")
 lazyTrace(fit$draws("j"), main = "j")
 lazyTrace(fit$draws("k"), main = "k")
@@ -347,55 +577,62 @@ lazyTrace(fit$draws("m"), main = "m")
 lazyTrace(fit$draws("n"), main = "n")
 lazyTrace(fit$draws("s"), main = "s")
 
-library(bayesplot)
-
 params = getParams(model_cmdstan = fit, params_names = c("c", "j", "m", "k"), type = "all")
 div = posterior::subset_draws(fit$sampler_diagnostics(), variable = "divergent__")
 
-div_c = posterior::subset_draws(params[, , "c"], draw = which(div == 1))
-div_j = posterior::subset_draws(params[, , "j"], draw = which(div == 1))
-div_m = posterior::subset_draws(params[, , "m"], draw = which(div == 1))
-div_k = posterior::subset_draws(params[, , "k"], draw = which(div == 1))
+if (any(div != 0))
+{
+	div_c = posterior::subset_draws(params[, , "c"], draw = which(div == 1))
+	div_j = posterior::subset_draws(params[, , "j"], draw = which(div == 1))
+	div_m = posterior::subset_draws(params[, , "m"], draw = which(div == 1))
+	div_k = posterior::subset_draws(params[, , "k"], draw = which(div == 1))
 
-# Plot divergence for c and j
-plot(params[, , "c"], params[, , "j"], pch = 19, cex = 0.65, col = "#FAB255",
-	xlab = "c", ylab = "j", main = "c and j")
-points(div_c, div_j, pch = 18, col = "#0F7BA2")
+	# Plot divergence for c and j
+	plot(params[, , "c"], params[, , "j"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "c", ylab = "j", main = "c and j")
+	points(div_c, div_j, pch = 18, col = "#0F7BA2")
 
-# Plot divergence for c and k
-plot(params[, , "c"], params[, , "k"], pch = 19, cex = 0.65, col = "#FAB255",
-	xlab = "c", ylab = "k", main = "c and k")
-points(div_c, div_k, pch = 18, col = "#0F7BA2")
+	# Plot divergence for c and k
+	plot(params[, , "c"], params[, , "k"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "c", ylab = "k", main = "c and k")
+	points(div_c, div_k, pch = 18, col = "#0F7BA2")
 
-# Plot divergence for c and m
-plot(params[, , "c"], params[, , "m"], pch = 19, cex = 0.65, col = "#FAB255",
-	xlab = "c", ylab = "m", main = "c and m")
-points(div_c, div_m, pch = 18, col = "#0F7BA2")
+	# Plot divergence for c and m
+	plot(params[, , "c"], params[, , "m"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "c", ylab = "m", main = "c and m")
+	points(div_c, div_m, pch = 18, col = "#0F7BA2")
 
-# Plot divergence for j and k
-plot(params[, , "j"], params[, , "k"], pch = 19, cex = 0.65, col = "#FAB255",
-	xlab = "j", ylab = "k", main = "j and k")
-points(div_j, div_k, pch = 18, col = "#0F7BA2")
+	# Plot divergence for j and k
+	plot(params[, , "j"], params[, , "k"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "j", ylab = "k", main = "j and k")
+	points(div_j, div_k, pch = 18, col = "#0F7BA2")
 
-# Plot divergence for j and m
-plot(params[, , "j"], params[, , "m"], pch = 19, cex = 0.65, col = "#FAB255",
-	xlab = "j", ylab = "m", main = "j and m")
-points(div_j, div_m, pch = 18, col = "#0F7BA2")
+	# Plot divergence for j and m
+	plot(params[, , "j"], params[, , "m"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "j", ylab = "m", main = "j and m")
+	points(div_j, div_m, pch = 18, col = "#0F7BA2")
 
-# Plot divergence for k and m
-plot(params[, , "k"], params[, , "m"], pch = 19, cex = 0.65, col = "#FAB255",
-	xlab = "k", ylab = "m", main = "k and m")
-points(div_k, div_m, pch = 18, col = "#0F7BA2")
-
+	# Plot divergence for k and m
+	plot(params[, , "k"], params[, , "m"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "k", ylab = "m", main = "k and m")
+	points(div_k, div_m, pch = 18, col = "#0F7BA2")
+}
 ```
 
 ```{r}
-fit$cmdstan_diagnose()
+# if (any(div != 0))
+# 	fit$cmdstan_diagnose()
 ```
 
 ## Predictions ...
 ### ... in ratio
 ```{r}
+#| label: fig-pred-ratio
+#| fig-cap: Predictions of ratio with non-uniqueness
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 8.142857
+
 f = function(x, pars)
 {
 	# The vector of parameters, pars, is in this order:
@@ -407,18 +644,250 @@ f = function(x, pars)
 	# 6 -> s
 	return ((pars["m"] - pars["c"]) * exp(pars["j"] - pars["k"]*x) * (pars["k"]*x/pars["j"])^pars["j"] +
 		pars["c"] - (pars["c"] - pars["n"])*exp(-pars["s"]*x));
-	# return ((pars[4] - pars[1]) * exp(pars[2] - pars[3]*x) * (pars[3]*x/pars[2])^pars[2] +
-	# 	pars[1] - (pars[1] - pars[5])*exp(-pars[6]*x));
 }
 
 paramsVec = getParams(model_cmdstan = fit, params_names = c("c", "j", "k", "m", "n", "s"), type = "mean")
+paramsVec1 = getParams(model_cmdstan = fit, params_names = c("c", "j", "k", "m", "n", "s"),
+	type = "chain", chain = 1)
+paramsVec2 = getParams(model_cmdstan = fit, params_names = c("c", "j", "k", "m", "n", "s"),
+	type = "chain", chain = 2)
+paramsVec3 = getParams(model_cmdstan = fit, params_names = c("c", "j", "k", "m", "n", "s"),
+	type = "chain", chain = 3)
+paramsVec4 = getParams(model_cmdstan = fit, params_names = c("c", "j", "k", "m", "n", "s"),
+	type = "chain", chain = 4)
 
-plot(stanData$SB, stanData$SB/stanData$AGB, pch = 19, cex = 0.65, col = "#A291AF33",
-	xlab = "SB", ylab = "r", axes = FALSE)
+plot(stanData$bole_volume_m3, stanData$bole_volume_m3/stanData$total_volume_m3, pch = 19, cex = 0.65,
+	col = tree_dt[sp, colour], xlab = "Bole volume", ylab = "r", axes = FALSE)
 curve(f(x, paramsVec), lwd = 4, add = TRUE)
+curve(f(x, paramsVec_fr), lwd = 4, add = TRUE, col = ls_colours["fr_comp"])
+curve(f(x, paramsVec_ch), lwd = 4, add = TRUE, col = ls_colours["ch_comp"])
+curve(f(x, paramsVec1), lwd = 4, add = TRUE, col = met.brewer("Egypt")[1])
+curve(f(x, paramsVec2), lwd = 4, add = TRUE, col = met.brewer("Egypt")[2])
+curve(f(x, paramsVec3), lwd = 4, add = TRUE, col = met.brewer("Egypt")[3])
+curve(f(x, paramsVec4), lwd = 4, add = TRUE, col = met.brewer("Egypt")[4])
 abline(v = paramsVec["j"]/paramsVec["k"], lty = "dashed", lwd = 0.6)
 abline(h = paramsVec["m"] - (paramsVec["c"] - paramsVec["n"])*exp(-paramsVec["s"]*paramsVec["j"]/paramsVec["k"]),
 	lty = "dashed")
+legend("bottomright", legend = paste("Chain", 1:4), fill = met.brewer("Egypt"))
+axis(1)
+axis(2, las = 1)
+
+# curve(f(x, paramsVec), lwd = 4, to = 8)
+# abline(v = paramsVec["j"]/paramsVec["k"], lty = "dashed")
+# abline(h = paramsVec["m"] - (paramsVec["c"] - paramsVec["n"])*exp(-paramsVec["s"]*paramsVec["j"]/paramsVec["k"]),
+# 	lty = "dashed")
+
+# (paramsVec["c"] - paramsVec["n"])*exp(-paramsVec["s"]*paramsVec["j"]/paramsVec["k"])
+
+# paramsVec["s"] - 3*paramsVec["k"]/paramsVec["j"]
+
+# lazyPosterior(fit$draws("c"), fun = dbeta, shape1 = 8, shape2 = 1)
+
+## Save results
+params_dt = as.data.table(x = paramsVec, keep.rownames = "parameter")
+params_dt = merge.data.table(params_dt, as.data.table(x = paramsVec1, keep.rownames = "parameter"),
+	by = "parameter")
+params_dt = merge.data.table(params_dt, as.data.table(x = paramsVec2, keep.rownames = "parameter"),
+	by = "parameter")
+params_dt = merge.data.table(params_dt, as.data.table(x = paramsVec3, keep.rownames = "parameter"),
+	by = "parameter")
+params_dt = merge.data.table(params_dt, as.data.table(x = paramsVec4, keep.rownames = "parameter"),
+	by = "parameter")
+
+setnames(params_dt, old = paste0("paramsVec", c("", 1:4)), new = c("avg", paste0("chain", 1:4)))
+fwrite(params_dt, "~/work/writing/article_allometry/data/params_Larix-decidua_yang2024.csv")
+
+fwrite(data.table(bole_volume_m3 = stanData$SB, ratio = stanData$SB/stanData$AGB),
+	"~/work/writing/article_allometry/data/larix-decidua_data.csv")
+```
+
+### ... in volume
+
+```{r}
+#| label: fig-pred-volume
+#| fig-cap: Predictions in volume
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 8.142857
+
+vol_pred = apply(X = fit$draws("v_gen_mean"), MARGIN = 3, FUN = mean)
+
+plot(vol_pred, stanData$AGB, pch = 19, cex = 0.65, axes = FALSE,
+	xlab = "Above-ground volume (predicted)", ylab = "Above-ground volume (observed)")
+abline(a = 0, b = 1, lwd = 3, col = "#CD212A")
+axis(1)
+axis(2, las = 1)
+```
+
+```{r}
+#| label: fig-pred-volume-chains
+#| fig-cap: Predictions in volume, per chain
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 8.142857
+
+vol_pred1 = apply(X = fit$draws("v_gen_mean")[, 1, ], MARGIN = 3, FUN = mean)
+vol_pred2 = apply(X = fit$draws("v_gen_mean")[, 2, ], MARGIN = 3, FUN = mean)
+vol_pred3 = apply(X = fit$draws("v_gen_mean")[, 3, ], MARGIN = 3, FUN = mean)
+vol_pred4 = apply(X = fit$draws("v_gen_mean")[, 4, ], MARGIN = 3, FUN = mean)
+
+plot(vol_pred1, stanData$AGB, pch = 19, axes = FALSE, col = met.brewer("Egypt")[1],
+	xlab = "Above-ground volume (predicted)", ylab = "Above-ground volume (observed)")
+points(vol_pred2, stanData$AGB, pch = 19, cex = 0.65, col = met.brewer("Egypt")[2])
+points(vol_pred3, stanData$AGB, pch = 19, cex = 0.45, col = met.brewer("Egypt")[3])
+points(vol_pred4, stanData$AGB, pch = 19, cex = 0.25, col = met.brewer("Egypt")[4])
+abline(a = 0, b = 1, lwd = 3)
+legend("bottomright", legend = paste("Chain", 1:4), fill = met.brewer("Egypt"))
+axis(1)
+axis(2, las = 1)
+```
+
+
+
+
+## Simplified run brute force!
+
+```{r}
+# tree_dt[, any(is.na(bole_volume_m3))]
+# tree_dt[is.na(bole_volume_m3), 100*circumference_m]
+## Compile model
+model = cmdstan_model("./yang2024_simplified.stan")
+
+## Prepare data
+tree_dt = tree_dt[!is.na(bole_volume_m3)]
+
+stanData = list(
+	N = tree_dt["Fagus sylvatica"][origin == "inra", .N],
+	SB = tree_dt["Fagus sylvatica"][origin == "inra", bole_volume_m3],
+	AGB = tree_dt["Fagus sylvatica"][origin == "inra", total_volume_m3]
+)
+
+## Common variables
+n_chains = 4
+
+savePath = "./yang/"
+if (!dir.exists(savePath))
+	dir.create(savePath)
+
+filename = "inra-Fagsyl_simplified"
+
+## Run model
+if (file.exists(paste0(savePath, filename, ".rds")))
+{
+	fit = readRDS(paste0(savePath, filename, ".rds"))
+} else {
+	fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4),
+		iter_warmup = 1500, iter_sampling = 500, max_treedepth = 10)
+
+	## Save results
+	fit$save_output_files(dir = savePath, basename = filename, random = FALSE)
+	saveRDS(fit, paste0(savePath, filename, ".rds"))
+}
+```
+
+```{r}
+#| label: fig-pred-allom-simplif
+#| fig-cap: Predictions of above-ground volume in function of bole volume and the parametrised fitting curve
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 8.142857
+
+psi = function(x, pars)
+{
+	r = (pars["m"] - pars["c"]) * exp(1 - pars["k"]*x) * pars["k"]*x + pars["c"]
+
+	return ( 1/pars["c"] * x^( 1 - (log(r) - log(pars["c"])) / log(x) ) )
+}
+
+paramsVec = getParams(model_cmdstan = fit, params_names = c("c", "k", "m"), type = "mean")
+
+# ff = function(x)
+# 	return (10.24*exp(-3.74*x))
+
+# curve(ff, from = 0, to = 5)
+
+plot(stanData$SB, stanData$AGB, pch = 19, cex = 0.65, col = "#A291AF33",
+	xlab = "Bole volume", ylab = "Above-ground volume", axes = FALSE)
+curve(psi(x, paramsVec), lwd = 4, add = TRUE)
+abline(a = 0, b = 1, lty = "dashed")
+axis(1)
+axis(2, las = 1)
+```
+
+```{r}
+lazyTrace(fit$draws("c"), main = "c")
+lazyTrace(fit$draws("k"), main = "k")
+lazyTrace(fit$draws("m"), main = "m")
+
+lazyPosterior(fit$draws("phi0"), fun = dgamma, shape = 3, rate = 0.1)
+lazyPosterior(fit$draws("phi1"), fun = dnorm, mean = 3, sd = 1)
+
+params = getParams(model_cmdstan = fit, params_names = c("c", "m", "k"), type = "all")
+div = posterior::subset_draws(fit$sampler_diagnostics(), variable = "divergent__")
+
+if (any(div != 0))
+{
+	div_c = posterior::subset_draws(params[, , "c"], draw = which(div == 1))
+	div_m = posterior::subset_draws(params[, , "m"], draw = which(div == 1))
+	div_k = posterior::subset_draws(params[, , "k"], draw = which(div == 1))
+
+	# Plot divergence for c and k
+	plot(params[, , "c"], params[, , "k"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "c", ylab = "k", main = "c and k")
+	points(div_c, div_k, pch = 18, col = "#0F7BA2")
+
+	# Plot divergence for c and m
+	plot(params[, , "c"], params[, , "m"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "c", ylab = "m", main = "c and m")
+	points(div_c, div_m, pch = 18, col = "#0F7BA2")
+
+	# Plot divergence for k and m
+	plot(params[, , "k"], params[, , "m"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "k", ylab = "m", main = "k and m")
+	points(div_k, div_m, pch = 18, col = "#0F7BA2")
+}
+```
+
+```{r}
+if (any(div != 0))
+	fit$cmdstan_diagnose()
+```
+
+## Predictions ...
+### ... in ratio
+```{r}
+#| label: fig-pred-ratio-simplif
+#| fig-cap: Predictions of ratio, simplified model
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 8.142857
+
+f = function(x, pars)
+{
+	# The vector of parameters, pars, is in this order:
+	# 1 -> c,
+	# 2 -> k,
+	# 3 -> m,
+	return ((pars["m"] - pars["c"]) * exp(1 - pars["k"]*x) * (pars["k"]*x) + pars["c"]);
+}
+
+paramsVec = getParams(model_cmdstan = fit, params_names = c("c", "k", "m"), type = "mean")
+paramsVec1 = getParams(model_cmdstan = fit, params_names = c("c", "k", "m"), type = "chain", chain = 1)
+paramsVec2 = getParams(model_cmdstan = fit, params_names = c("c", "k", "m"), type = "chain", chain = 2)
+paramsVec3 = getParams(model_cmdstan = fit, params_names = c("c", "k", "m"), type = "chain", chain = 3)
+paramsVec4 = getParams(model_cmdstan = fit, params_names = c("c", "k", "m"), type = "chain", chain = 4)
+
+plot(stanData$SB, stanData$SB/stanData$AGB, pch = 19, cex = 0.65, col = "#A291AF33",
+	xlab = "Bole volume", ylab = "r", axes = FALSE)
+curve(f(x, paramsVec), lwd = 4, add = TRUE)
+curve(f(x, paramsVec1), lwd = 4, add = TRUE, col = met.brewer("Egypt")[1])
+curve(f(x, paramsVec2), lwd = 4, add = TRUE, col = met.brewer("Egypt")[2])
+curve(f(x, paramsVec3), lwd = 4, add = TRUE, col = met.brewer("Egypt")[3])
+curve(f(x, paramsVec4), lwd = 4, add = TRUE, col = met.brewer("Egypt")[4])
+abline(v = paramsVec["j"]/paramsVec["k"], lty = "dashed", lwd = 0.6)
+abline(h = paramsVec["m"] - (paramsVec["c"] - paramsVec["n"])*exp(-paramsVec["s"]*paramsVec["j"]/paramsVec["k"]),
+	lty = "dashed")
+legend("bottomright", legend = paste("Chain", 1:4), fill = met.brewer("Egypt"))
 axis(1)
 axis(2, las = 1)
 
@@ -437,11 +906,40 @@ axis(2, las = 1)
 ### ... in volume
 
 ```{r}
+#| label: fig-pred-volume-simplif
+#| fig-cap: Predictions in volume
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 8.142857
+
 vol_pred = apply(X = fit$draws("v_gen_mean"), MARGIN = 3, FUN = mean)
 
 plot(vol_pred, stanData$AGB, pch = 19, cex = 0.65, axes = FALSE,
 	xlab = "Above-ground volume (predicted)", ylab = "Above-ground volume (observed)")
 abline(a = 0, b = 1, lwd = 3, col = "#CD212A")
+axis(1)
+axis(2, las = 1)
+```
+
+```{r}
+#| label: fig-pred-volume-chains-simplif
+#| fig-cap: Predictions in volume, per chain
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 8.142857
+
+vol_pred1 = apply(X = fit$draws("v_gen_mean")[, 1, ], MARGIN = 3, FUN = mean)
+vol_pred2 = apply(X = fit$draws("v_gen_mean")[, 2, ], MARGIN = 3, FUN = mean)
+vol_pred3 = apply(X = fit$draws("v_gen_mean")[, 3, ], MARGIN = 3, FUN = mean)
+vol_pred4 = apply(X = fit$draws("v_gen_mean")[, 4, ], MARGIN = 3, FUN = mean)
+
+plot(vol_pred1, stanData$AGB, pch = 19, axes = FALSE, col = met.brewer("Egypt")[1],
+	xlab = "Above-ground volume (predicted)", ylab = "Above-ground volume (observed)")
+points(vol_pred2, stanData$AGB, pch = 19, cex = 0.65, col = met.brewer("Egypt")[2])
+points(vol_pred3, stanData$AGB, pch = 19, cex = 0.45, col = met.brewer("Egypt")[3])
+points(vol_pred4, stanData$AGB, pch = 19, cex = 0.25, col = met.brewer("Egypt")[4])
+abline(a = 0, b = 1, lwd = 3)
+legend("bottomright", legend = paste("Chain", 1:4), fill = met.brewer("Egypt"))
 axis(1)
 axis(2, las = 1)
 ```
