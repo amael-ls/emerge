@@ -159,7 +159,7 @@ plot_sp = function(fit, sp, forest = tree_dt[.(sp)], pred = TRUE, simplif = FALS
 	div = posterior::subset_draws(fit$sampler_diagnostics(), variable = "divergent__")
 
 	if (!print_plot)
-		return (list(any_div = any(div != 0), div, rhats = rhats))
+		return (list(any_div = any(div != 0), loc = div, rhats = rhats))
 
 	# Plot figure r vs bole and fitted curve
 	plot(forest[, bole_volume_m3], forest[, r], pch = 19, col = forest[, colour], axes = FALSE,
@@ -276,51 +276,53 @@ plot_sp = function(fit, sp, forest = tree_dt[.(sp)], pred = TRUE, simplif = FALS
 		axis(2, las = 1)
 	}
 
-	return (list(any_div = any(div != 0), div, rhats = rhats))
+	return (list(any_div = any(div != 0), loc = div, rhats = rhats))
 }
 
-plot_divergences = function(fit, div)
+plot_divergences = function(fit, div, simplif = FALSE)
 {
-	# params = getParams(model_cmdstan = fit, params_names = c("c", "j", "m", "k"), type = "all")
-# div = posterior::subset_draws(fit$sampler_diagnostics(), variable = "divergent__")
+	params = getParams(model_cmdstan = fit, params_names = c("c", "j", "k", "m", "n", "s"), type = "all")
 
-# if (any(div != 0))
-# {
-# 	div_c = posterior::subset_draws(params[, , "c"], draw = which(div == 1))
-# 	div_j = posterior::subset_draws(params[, , "j"], draw = which(div == 1))
-# 	div_m = posterior::subset_draws(params[, , "m"], draw = which(div == 1))
-# 	div_k = posterior::subset_draws(params[, , "k"], draw = which(div == 1))
+	div_c = posterior::subset_draws(params[, , "c"], draw = which(div == 1))
+	div_j = posterior::subset_draws(params[, , "j"], draw = which(div == 1))
+	div_m = posterior::subset_draws(params[, , "m"], draw = which(div == 1))
+	div_k = posterior::subset_draws(params[, , "k"], draw = which(div == 1))
+	div_s = posterior::subset_draws(params[, , "s"], draw = which(div == 1))
 
-# 	# Plot divergence for c and j
-# 	plot(params[, , "c"], params[, , "j"], pch = 19, cex = 0.65, col = "#FAB255",
-# 		xlab = "c", ylab = "j", main = "c and j")
-# 	points(div_c, div_j, pch = 18, col = "#0F7BA2")
+	# Plot divergence for c and j
+	plot(params[, , "c"], params[, , "j"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "c", ylab = "j", main = "c and j")
+	points(div_c, div_j, pch = 18, col = "#0F7BA2")
 
-# 	# Plot divergence for c and k
-# 	plot(params[, , "c"], params[, , "k"], pch = 19, cex = 0.65, col = "#FAB255",
-# 		xlab = "c", ylab = "k", main = "c and k")
-# 	points(div_c, div_k, pch = 18, col = "#0F7BA2")
+	# Plot divergence for c and k
+	plot(params[, , "c"], params[, , "k"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "c", ylab = "k", main = "c and k")
+	points(div_c, div_k, pch = 18, col = "#0F7BA2")
 
-# 	# Plot divergence for c and m
-# 	plot(params[, , "c"], params[, , "m"], pch = 19, cex = 0.65, col = "#FAB255",
-# 		xlab = "c", ylab = "m", main = "c and m")
-# 	points(div_c, div_m, pch = 18, col = "#0F7BA2")
+	# Plot divergence for c and m
+	plot(params[, , "c"], params[, , "m"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "c", ylab = "m", main = "c and m")
+	points(div_c, div_m, pch = 18, col = "#0F7BA2")
 
-# 	# Plot divergence for j and k
-# 	plot(params[, , "j"], params[, , "k"], pch = 19, cex = 0.65, col = "#FAB255",
-# 		xlab = "j", ylab = "k", main = "j and k")
-# 	points(div_j, div_k, pch = 18, col = "#0F7BA2")
+	# Plot divergence for j and k
+	plot(params[, , "j"], params[, , "k"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "j", ylab = "k", main = "j and k")
+	points(div_j, div_k, pch = 18, col = "#0F7BA2")
 
-# 	# Plot divergence for j and m
-# 	plot(params[, , "j"], params[, , "m"], pch = 19, cex = 0.65, col = "#FAB255",
-# 		xlab = "j", ylab = "m", main = "j and m")
-# 	points(div_j, div_m, pch = 18, col = "#0F7BA2")
+	# Plot divergence for j and m
+	plot(params[, , "j"], params[, , "m"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "j", ylab = "m", main = "j and m")
+	points(div_j, div_m, pch = 18, col = "#0F7BA2")
 
-# 	# Plot divergence for k and m
-# 	plot(params[, , "k"], params[, , "m"], pch = 19, cex = 0.65, col = "#FAB255",
-# 		xlab = "k", ylab = "m", main = "k and m")
-# 	points(div_k, div_m, pch = 18, col = "#0F7BA2")
-# }
+	# Plot divergence for k and m
+	plot(params[, , "k"], params[, , "m"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "k", ylab = "m", main = "k and m")
+	points(div_k, div_m, pch = 18, col = "#0F7BA2")
+	
+	# Bonus plots of susceptible correlated parameters: k and s
+	plot(params[, , "k"], params[, , "s"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "k", ylab = "s", main = "k and s")
+	points(div_k, div_s, pch = 18, col = "#0F7BA2")
 }
 ```
 
@@ -691,6 +693,15 @@ for (sp in ls_species)
 I found there are divergences for *Pinus laricio*. This is a warning to remove this species! Here are a bit more investigations
 
 ```{r}
+## Load Pinus laricio results
+sp = "Pinus laricio"
+filename = stri_replace(str = sp, regex = " ", replacement = "-")
+fit = readRDS(paste0(savePath, filename, ".rds"))
+
+div = plot_sp(fit, sp, simplif = FALSE, n_bins = 4, pal = "Hiroshige", selected_variable = "height",
+	print_plot = FALSE)
+
+plot_divergences(fit, div[["loc"]], simplif = FALSE)
 
 ```
 
