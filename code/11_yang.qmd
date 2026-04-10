@@ -92,12 +92,10 @@ library(loo)
 ## Tool function
 source("./toolFunctions.R")
 
-plot_sp = function(fit, sp, count, stanData, fun, args, forest = forest_dt[.(sp)], pred = FALSE,
-	n_subsample = 10, folder = NULL, add = TRUE, n_bins = 12, pal = "Hiroshige", selected_variable = NULL)
+plot_sp = function(fit, sp, count, fun, args, forest = tree_dt[.(sp)], pred = FALSE, simplif = FALSE,
+	n_subsample = 10, add = TRUE, n_bins = 12, pal = "Hiroshige", selected_variable = NULL)
 {
 	# Get parameters
-	start = stanData[["start"]][count]
-	end = stanData[["end"]][count]
 	n_sampling = fit$metadata()$iter_sampling
 	n_chains = fit$num_chains()
 
@@ -120,67 +118,73 @@ plot_sp = function(fit, sp, count, stanData, fun, args, forest = forest_dt[.(sp)
 		forest[, colour := "#3355AA33"] # Default colour
 	}
 
-	# Plot figure
-	if (!is.null(folder))
-		png(paste0("./", folder, "/", sp, ".png"))
+	# Define fitted functions (depends if simplified model 2 stages vs 3 stages)
+	if (!simplif)
+	{
+		paramsVec = getParams(model_cmdstan = fit, params_names = c("c", "j", "k", "m", "n", "s"), type = "mean")
+	} else {
+		paramsVec_simplif = getParams(model_cmdstan = fit,
+			params_names = c("alpha", "beta", "beta", "gamma", "delta"), type = "mean")
+		paramsVec = c(
+			c = paramsVec_simplif["alpha"],
+			j = 1,
+			k = paramsVec_simplif["beta"],
+			m = exp(-1)*paramsVec_simplif["gamma"]/paramsVec_simplif["beta"] + paramsVec_simplif["alpha"],
+			n = paramsVec_simplif["delta"] + paramsVec_simplif["alpha"],
+			s = paramsVec_simplif["beta"]
+		)
+	}
+
+	r_func = function(x, pars)
+	{
+		return ((pars["m"] - pars["c"]) * exp(pars["j"] - pars["k"]*x) * (pars["k"]*x/pars["j"])^pars["j"] +
+			pars["c"] - (pars["c"] - pars["n"])*exp(-pars["s"]*x));
+	}
 	
-	plot(forest[, bole_volume_m3], forest[, total_ratio], pch = 19, col = forest[, colour], axes = FALSE,
+	psi = function(x, pars)
+	{
+		r = r_func(x, pars)
+
+		return ( 1/pars["c"] * x^( 1 - (log(r) - log(pars["c"])) / log(x) ) )
+	}
+
+	# Plot figure
+
+	plot(forest[, bole_volume_m3], forest[, r], pch = 19, col = forest[, colour], axes = FALSE,
 		xlab = "Bole volume", ylab = "Ratio bole/tot volumes", lwd = 0, cex = 0.75,
 		main = ifelse(is.null(selected_variable), "", selected_variable))
 	if (!is.null(selected_variable))
-		legend("topright", legend = levels(forest[, cut(.SD[[selected_variable]], breaks = n_bins)]),
-			fill = colours, title = paste(selected_variable, "classes"))
+		legend("topright", fill = colours, title = paste(selected_variable, "classes"),
+			legend = levels(forest[, cut(.SD[[selected_variable]], breaks = n_bins, dig.lab = 1)]))
+	curve(r_func(x, paramsVec), add = TRUE, lwd = 3)
 	axis(1)
 	axis(2, las = 1)
-
-	# fwrite(forest[, .(bole_volume_m3, total_ratio)],
-	# 	"../../../subventions/2025-ademe_graine/niko_doc/data/ratio.csv") # pgfplots Niko
 
 	# Plot prediction
 	if (pred)
 	{
-		sim = fit$draws("r_gen")[sample(x = 1:n_sampling, size = n_subsample, replace = FALSE), , start:end]
-		for (i in 1:forest[, .N])
-			points(rep(forest[i, bole_volume_m3], n_chains*n_subsample),
-				as.numeric(sim[, , i]), col = "#335577AA", pch = ".")
+		sim = apply(X = fit$draws("v_gen_mean"), MARGIN = 3, FUN = mean)
+		plot(sim, forest[, total_volume_m3], pch = 19, col = forest[, colour], axes = FALSE,
+			xlab = "Predicted total volume", ylab = "Observed total volume")
+		if (!is.null(selected_variable))
+			legend("topright", fill = colours, title = paste(selected_variable, "classes"),
+				legend = levels(forest[, cut(.SD[[selected_variable]], breaks = n_bins, dig.lab = 1)]))
+		abline(a = 0, b = 1, lty = "dashed", lwd = 1.5, col = "#2E2E2E")
+		axis(1)
+		axis(2, las = 1)
+		
+		plot(forest[, bole_volume_m3], forest[, total_volume_m3], pch = 19, col = forest[, colour],
+			axes = FALSE, xlab = "Observed bole volume", ylab = "Observed total volume")
+		if (!is.null(selected_variable))
+			legend("topright", fill = colours, title = paste(selected_variable, "classes"),
+				legend = levels(forest[, cut(.SD[[selected_variable]], breaks = n_bins, dig.lab = 1)]))
+		abline(a = 0, b = 1, lty = "dashed", lwd = 0.85, col = "#2E2E2E")
+		curve(psi(x, paramsVec), add = TRUE, lwd = 3)
+		axis(1)
+		axis(2, las = 1)
 	}
 
-	# Plot fitted curve
-	if (length(args) == 2 && all(c("k", "lambda") == args))
-	{
-		selected_params = c(paste0("k[", count, "]"), paste0("lambda[", count, "]"))
-		params = apply(X = fit$draws(args)[, , selected_params], MARGIN = 3, FUN = mean)
 
-		curve(fun(x, params[1], params[2]), col = "#CD212A", lwd = 2, add = add, n = 501)
-	}
-	
-	if (length(args) == 3 && all(c("beta_", "gamma", "b") == args))
-	{
-		selected_params = c(paste0("beta_[", count, "]"),
-			paste0("gamma[", count, "]"), paste0("b[", count, "]"))
-		params = apply(X = fit$draws(args)[, , selected_params], MARGIN = 3, FUN = mean)
-
-		curve(fun(x, 1, params[1], params[2], params[3]), col = "#CD212A", lwd = 2, n = 501, add = add)
-	}
-
-	if (length(args) == 3 && all(c("m", "k", "d") == args))
-	{
-		selected_params = c(paste0("m[", count, "]"), paste0("k[", count, "]"), paste0("d[", count, "]"))
-		params = apply(X = fit$draws(args)[, , selected_params], MARGIN = 3, FUN = mean)
-
-		curve(fun(x, params[1], params[2], params[3]), col = "#CD212A", lwd = 2, n = 501, add = add)
-	}
-
-	if (length(args) == 4 && all(c("alpha", "beta_", "gamma", "b") == args))
-	{
-		selected_params = c(paste0("alpha[", count, "]"), paste0("beta_[", count, "]"),
-			paste0("gamma[", count, "]"), paste0("b[", count, "]"))
-		params = apply(X = fit$draws(args)[, , selected_params], MARGIN = 3, FUN = mean)
-
-		curve(fun(x, params[1], params[2], params[3], params[4]), col = "#CD212A", lwd = 2, add = add, n = 501)
-	}
-	if (!is.null(folder))
-		dev.off()
 }
 ```
 
