@@ -183,13 +183,13 @@ plot_sp = function(fit, sp, forest = tree_dt[.(sp)], pred = TRUE, simplif = FALS
 		axis(2, las = 1)
 	}
 
-
 	# Plot chains if any rhat problem
 	pars_names = names(paramsVec)
 	if (simplif)
 		pars_names = c("alpha", "beta", "gamma", "delta")
 	rhats = rhat(object = fit, pars = pars_names)
-	any(rhats > 1.05)
+
+	if (any(rhats > 1.05))
 	{
 		if (!simplif)
 		{
@@ -210,7 +210,7 @@ plot_sp = function(fit, sp, forest = tree_dt[.(sp)], pred = TRUE, simplif = FALS
 	# Divergence check up
 	params = getParams(model_cmdstan = fit, params_names = pars_names, type = "all")
 	div = posterior::subset_draws(fit$sampler_diagnostics(), variable = "divergent__")
-	return (list(any_div = any(div != 0), div))
+	return (list(any_div = any(div != 0), div, rhats = rhats))
 }
 ```
 
@@ -536,17 +536,6 @@ for (sp in ls_species)
 ## Compile model
 model = cmdstan_model("./yang2024.stan")
 
-## Prepare data
-# Choose species
-sp = "Fagus sylvatica"
-
-# Subset to targeted species for stanData
-stanData = list(
-	N = tree_dt[.(sp)][, .N],
-	bole_volume_m3 = tree_dt[.(sp)][, bole_volume_m3],
-	total_volume_m3 = tree_dt[.(sp)][, total_volume_m3]
-)
-
 ## Common variables
 n_chains = 4
 
@@ -554,22 +543,35 @@ savePath = "./yang/"
 if (!dir.exists(savePath))
 	dir.create(savePath)
 
-filename = stri_replace(str = sp, regex = " ", replacement = "-")
-
 ## Run model
-if (file.exists(paste0(savePath, filename, ".rds")))
+for (sp in ls_species)
 {
-	fit = readRDS(paste0(savePath, filename, ".rds"))
-} else {
-	fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4),
-		iter_warmup = 1500, iter_sampling = 1000, max_treedepth = 10)
+	print(paste("Running", sp))
+	
+	# Subset to targeted species for stanData
+	stanData = list(
+		N = tree_dt[.(sp)][, .N],
+		bole_volume_m3 = tree_dt[.(sp)][, bole_volume_m3],
+		total_volume_m3 = tree_dt[.(sp)][, total_volume_m3]
+	)
 
-	## Save results
-	fit$save_output_files(dir = savePath, basename = filename, random = FALSE)
-	saveRDS(fit, paste0(savePath, filename, ".rds"))
+	filename = stri_replace(str = sp, regex = " ", replacement = "-")
+
+	## Run model
+	if (file.exists(paste0(savePath, filename, ".rds")))
+	{
+		fit = readRDS(paste0(savePath, filename, ".rds"))
+	} else {
+		fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4),
+			iter_warmup = 1500, iter_sampling = 1000, max_treedepth = 10)
+
+		## Save results
+		fit$save_output_files(dir = savePath, basename = filename, random = FALSE)
+		saveRDS(fit, paste0(savePath, filename, ".rds"))
+	}
+
+	# plot_sp(fit, sp, simplif = FALSE, n_bins = 4, pal = "Hiroshige", selected_variable = "height")
 }
-
-plot_sp(fit, sp, simplif = FALSE, n_bins = 4, pal = "Hiroshige", selected_variable = "height")
 ```
 
 ### Graphics to check the run
