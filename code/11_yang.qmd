@@ -1,5 +1,5 @@
 ---
-title: "Simple tests of bole volume models"
+title: "Run the ratio models (complete and submodel)"
 date: today
 author: Amaël Le Squin
 date-format: iso
@@ -84,8 +84,10 @@ library(MetBrewer)
 library(bayesplot)
 library(cmdstanr)
 	register_knitr_engine(override = TRUE)
+library(stringi)
 library(inventR)
 library(interp)
+library(terra)
 library(shape)
 library(loo)
 
@@ -357,8 +359,8 @@ setkey(inra, speciesName_sci)
 
 # Loading Swiss data
 swiss = readRDS(paste0(mnt_point, "data/switzerland.rds"))
-swiss = swiss[, .(speciesName_sci, tree_id, plot_id, fct_type, year, circumference_m, height, taper_height = hdecro,
-	bole_volume_m3, total_volume_m3)]
+swiss = unique(swiss[, .(speciesName_sci, tree_id, plot_id, fct_type, year, circumference_m, height,
+	taper_height = hdec, bole_volume_m3, total_volume_m3)])
 setkey(swiss, speciesName_sci)
 
 ## Modern Emerge data
@@ -544,7 +546,7 @@ legend(x = "topright", fill = met.brewer("Homer1")[c(1:5, 8, 7, 6)],
 ## Check the overlap of the ratio data
 The Swiss data have an abnormal number of ratio values near one... It happens on very concentrated years and plots, which makes me think 
 ```{r}
-library(terra)
+#### Clean Swiss data
 swiss_coords = vect(paste0(mnt_point, "data/coords_switzerland"))
 
 tree_dt[, r := bole_volume_m3/total_volume_m3]
@@ -610,36 +612,28 @@ plot(tree_dt[((plot_id %in% ls_pb_10p$plot_id) & (year %in% ls_pb_10p$year) & (r
 	tree_dt[((plot_id %in% ls_pb_10p$plot_id) & (year %in% ls_pb_10p$year))][, .N]
 ```
 
-## Removing some trees from the Swiss data
+## Checking overlap of ratios from French and Swiss data
 
-As demonstrated in the previous section, the overlap is not that good for some very particular plots where many trees have a ratio greater than 0.98! I decided to remove trees with a ratio $r > 0.98$ and belonging to plots with more than 10% of such trees.
-
-```{r}
-tree_dt_copy = copy(tree_dt)
-tree_dt = tree_dt[!((plot_id %in% ls_pb_10p$plot_id) & (year %in% ls_pb_10p$year) & (r > 0.98))]
-# tree_dt[plot_id == "01015004"]
-```
-
-I also decided to remove comletely *Fagus sylvatica* as we have many in France and the two populations do not overlap well nor does it extend the data range (contrary to *Larix decidua* for instance).
+The overlap is quite good although few discrepancies for *Abies alba*
 
 ```{r}
-tree_dt = tree_dt[!((speciesName_sci == "Fagus sylvatica") & (origin == "swiss"))]
-```
-
-```{r}
+#### Plot data before and after cleaning
 ls_species = tree_dt[, unique(speciesName_sci)]
 for (sp in ls_species)
 {
-	plot(tree_dt_copy[sp, bole_volume_m3], tree_dt_copy[sp, bole_volume_m3/total_volume_m3],
-		col = tree_dt_copy[sp, colour], xlab = "Bole volume", ylab = "r", axes = FALSE, pch = 19,
+	plot(tree_dt[sp, bole_volume_m3], tree_dt[sp, bole_volume_m3/total_volume_m3],
+		col = tree_dt[sp, colour], xlab = "Bole volume", ylab = "r", axes = FALSE, pch = 19,
 		cex = 0.85, main = sp)
 	axis(1)
 	axis(2, las = 1)
-	plot(tree_dt[sp, bole_volume_m3], tree_dt[sp, bole_volume_m3/total_volume_m3], col = tree_dt[sp, colour],
-		xlab = "Bole volume", ylab = "r", axes = FALSE, pch = 19, cex = 0.85, main = sp)
-	axis(1)
-	axis(2, las = 1)
 }
+```
+
+## Composition of the data
+
+```{r}
+tree_dt[origin == "swiss", .N] # 15931
+tree_dt[origin != "swiss", .N] # 11962, Emerge modern or inra (Oudin, alias old emerge kept by INRAE)
 ```
 
 ## First run brute force!
@@ -683,7 +677,7 @@ for (sp in ls_species)
 	}
 
 	div = plot_sp(fit, sp, simplif = FALSE, n_bins = 4, pal = "Hiroshige", selected_variable = "height",
-		print_plot = FALSE)
+		print_plot = TRUE)
 
 	if (div[["any_div"]])
 		warning(paste("Divergences for", sp))
