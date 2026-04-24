@@ -270,9 +270,13 @@ n_indiv = n_indiv[, .N, by = .(sp_code, speciesName_sci)][order(-N)]
 n_indiv[, sum(N)] # 16250 individuals
 ```
 
-## Compute bole volumes
+## Compute bole volumes and estimate taper break height (hdec)
 
-As said in the introduction, bole volumes are not provided. I estimate them using the package `TapeS`, verion 0.14.1. The documentation can be found [here](https://cran.r-project.org/web/packages/TapeS/refman/TapeS.html), and I used the [vignette](https://cran.r-project.org/web/packages/TapeS/vignettes/tapes.html) as a guide; for instance it seems that the diameters must be in cm, and heights in m, although it is speciefied nowhere in the documentation. The package is based on @Kublin2013.
+As said in the introduction, bole volumes are not provided. I estimate them using the package `TapeS`, verion 0.14.1. The documentation can be found [here](https://cran.r-project.org/web/packages/TapeS/refman/TapeS.html), and I used the [vignette](https://cran.r-project.org/web/packages/TapeS/vignettes/tapes.html) as a guide; for instance it seems that the diameters must be in cm, and heights in m, although it is speciefied nowhere in the documentation. The package is based on @Kublin2013 and @Vonderach2018.
+
+The taper break height, hdec (for "hauteur de découpe", French NFI wording, or "hauteur de décrochement", Emerge wording) corresponds to the height at which a sharp decrease (at least 10%) in diameter occurs. This measurement seems to be specific to the French NFI and does not exist in the Oudin's protocol [@Oudin1930], nor does it exist in the EFM [@Didion2024].
+
+I do not need hdec so far, but a joint model (multivariate distribution or copula, see @Nelsen2006) would require hdec as the bole volume formula requires it!
 
 ```{r}
 #### Compute bole volume using TapeS package (https://link.springer.com/article/10.1007/s10342-013-0715-0)
@@ -321,8 +325,13 @@ setkey(ls_tapes, scientific)
 setkey(n_indiv, speciesName_sci)
 
 ## Fit taper model to estimate tree profile and compute bole volumes (threshold diameter = 7 cm)
-bole_volume_dt = unique(swiss_dt[, .(sp_code, tree_id)])
+bole_volume_dt = unique(swiss_dt[, .(sp_code, tree_id, height)])
+
+bole_volume_dt[, eval_h := .(list(seq(2, max(height), 1))), by = tree_id]
+
 bole_volume_dt[, bole_volume_m3 := -Inf]
+bole_volume_dt[, pred_diam_m := as.list(NULL)]
+
 setkey(bole_volume_dt, sp_code, tree_id)
 
 swiss_dt[D_top == 0, length(unique(tree_id))] # 416 concerned individuals
@@ -342,8 +351,23 @@ for (sp in n_indiv[, speciesName_sci])
 		Dm = temp[, .(diameter = list(100*diameter)), by = tree_id][, diameter], #! Diameter in cm
 		Ht = temp[, .(height = unique(height)), by = tree_id][, height])
 
+	# Compute bole volume based on taper functions
 	bv = tprVolume(obj, AB = list(A = 0, B = 7), iAB = c("h", "dob"), bark = TRUE)
 	bole_volume_dt[.(n_indiv[sp, sp_code]), bole_volume_m3 := bv]
+
+	# Predict diameters every metre (matrix filled with 0 when beyond tree height) and convert into metres
+	pred_diam_mat = tprDiameter(obj = obj, Hx = seq(2, max(Ht(obj)), by = 1), bark = TRUE,
+		interval = "none", cp = TRUE, mono = TRUE, Rfn = NULL)/100 # Start at 2 m, to avoid buttlog
+
+	# Remove trailing zeros and coerce to list
+	if (n_indiv[.(sp), N] > 1) # It means there is more than one individual (pb Larix kaempferi)
+		diam_ls = apply(pred_diam_mat, 1, function(x) x[seq_len(max(which(x != 0)))])
+	
+	if (n_indiv[.(sp), N] == 1) # It means there there is only one individual (pb Larix kaempferi)
+		diam_ls = list(pred_diam_mat)
+
+	# Add to bole volume
+	bole_volume_dt[.(n_indiv[sp, sp_code]), pred_diam_m := diam_ls]
 }
 
 # Check NAs
@@ -354,7 +378,7 @@ pb = bole_volume_dt[is.infinite(bole_volume_m3), unique(sp_code)]
 n_indiv[, any(sp_code %in% pb)] # In other words, -Inf only for species not listed, such as Pinus cembra...
 
 # Fit non-parametrised species using TapeS' generic models, Coniferales and Magnoliopsida trees, resp.
-sp_pb = unique(swiss_dt[.(pb), .(speciesName_sci, fct_type, sp_code)])
+sp_pb = unique(swiss_dt[.(pb), .(speciesName_sci, fct_type, .N), by = sp_code])
 setkey(sp_pb, speciesName_sci)
 
 for (sp in sp_pb[, speciesName_sci])
@@ -375,16 +399,48 @@ for (sp in sp_pb[, speciesName_sci])
 		Dm = temp[, .(diameter = list(100*diameter)), by = tree_id][, diameter], #! Diameter in cm
 		Ht = temp[, .(height = unique(height)), by = tree_id][, height])
 
+	# Compute bole volume based on taper functions
 	bv = tprVolume(obj, AB = list(A = 0, B = 7), iAB = c("h", "dob"), bark = TRUE)
 	bole_volume_dt[.(sp_pb[sp, sp_code]), bole_volume_m3 := bv]
+
+	# Predict diameters every metre (matrix filled with 0 when beyond tree height) and convert into metres
+	pred_diam_mat = tprDiameter(obj = obj, Hx = seq(2, max(Ht(obj)), by = 1), bark = TRUE,
+		interval = "none", cp = TRUE, mono = TRUE, Rfn = NULL)/100 # Start at 2 m, to avoid buttlog
+
+	# Remove trailing zeros and coerce to list
+	if (sp_pb[.(sp), N] > 1) # It means there is more than one individual (pb Larix kaempferi)
+		diam_ls = apply(pred_diam_mat, 1, function(x) x[seq_len(max(which(x != 0)))])
+	
+	if (sp_pb[.(sp), N] == 1) # It means there there is only one individual (pb Larix kaempferi)
+		diam_ls = list(pred_diam_mat)
+
+	# Add to bole volume
+	bole_volume_dt[.(sp_pb[sp, sp_code]), pred_diam_m := diam_ls]
 }
 
 ## Check the validity of the computation
 bole_volume_dt[, any(is.na(bole_volume_m3)) | any(is.infinite(bole_volume_m3))] # FALSE
 round(bole_volume_dt[, range(bole_volume_m3)], digit = 3) # 0.004 -- 15.543
 
+## Compute hdec
+hdec = bole_volume_dt[, {
+	pd <- unlist(pred_diam_m)
+	pct_change <- diff(pd) / head(pd, -1)
+	drop_idx <- which(pct_change <= -0.10)[1L]
+	eh <- unlist(eval_h)
+		.(first_drop_h = eh[drop_idx] + 0.5, # + 0.5 because one metre precision, so chosing mean dist
+		first_pct_drop = round(pct_change[drop_idx] * 100, 2))
+	}, by = .(sp_code, tree_id)]
+
 ## Add the computed volumes to Swiss dataset
 swiss_dt = merge.data.table(swiss_dt, bole_volume_dt, by = c("sp_code", "tree_id"))
+
+## Add the estimated hdec and remove pred_diam_m column
+swiss_dt = merge.data.table(swiss_dt, hdec[, .(sp_code, tree_id, hdec = first_drop_h)],
+	by = c("sp_code", "tree_id"))
+
+swiss_dt[, pred_diam_m := NULL]
+swiss_dt[, eval_h := NULL]
 
 ## Compute bole volumes using cylinders
 # Volume trunk using cylindre formula with median diameter: log 0 to 2 --> DM1, log 2 to 4 --> DM3, etc...
@@ -409,4 +465,11 @@ abline(a = 0, b = 1, lwd = 4, col = "#CF212A")
 lm(formula = total_volume_m3_cyl ~ total_volume_m3, data = swiss_dt)
 ```
 
-## Estimate taper break height, hdec
+## Save the prepared data
+
+```{r}
+saveRDS(swiss_dt, paste0(mnt_point, "data/switzerland.rds"))
+if (!dir.exists(paste0(mnt_point, "data/coords_switzerland")))
+	writeVector(x = coords_swiss, filename = paste0(mnt_point, "data/coords_switzerland"),
+		filetype = "ESRI Shapefile", overwrite = TRUE)
+```
