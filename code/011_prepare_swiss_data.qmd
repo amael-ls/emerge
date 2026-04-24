@@ -41,3 +41,114 @@ format:
 \newcommand{\ie}{*i.e.,*}
 \newcommand{\F}{\mathscr{F}}
 \newcommand{\N}{\mathbfscr{N}}
+
+## Introduction
+
+The data are provided in @Didion2024. After talking to the main author (Markus Didion), it is recommended to use the variable `V_finewoodytotal` instead of `V_finebranch` + estimate of tree top, as the definition of `V_finebranch` was not always stable (sometimes set to 0 despite there are small branches, and reported to `V_finewoodytotal`).
+
+Given that there is no bole volume provided and that the authors leave the choice of the method to the users, I decided to use the package `TapeS`. Originally I was using `TapeR`, but, after discussion, Markus Didion recommended the newer package which is species-specific, while `TapeR` was only trained on *Abies alba*. Surprisingly, `TapeR` gave results quite close to simply piling up cones or cylinders! `TapeS` is also very similar to `TapeR` in estimations too. Note that I use the version `0.14.1` of `TapeS`.
+
+## Prepare the data
+
+### Loading the data
+
+The following packages are required to load and handle the data and print summary tables:
+```{r}
+#| output: false
+#### Clear space and load packages
+rm(list = ls())
+graphics.off()
+
+options(max.print = 500)
+
+library(data.table)
+library(MetBrewer)
+library(stringi)
+library(terra)
+library(TapeS)
+library(gt)
+```
+
+To load the data, more details are provided in `01_prepare_french_data.qmd`
+
+```{r}
+#### Prepare data
+## Loading
+os = Sys.info()[['sysname']]
+mnt_point = "/mnt/local_share/"
+if (os == "Linux" || os == "Darwin")
+{
+	if (!dir.exists(mnt_point))
+		stop(paste0("The mounting point <", mnt_point, "> does not exist"))
+	path_data = paste0(mnt_point, "data_orig/")
+	if (!dir.exists(path_data))
+		stop(paste0("Folder <", path_data, "> does not exist! Check mounting point and mounted folder"))
+} else if (os == "Windows") {
+	path_data = "//Del1509n015/2024_FairCarbon/data_orig/"
+	if (!dir.exists(path_data))
+		stop(paste0("Folder <", path_data, "> does not exist!"))
+} else {
+	stop(paste("Unknown Operating System:", os))
+}
+
+# Swiss data
+filename_switzerland = paste0(path_data, "switzerland/stembranchchwood_2024-04-25.txt")
+if (!file.exists(filename_switzerland))
+	stop(paste0("The file <", filename_switzerland, "> does not exist"))
+
+swiss_dt = fread(filename_switzerland)
+```
+
+### Adding species informations
+Species have been prepared in `01_prepare_french_data.qmd` accordingly with the Swiss species code.
+
+```{r}
+#### Add species to swiss_dt
+## Load species_dt, in order to add species' name
+species_dt = readRDS("/mnt/local_share/data/all_species.rds")
+
+## Add species scientific names
+swiss_dt = merge.data.table(x = swiss_dt,
+	y = species_dt[!is.na(sp_code_swiss), .(sp_code_swiss, speciesName_sci, genus = genre, fct_type)],
+	by.x = "TreeSpecies", by.y = "sp_code_swiss")
+```
+
+### Extract coordinates to create the point shapefile (`SpatVector`)
+
+Extract all the informations at the plot level, such as structure of the stand (even/uneven aged), main species, elevation and coordinates, ...
+
+```{r}
+#### Extract info plots
+## Keep columns of interest
+coords_swiss = unique(swiss_dt[, .(SiteID, Lat, Long, InvYear, Elevation, NFI_PR, StandAge, StandComp)])
+swiss_dt[, c("Elevation", "NFI_PR", "StandAge", "StandComp", "TreeAge", "NFI_mainspecies",
+	"Lat", "Long", "DBH", "H_total") := NULL]
+
+setnames(coords_swiss, new = c("plot_id", "lat", "lon", "year", "altitude", "region", "stand_age", "composition"))
+
+## Change modalities, based on Didion et al. 2024
+coords_swiss[, .N, by = stand_age] # I guess 0 is even-aged
+coords_swiss[, .N, by = composition][order(composition)] # I guess 1 is pure, 2 is confi 75%, 3 is broadleaf 75
+
+# Stand age
+coords_swiss[, stand_age := as.character(stand_age)]
+coords_swiss[stand_age == "0", stand_age := "even"]
+coords_swiss[stand_age == "1", stand_age := "uneven"]
+
+# Composition
+coords_swiss[, composition := as.character(composition)]
+coords_swiss[composition == "1", composition := "pure"]
+coords_swiss[composition == "2", composition := "conifer_75"]
+coords_swiss[composition == "3", composition := "broadleaf_75"]
+coords_swiss[composition == "4", composition := "mixed"]
+
+## Correction of the plot id, leading 0 were removed when loading
+coords_swiss[, plot_id := stri_pad(str = plot_id, width = 8, pad = "0")]
+
+## Create SpatVector
+coords_swiss = vect(x = coords_swiss, crs = "EPSG:4326") # There are doublons in terms of (x, y) coords of courses!
+```
+
+### Reshaping the data
+
+To use the package `TapeS`, data must be reshaped in the 'melt' format rather than large format. There are also intermediate diameter--height combinations to add, such as the dbh, the 7 cm diameter, and the top diameter.
