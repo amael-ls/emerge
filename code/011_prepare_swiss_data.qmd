@@ -270,3 +270,143 @@ n_indiv = n_indiv[, .N, by = .(sp_code, speciesName_sci)][order(-N)]
 n_indiv[, sum(N)] # 16250 individuals
 ```
 
+## Compute bole volumes
+
+As said in the introduction, bole volumes are not provided. I estimate them using the package `TapeS`, verion 0.14.1. The documentation can be found [here](https://cran.r-project.org/web/packages/TapeS/refman/TapeS.html), and I used the [vignette](https://cran.r-project.org/web/packages/TapeS/vignettes/tapes.html) as a guide; for instance it seems that the diameters must be in cm, and heights in m, although it is speciefied nowhere in the documentation. The package is based on @Kublin2013.
+
+```{r}
+#### Compute bole volume using TapeS package (https://link.springer.com/article/10.1007/s10342-013-0715-0)
+## List species parametrised in TapeS https://cran.r-project.org/web/packages/TapeS/index.html
+ls_tapes = tprSpeciesCode(inSp = NULL, outSp = NULL)
+setDT(ls_tapes)
+ls_tapes = ls_tapes[, .(ID, scientific)]
+
+# Correction in the package, wrong leading space
+ls_tapes[scientific == " Picea sitchensis", scientific := "Picea sitchensis"]
+
+setorder(ls_tapes, scientific)
+
+# List problematic species
+sp_pb = n_indiv[!(speciesName_sci %in% ls_tapes[, scientific]), speciesName_sci]
+sp_pb_genus = unique(stri_sub(str = sp_pb, to = stri_locate_first(str = sp_pb, regex = " ")[, "start"] - 1))
+
+for (sp in sp_pb_genus)
+{
+	print(sp_pb[stri_detect(str = sp_pb, regex = sp)])
+	print(ls_tapes[stri_detect(str = scientific, regex = sp)])
+}
+
+# Assumptions and names modifications (in ls_tapes rather than swiss_dt of course!)
+# I assume that Fraxinus sp. in Switzerland is Fraxinus excelsior,
+# https://www.wsl.ch/lud/portree/_sppDoc/Fraxinus_excelsior_v2.pdf
+ls_tapes[scientific == "Fraxinus excelsior", scientific := "Fraxinus sp."]
+
+# I assume that Populus spp. applies to Populus tremula in Switzerland given that balsamifera ruled out
+ls_tapes[scientific == "Populus spp.", scientific := "Populus tremula"]
+
+# I assume that Betula spp. applies to Betula pendula in Switzerland
+ls_tapes[scientific == "Betula spp.", scientific := "Betula pendula"]
+
+# I assume that Ulmus spp. applies to Ulmus glabra in Switzerland
+ls_tapes[scientific == "Ulmus spp.", scientific := "Ulmus glabra"]
+
+# List species that are not referenced in the TapeS package
+sp_pb = n_indiv[!(speciesName_sci %in% ls_tapes[, scientific]), speciesName_sci]
+# sp_pb = "Pinus cembra", "Pinus mugo", "Chamaecyparis sp.", "Juglans sp.", "Picea sp." 
+
+n_indiv[speciesName_sci %in% sp_pb, sum(N)]
+n_indiv = n_indiv[!(speciesName_sci %in% sp_pb)]
+
+setkey(ls_tapes, scientific)
+setkey(n_indiv, speciesName_sci)
+
+## Fit taper model to estimate tree profile and compute bole volumes (threshold diameter = 7 cm)
+bole_volume_dt = unique(swiss_dt[, .(sp_code, tree_id)])
+bole_volume_dt[, bole_volume_m3 := -Inf]
+setkey(bole_volume_dt, sp_code, tree_id)
+
+swiss_dt[D_top == 0, length(unique(tree_id))] # 416 concerned individuals
+
+# Fit for species that are parametrised in TapeS
+for (sp in n_indiv[, speciesName_sci])
+{
+	print(paste("Running species", sp))
+	tapes_id = ls_tapes[sp, ID]
+
+	temp = swiss_dt[.(n_indiv[sp, sp_code])]
+	temp = temp[diameter > 0] # Sometimes D_top == 0...
+	setorder(temp, tree_id, diameter_height_m)
+
+	obj = tprTrees(spp = rep(tapes_id, n_indiv[sp, N]),
+		Hm = temp[, .(diameter_height_m = list(diameter_height_m)), by = tree_id][, diameter_height_m],
+		Dm = temp[, .(diameter = list(100*diameter)), by = tree_id][, diameter], #! Diameter in cm
+		Ht = temp[, .(height = unique(height)), by = tree_id][, height])
+
+	bv = tprVolume(obj, AB = list(A = 0, B = 7), iAB = c("h", "dob"), bark = TRUE)
+	bole_volume_dt[.(n_indiv[sp, sp_code]), bole_volume_m3 := bv]
+}
+
+# Check NAs
+bole_volume_dt[, any(is.na(bole_volume_m3))] # FALSE
+
+# Check the non computed volumes (only non parametrised species)
+pb = bole_volume_dt[is.infinite(bole_volume_m3), unique(sp_code)]
+n_indiv[, any(sp_code %in% pb)] # In other words, -Inf only for species not listed, such as Pinus cembra...
+
+# Fit non-parametrised species using TapeS' generic models, Coniferales and Magnoliopsida trees, resp.
+sp_pb = unique(swiss_dt[.(pb), .(speciesName_sci, fct_type, sp_code)])
+setkey(sp_pb, speciesName_sci)
+
+for (sp in sp_pb[, speciesName_sci])
+{
+	print(paste("Running species", sp))
+	if (sp_pb[sp, fct_type] == "conifer")
+		tapes_id = ls_tapes["Coniferales trees", ID]
+
+	if (sp_pb[sp, fct_type] == "broadleaf")
+		tapes_id = ls_tapes["Magnoliopsida trees", ID]
+
+	temp = swiss_dt[.(sp_pb[sp, sp_code])]
+	temp = temp[diameter > 0] # Sometimes D_top == 0...
+	setorder(temp, tree_id, diameter_height_m)
+
+	obj = tprTrees(spp = rep(tapes_id, temp[, length(unique(tree_id))]),
+		Hm = temp[, .(diameter_height_m = list(diameter_height_m)), by = tree_id][, diameter_height_m],
+		Dm = temp[, .(diameter = list(100*diameter)), by = tree_id][, diameter], #! Diameter in cm
+		Ht = temp[, .(height = unique(height)), by = tree_id][, height])
+
+	bv = tprVolume(obj, AB = list(A = 0, B = 7), iAB = c("h", "dob"), bark = TRUE)
+	bole_volume_dt[.(sp_pb[sp, sp_code]), bole_volume_m3 := bv]
+}
+
+## Check the validity of the computation
+bole_volume_dt[, any(is.na(bole_volume_m3)) | any(is.infinite(bole_volume_m3))] # FALSE
+round(bole_volume_dt[, range(bole_volume_m3)], digit = 3) # 0.004 -- 15.543
+
+## Add the computed volumes to Swiss dataset
+swiss_dt = merge.data.table(swiss_dt, bole_volume_dt, by = c("sp_code", "tree_id"))
+
+## Compute bole volumes using cylinders
+# Volume trunk using cylindre formula with median diameter: log 0 to 2 --> DM1, log 2 to 4 --> DM3, etc...
+swiss_dt[, vol_log_cyl := pi*diameter^2/4*2] # The *2 comes from the fact that each log is 2m long
+swiss_dt[, bole_volume_cyl_m3 := sum(vol_log_cyl) + pi*D_coarsestemfinal^2/4*L_coarsestemfinal, by = tree_id]
+
+# Total volume
+swiss_dt[, total_volume_m3_cyl := bole_volume_cyl_m3 + V_coarsebranch + V_finewoodytotal]
+swiss_dt[, total_volume_m3 := bole_volume_m3 + V_coarsebranch + V_finewoodytotal]
+```
+
+As can be seen, the stack cylindres overestimate the bole volume compared to taper functions. Whatever is the closest to the truth, there is no biais from `TapeS` (intercept is near 0).
+
+```{r}
+plot(unique(swiss_dt[, .(tree_id, total_volume_m3_cyl)])[, total_volume_m3_cyl],
+	unique(swiss_dt[, .(tree_id, total_volume_m3)])[, total_volume_m3],
+	pch = 19, cex = 0.65, axes = FALSE, xlab = "Cyl", ylab = "TapeS")
+axis(1)
+axis(2, las = 1)
+abline(a = 0, b = 1, lwd = 4, col = "#CF212A")
+
+lm(formula = total_volume_m3_cyl ~ total_volume_m3, data = swiss_dt)
+```
+
+## Estimate taper break height, hdec
