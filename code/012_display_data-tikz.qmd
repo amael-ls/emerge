@@ -1,0 +1,39 @@
+---
+title: "Export data for TikZ plotting"
+date: today
+author: Amaël Le Squin
+date-format: iso
+filters:
+  - fontawesome
+execute:
+  error: true
+bibliography: /home/ALe-Squin/work/library/bib_file/references.bib
+lightbox:
+  match: auto
+css: style.css
+knitr:
+  opts_chunk: 
+    dev: ragg_png
+    crop: null
+    out.width: "70%"
+    fig.width: 6
+    fig.asp: 0.618
+    fig.align: "center"
+format:
+  html:
+    toc: true
+    include-in-header: mathjax.html
+    code-fold: true
+    df-print: paged
+    number-sections: true
+    theme:
+      light: cerulean
+      dark: darkly
+    margin: 5% 0;
+  pdf:
+    keep-tex: true
+    pdf-engine: lualatex
+    include-in-header:
+      - text: |
+          \usepackage{unicode-math}
+---
