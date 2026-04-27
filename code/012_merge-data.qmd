@@ -1,12 +1,27 @@
 ---
-title: "Export data for TikZ plotting"
+title: "Merge data FR -- CH and export for TikZ"
 date: today
 author: Amaël Le Squin
 date-format: iso
 filters:
   - fontawesome
+  - siunitx-quarto
+  - imagify
+imagify:
+  header-includes: |
+    \usepackage{pgfplots}
+    \pgfplotsset{compat=1.18}
+    \usepgfplotslibrary{fillbetween}
+    \usetikzlibrary{positioning}
+    \usetikzlibrary{calc}
+  pdf-engine: lualatex
+pdf-engine: lualatex
+keep-tex: true
 execute:
   error: true
+  echo: false
+  warning: false
+  message: false
 bibliography: /home/ALe-Squin/work/library/bib_file/references.bib
 lightbox:
   match: auto
@@ -31,9 +46,371 @@ format:
       dark: darkly
     margin: 5% 0;
   pdf:
-    keep-tex: true
-    pdf-engine: lualatex
+    mathspec: true
     include-in-header:
       - text: |
           \usepackage{unicode-math}
 ---
+
+## Intro
+
+I merge the data for fitting and plotting. Most of the plots to present the data will be done using TikZ. This implies to format and export the data in csv for LaTeX. So far, I pla the following figures:
+
+- A map (this one is actually not done in TikZ),
+- Horizontal histogram of individual per species, for total volume (cumulative for TikZ by origin),
+- Distributions of circumference, height, and slenderness for French NFI, EFM, and Emerge.
+
+## Load and merge data
+
+Data must be prepared by `01_[...]_prepare_data.qmd`. Note that the Emerge dataset uses the NFI species codes.
+
+```{r}
+#| output: false
+#### Clear space and load packages
+rm(list = ls())
+graphics.off()
+
+options(max.print = 500)
+
+library(data.table)
+library(MetBrewer)
+library(stringi)
+library(terra)
+```
+
+```{r}
+#| output: false
+
+#### Load the data
+## Path
+os = Sys.info()[['sysname']]
+mnt_point = "/mnt/local_share/"
+if (os == "Linux" || os == "Darwin")
+{
+	if (!dir.exists(mnt_point))
+		stop(paste0("The mounting point <", mnt_point, "> does not exist"))
+} else if (os == "Windows") {
+	stop("TO DO!!! No idea how that works on Windows!")
+} else {
+	stop(paste("Unknown Operating System:", os))
+}
+
+path_data = paste0(mnt_point, "data/")
+if (!dir.exists(path_data))
+	stop(paste0("Folder <", path_data, "> does not exist! Did you run 01_prepare_data.qmd?"))
+
+opt = "_inra"
+
+## Loading Emerge data
+inra = readRDS(paste0(path_data, "nfi-inra_dt", opt, ".rds"))
+inra = inra[, .(speciesName_sci, tree_id = unique_id, plot_id, fct_type, year, circumference_m, height,
+	taper_height = taper_height_flo, bole_volume_m3, total_volume_m3)]
+setkey(inra, speciesName_sci)
+
+## Loading Swiss data
+swiss = readRDS(paste0(mnt_point, "data/switzerland.rds"))
+swiss = unique(swiss[, .(speciesName_sci, tree_id, plot_id, fct_type, year, circumference_m, height,
+	taper_height = hdec, bole_volume_m3, total_volume_m3)])
+setkey(swiss, speciesName_sci)
+
+## Modern Emerge data
+emerge = readRDS(paste0(mnt_point, "data/emerge_2009-2010.rds"))
+emerge[, year := as.integer(stringi::stri_replace_all(str = dataset, replacement = "", regex = "emerge_"))]
+emerge = emerge[, .(speciesName_sci, tree_id, fct_type, year, circumference_m, height, taper_height,
+	bole_volume_m3 = bole_volume_conic_m3, total_volume_m3)]
+
+## NFI data used to fit bole volumes (prepared by Florence)
+nfi_data = readRDS("~/work/FairCarbon/gohon_florence/arbComp.rds")
+
+## Species list
+# Load data
+species_dt = readRDS(paste0(mnt_point, "data/all_species.rds"))[, .(speciesName_sci, nfi = essence_ifn,
+	sp_code_swiss, fct_type)]
+
+# Change class to avoid merge warnings
+species_dt[, nfi := as.integer(nfi)]
+
+# Reshaping to long format
+species_dt = melt.data.table(species_dt, id.vars = c("speciesName_sci", "fct_type"), variable.name = "origin",
+	value.name = "sp_code", na.rm = TRUE, variable.factor = FALSE)
+
+# Rename modalities
+species_dt[stri_detect(str = origin, regex = "sp_code_"),
+	origin := stri_sub(str = origin, from = stri_locate(str = origin, regex = "sp_code_")[, "end"] + 1)]
+
+# Two species are missing in species_dt
+species_dt = rbindlist(list(species_dt,
+	data.table(speciesName_sci = c("Acer pseudoplatanus", "Acer campestre", "fruits",
+		"Exotic broadleaves sp.", "Broadleaves sp."), fct_type = rep("broadleaf", 5),
+	origin = rep("nfi", 5), sp_code = c(15, 21, 23, 29, 49))))
+
+# Set keys
+setkey(species_dt, speciesName_sci, origin)
+```
+
+I merge the three datasets into one. Note that species with less than 150 individuals will not be fit directly later on. I will, for some, group them by genera, such as *Quercus sp.*, *Fraxinus sp.*, etc.
+```{r}
+## Bind everything
+tree_dt = rbindlist(list(inra = inra, swiss = swiss, emerge = emerge), idcol = "origin", fill = TRUE)
+
+# Remove NAs
+tree_dt = tree_dt[!is.na(bole_volume_m3)]
+
+# Remove species with less than 150 individuals
+tree_dt[, n_indiv := .N, by = speciesName_sci]
+
+# Add column direct_fit to decide if a species is fitted directly or by group
+tree_dt[, direct_fit := ifelse(n_indiv > 150, TRUE, FALSE)]
+```
+
+I subset the columns of the nfi dataset `nfi_data` and rename the columns so that it matches the total volume dataset `tree_dt`.
+
+```{r}
+#### Reshape NFI data to match tree_dt format
+## Add species names
+# Cast to integer for merging
+nfi_data[, ess := as.integer(ess)]
+
+# Mergin
+nfi_data = merge.data.table(nfi_data,
+	species_dt[.(unique(speciesName_sci), "nfi"), .(sp_code, speciesName_sci, fct_type)],
+	by.x = "ess", by.y = "sp_code")
+
+nfi_data = nfi_data[, .(origin = "nfi", speciesName_sci, tree_id = a, plot_id = npp,
+	fct_type, circumference_m = c13, height = htot)]
+```
+
+Now, I merge all the datasets to plot the circumference, height, and slenderness distributions, and assign a colour to each based on `Met.Brewer("Lakota")`.
+
+```{r}
+chs_data = rbindlist(list(nfi_data,
+	tree_dt[, .(origin, speciesName_sci, tree_id, plot_id, fct_type, circumference_m, height)]))
+
+ls_colours = met.brewer("Kandinsky")[c(1, 3, 4)]
+names(ls_colours) = c("swiss", "nfi", "inra")
+# ls_colours = met.brewer("Egypt", n = 3)
+# names(ls_colours) = c("inra", "nfi", "swiss")
+
+chs_data[, colour := ls_colours["nfi"]]
+chs_data[origin == "swiss", colour := ls_colours["swiss"]]
+chs_data[origin == "inra", colour := ls_colours["inra"]]
+```
+
+## Complete NFI's data with coordinates
+
+Florence did not add the coordinates to her query. I am using the internal NFI R package `inventR` to get them.
+
+```{r}
+login = inventR::connect_db()
+
+coords_am = inventR::exec_req(conn = login, req = "
+	SELECT
+		coords.NPP AS plot_id, coords.XL, coords.YL
+
+	FROM
+		inv_exp_am.e1point AS coords
+
+	ORDER BY
+		plot_id;
+	", DT = TRUE)
+
+coords_nm = inventR::exec_req(conn = login, req = "
+	SELECT
+		coords.NPP AS plot_id, coords.XL, coords.YL
+
+	FROM
+		inv_exp_nm.e1point AS coords
+
+	ORDER BY
+		plot_id;
+	", DT = TRUE)
+
+logout = inventR::disconnect_db(login)
+
+ll = unique(nfi_data[, .(plot_id, tree_id)])
+setkey(ll)
+
+coords_am[, plot_id := stri_sub(str = plot_id, to = stri_locate(str = plot_id, regex = "---")[, "start"] - 1)]
+
+coords_nfi = rbindlist(list(am = coords_am, nm = coords_nm), idcol = "origin")
+coords_nfi = na.omit(coords_nfi)
+
+coords_nfi = coords_nfi[plot_id %in% nfi_data[, unique(plot_id)]]
+coords_nfi = vect(x = coords_nfi, geom = c("xl", "yl"), crs = "EPSG:27572") # Lambert zone II, I checked
+```
+
+## Presentation of the data
+
+I add few columns.
+
+```{r}
+chs_data[, genus := stri_sub(str = speciesName_sci,
+	to = stri_locate_first(str = speciesName_sci, regex = " ")[, "start"] - 1)]
+```
+
+### Maps of plots location
+
+The plots are located:
+
+```{r}
+#| echo: false
+#| label: fig-map
+#| fig-cap: "Location of the plots, with NFI for the Naional Forest Invetory of France, and EFM the Experimental Forest Monitoring of Switzerland [@Didion2024]"
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 9
+
+#### Coordinates
+## Read point shapefiles
+coords_inra = vect(paste0(mnt_point, "data/coords_inra_full"))
+coords_swiss = vect(paste0(mnt_point, "data/coords_switzerland"))
+
+## Read shapefiles countries
+switzerland = project(vect(paste0(mnt_point, "data/shapefiles/switzerland/CHE_adm0.shp")), coords_inra)
+france = project(vect(paste0(mnt_point, "data/shapefiles/france/FRA_adm0.shp")), coords_inra)
+belgium = project(vect(paste0(mnt_point, "data/shapefiles/belgium/gadm41_BEL_0.shp")), coords_inra)
+italy = project(vect(paste0(mnt_point, "data/shapefiles/italy/gadm41_ITA_0.shp")), coords_inra)
+luxembourg = project(vect(paste0(mnt_point, "data/shapefiles/luxembourg/gadm41_LUX_0.shp")), coords_inra)
+germany = project(vect(paste0(mnt_point, "data/shapefiles/germany/gadm41_DEU_0.shp")), coords_inra)
+spain = project(vect(paste0(mnt_point, "data/shapefiles/spain/gadm41_ESP_0.shp")), coords_inra)
+
+fr_ch = project(rbind(france, switzerland), coords_inra)
+
+## Plot
+pdf("../../../writing/article_allometry/pictures/map2.pdf")
+plot(fr_ch, lwd = 2, axes = FALSE)
+points(coords_nfi, col = ls_colours["nfi"], pch = 20, cex = 0.35)
+points(coords_inra, col = ls_colours["inra"], pch = 20, cex = 1.15)
+points(project(coords_swiss, coords_inra), col = ls_colours["swiss"], pch = 20, cex = 0.55)
+plot(fr_ch, lwd = 2, add = TRUE, bg = "transparent")
+plot(luxembourg, lwd = 2, add = TRUE)
+plot(germany, lwd = 2, add = TRUE)
+plot(belgium, lwd = 2, add = TRUE)
+plot(italy, lwd = 2, add = TRUE)
+plot(spain, lwd = 2, add = TRUE)
+# legend(x = "bottomleft", legend = c("Emerge", "NFI", "EFM"), fill = ls_colours[c("inra", "nfi", "swiss")], bty = "n", inset = c(0, 0.1))
+dev.off()
+```
+
+### Number of individuals per species and dataset
+
+The data are composed by the following species:
+```{r}
+#| echo: false
+#| label: fig-data
+#| fig-cap: Number of individuals per genus (French data), with conifers in blue and broadleaves in orange. Watch out, it is a $\\log_{10}$ scale
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 9
+
+## Create nb indiv data
+species_nb = unique(chs_data[speciesName_sci != "fruits"][origin %in% c("swiss", "emerge", "inra"),
+	.(N = .N, colour), by = .(genus, origin)])
+
+species_nb[, tot := sum(N), by = genus]
+setorder(species_nb, tot)
+
+par(mar = c(5, 12, 2, 2))
+
+## Use barplot fct (for preview)
+ll = dcast.data.table(species_nb, colour ~ genus, value.var = "N", fill = 0)
+# cols = colnames(ll[, .SD, .SDcols = !patterns("^colour")])
+# ll[, (cols) := lapply(X = .SD, FUN = function(x) fcase(x == 0, 0, x > 0, log1p(x))), .SDcols = cols]
+ll = as.matrix(ll, rownames = "colour")
+
+ord = species_nb[, sum(N), by = genus][order(V1)]
+
+ll = ll[, ord[, genus]]
+
+# Get the stacked barplot
+barplot(ll,
+	col = rownames(ll),
+	border = "white",
+	space = 0.04,
+	font.axis = 2,
+	log = "x",
+	offset = 1,
+	las = 1,
+	horiz = TRUE, # Horizontal bars
+	xlab = "Number of individuals")
+
+fwrite(species_nb[, .(genus, origin, N)], "../../../writing/article_allometry/data/n_indiv.csv")
+```
+
+### Distribution of the data in terms of circumference, height, slenderness
+
+Densities are computed here, with 1024 points, and then exported to csv files for TikZ plotting.
+
+```{r}
+#| echo: false
+#| label: fig-distrib
+#| fig-cap: Distribution of the data
+#| fig-subcap: 
+#|   - "Densities of circumferences"
+#|   - "Densities of heights"
+#|   - "Densities of slenderness (height/circumference)"
+#| layout-nrow: 3
+#| fig-asp: 1
+#| out-width: 95%
+#| fig-width: 9
+
+# --- Circumferences
+dd_fr = density(chs_data[origin == "nfi", circumference_m]) # French NFI
+dd_ch = density(chs_data[origin == "swiss", circumference_m]) # EFM data
+dd_in = density(chs_data[origin %in% c("emerge", "inra"), circumference_m], na.rm = TRUE) # Inra/Emerge data
+
+plot(dd_fr, col = ls_colours["nfi"], axes = FALSE, lwd = 3, xlab = "Circumference (m)", main = "",
+	ylim = c(0, max(dd_fr$y, dd_in$y, dd_ch$y)))
+polygon(dd_fr, col = paste0(ls_colours["nfi"], "AA"))
+
+lines(dd_in, col = ls_colours["inra"], lwd = 3)
+polygon(dd_in, col = paste0(ls_colours["inra"], "AA"))
+
+lines(dd_ch, col = ls_colours["swiss"], lwd = 3)
+polygon(dd_ch, col = paste0(ls_colours["swiss"], "AA"))
+
+axis(1)
+axis(2, las = 1)
+legend(x = "topright", legend = c("Emerge", "NFI", "EFM"), fill = ls_colours[c("inra", "nfi", "swiss")], bty = "n")
+
+# --- Heights
+dd_fr = density(chs_data[origin == "nfi", height]) # French NFI
+dd_ch = density(chs_data[origin == "swiss", height]) # EFM data
+dd_in = density(chs_data[origin %in% c("emerge", "inra"), height], na.rm = TRUE) # Inra/Emerge data
+
+plot(dd_fr, col = ls_colours["nfi"], axes = FALSE, lwd = 3, xlab = "Height (m)", main = "",
+	ylim = c(0, max(dd_fr$y, dd_in$y, dd_ch$y)))
+polygon(dd_fr, col = paste0(ls_colours["nfi"], "AA"))
+
+lines(dd_in, col = ls_colours["inra"], lwd = 3)
+polygon(dd_in, col = paste0(ls_colours["inra"], "AA"))
+
+lines(dd_ch, col = ls_colours["swiss"], lwd = 3)
+polygon(dd_ch, col = paste0(ls_colours["swiss"], "AA"))
+
+axis(1)
+axis(2, las = 1)
+legend(x = "topright", legend = c("Emerge", "NFI", "EFM"), fill = ls_colours[c("inra", "nfi", "swiss")], bty = "n")
+
+# --- Slenderness
+dd_fr = density(chs_data[origin == "nfi", height/circumference_m]) # French NFI
+dd_ch = density(chs_data[origin == "swiss", height/circumference_m]) # EFM data
+dd_in = density(chs_data[origin %in% c("emerge", "inra"), height/circumference_m], na.rm = TRUE) # Inra/Emerge data
+
+fwrite(data.table(xfr = dd_fr$x, yfr = dd_fr$y, xin = dd_in$x, yin = dd_in$y,
+	xch = dd_ch$x, ych = dd_ch$y), "../../../writing/article_allometry/data/densities_slenderness.csv")
+
+plot(dd_fr, col = ls_colours["nfi"], axes = FALSE, lwd = 3, xlab = "Slenderness (height/circumference)", main = "",
+	ylim = c(0, max(dd_fr$y, dd_in$y, dd_ch$y)))
+polygon(dd_fr, col = paste0(ls_colours["nfi"], "AA"))
+
+lines(dd_in, col = ls_colours["inra"], lwd = 3)
+polygon(dd_in, col = paste0(ls_colours["inra"], "AA"))
+
+lines(dd_ch, col = ls_colours["swiss"], lwd = 3)
+polygon(dd_ch, col = paste0(ls_colours["swiss"], "AA"))
+
+axis(1)
+axis(2, las = 1)
+legend(x = "topright", legend = c("Emerge", "NFI", "EFM"), fill = ls_colours[c("inra", "nfi", "swiss")], bty = "n")
+```
