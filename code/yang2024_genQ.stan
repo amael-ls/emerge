@@ -23,16 +23,20 @@ functions {
 data {
 	// Dimensions
 	int <lower = 1> N; // Number of trees
+	int <lower = 1> N_new; // Number of trees
 
 	// Predictors
 	vector[N] bole_volume_m3;
+	vector[N_new] bole_volume_m3_new;
 
 	// Data
 	vector[N] total_volume_m3;
+	vector[N_new] total_volume_m3_new;
 }
 
 transformed data {
 	vector[N] ratio = bole_volume_m3 ./ total_volume_m3;
+	vector[N_new] ratio_new = bole_volume_m3_new ./ total_volume_m3_new;
 }
 
 parameters {
@@ -55,29 +59,19 @@ transformed parameters {
 	vector [N] shape2 = phi*(1 - r_yang_6(bole_volume_m3, [c, j, k, m, n, s]));
 }
 
-model{
-	// Prior linear regression
-	target += beta_lpdf(c_beta | 3, 3); // Centred
-	target += normal_lpdf(j | 1, 0.1);
-	target += gamma_lpdf(k | 2, 10); // Right skewed
-	target += beta_lpdf(m_beta | 3, 3); // Centred
-	target += beta_lpdf(n | 1, 8); // Right skewed
-	target += gamma_lpdf(s_multiplier | 1.5, 0.5); // Right skewed
-
-	target += gamma_lpdf(phi | 3, 0.5); // Right skewed
-	
-	// Likelihood
-	target += beta_lpdf(ratio | shape1, shape2);
-}
-
-
 generated quantities {
-	array[N] real r_gen = beta_rng(shape1, shape2);
-	vector[N] v_gen;
-	vector[N] v_gen_mean;
+	array[N_new] real r_gen;
+	vector[N_new] v_gen;
+	vector[N_new] v_gen_mean;
 
-	for (i in 1:N)
-		v_gen[i] = 1/c * bole_volume_m3[i]^( 1 - (log(r_gen[i]) - log(c)) / log(bole_volume_m3[i]) );
-	v_gen_mean = 1/c * bole_volume_m3 .^
-		( 1 - (log(r_yang_6(bole_volume_m3, [c, j, k, m, n, s])) - log(c)) ./ log(bole_volume_m3) );
+	{
+		vector [N_new] shape1_new = phi*r_yang_6(bole_volume_m3_new, [c, j, k, m, n, s]);
+		vector [N_new] shape2_new = phi*(1 - r_yang_6(bole_volume_m3_new, [c, j, k, m, n, s]));
+		r_gen = beta_rng(shape1_new, shape2_new);
+
+		for (i in 1:N_new)
+			v_gen[i] = 1/c * bole_volume_m3_new[i]^( 1 - (log(r_gen[i]) - log(c)) / log(bole_volume_m3_new[i]) );
+		v_gen_mean = 1/c * bole_volume_m3_new .^
+			( 1 - (log(r_yang_6(bole_volume_m3_new, [c, j, k, m, n, s])) - log(c)) ./ log(bole_volume_m3_new) );
+	}
 }
