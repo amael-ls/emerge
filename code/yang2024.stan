@@ -49,8 +49,10 @@ parameters {
 
 transformed parameters {
 	real c = 0.6 + 0.4*c_beta; // Forces c to be between 0.6 and 1
-	real m = 0.8 + 0.2*m_beta; // Forces m to be between 0.8 and 1
-	real s = (5 + s_multiplier)*k/j; // Force s to be at least 5
+	// real m = 0.8 + 0.2*m_beta; // Forces m to be between 0.8 and 1
+	real m = c + (1 - c)*m_beta; // Forces m to be between c and 1
+	// real s = (5 + s_multiplier)*k/j; // Force s to be at least 5*k/j, i.e., at least m + exp[-5] for x = j/k
+	real s = 5 + s_multiplier; // Force s to be at least 5
 	vector [N] shape1 = phi*r_yang_6(bole_volume_m3, [c, j, k, m, n, s]);
 	vector [N] shape2 = phi*(1 - r_yang_6(bole_volume_m3, [c, j, k, m, n, s]));
 }
@@ -60,7 +62,8 @@ model{
 	target += beta_lpdf(c_beta | 3, 3); // Centred
 	target += normal_lpdf(j | 1, 0.1);
 	target += gamma_lpdf(k | 2, 10); // Right skewed
-	target += beta_lpdf(m_beta | 3, 3); // Centred
+	// target += beta_lpdf(m_beta | 3, 3); // Centred
+	target += beta_lpdf(m_beta | 1, 8); // Left-skewed
 	target += beta_lpdf(n | 1, 8); // Right skewed
 	target += gamma_lpdf(s_multiplier | 1.5, 0.5); // Right skewed
 
