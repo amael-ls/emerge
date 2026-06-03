@@ -53,8 +53,8 @@ parameters {
 
 transformed parameters {
 	real c = 0.6 + 0.4*c_beta; // Forces c to be between 0.6 and 1
-	real m = 0.8 + 0.2*m_beta; // Forces m to be between 0.8 and 1
-	real s = (5 + s_multiplier)*k/j; // Force s to be at least 5
+	real m = c + (1 - c)*m_beta; // Forces m to be between c and 1
+	real s = 5 + s_multiplier; // Force s to be at least 5
 	vector [N] shape1 = phi*r_yang_6(bole_volume_m3, [c, j, k, m, n, s]);
 	vector [N] shape2 = phi*(1 - r_yang_6(bole_volume_m3, [c, j, k, m, n, s]));
 }
