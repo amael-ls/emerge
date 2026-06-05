@@ -98,7 +98,6 @@ plot_sp = function(fit, sp, forest = tree_dt[.(sp)], pred = TRUE, simplif = FALS
 	n_bins = 4, pal = "Hiroshige", selected_variable = NULL, print_plot = TRUE)
 {
 	# Get parameters
-	n_sampling = fit$metadata()$iter_sampling
 	n_chains = fit$num_chains()
 
 	if (n_chains != nrow(fit$metadata()$time))
@@ -280,6 +279,144 @@ plot_sp = function(fit, sp, forest = tree_dt[.(sp)], pred = TRUE, simplif = FALS
 
 	return (list(any_div = any(div != 0), loc = div, rhats = rhats))
 }
+
+## Function to get NFI data for a given species
+get_nfi = function(sp_code_nfi)
+{
+	## French NFI data query
+	db = connect_db()
+
+	# In Ancient Method (am), the inventory was done by cycles rather than homogeneously distributed everywhere
+	nfi_data_am = exec_req(conn = db, req = paste0("
+		SELECT
+			tree.NPP, tree.A, tree.ESS, tree.C13, tree.HTOT, tree.R, tree.V, tree.VTOT
+
+		FROM
+			inv_exp_am.g3arbre AS tree
+
+		WHERE
+			tree.ESS = '", sp_code_nfi, "' AND -- Selected tree species
+			tree.MC IN ('4', '5') AND -- Circumference measured, and not diameter
+			(tree.DOM BETWEEN '0' AND '5') -- Alive and no pollarded nor heavily pruned tree
+
+		ORDER BY
+			NPP, A;"), DT = TRUE)
+
+	# New method
+	nfi_data_nm = exec_req(conn = db, req = paste0("
+		SELECT
+			tree.NPP, tree.A, tree.ESS, tree.C13, tree.HTOT, tree.R, tree.V, tree.V0 AS VTOT
+
+		FROM
+			inv_exp_nm.g3arbre AS tree
+
+		WHERE
+			tree.ESS = '", sp_code_nfi, "' AND -- Selected tree species
+			(tree.veget = '0' OR tree.veget = 'Z') AND -- Alive
+			COALESCE(tree.forme, 'X') NOT IN ('0', 'Z') AND -- No pollarded nor heavily pruned tree
+			COALESCE(tree.tige, '1') = '1' -- No twin, forked, or heavily broken trees
+
+		ORDER BY
+			NPP, A;"), DT = TRUE)
+
+	disconnect_db(db)
+
+	# Merge data
+	nfi_data_am[, method := "ancient"]
+	nfi_data_nm[, method := "new"]
+	
+	nfi_data = rbindlist(list(nfi_data_am, nfi_data_nm))
+
+	# Change names
+	setnames(nfi_data, new = c("plot_id", "tree_id", "sp_code", "circumference_m", "height", "cull",
+		"bole_volume_m3", "total_volume_m3", "method"))
+
+	# Commpute ratio
+	nfi_data[, r_vallet := bole_volume_m3/total_volume_m3]
+
+	return(nfi_data)
+}
+
+ratio_vallet_fit = function(fit, sim, nfi_data, n_draws = NULL, simplif = FALSE)
+{
+	if (!simplif)
+	{
+		paramsVec = getParams(model_cmdstan = fit, params_names = c("c", "j", "k", "m", "n", "s"), type = "mean")
+	} else {
+		paramsVec_simplif = getParams(model_cmdstan = fit,
+			params_names = c("alpha", "beta_", "gamma", "delta"), type = "mean")
+		paramsVec = c(
+			c = unname(paramsVec_simplif["alpha"]),
+			j = 1,
+			k = unname(paramsVec_simplif["beta_"]),
+			m = unname(exp(-1)*paramsVec_simplif["gamma"]/paramsVec_simplif["beta_"] + paramsVec_simplif["alpha"]),
+			n = unname(paramsVec_simplif["delta"] + paramsVec_simplif["alpha"]),
+			s = unname(paramsVec_simplif["beta_"])
+		)
+	}
+
+	r_func = function(x, pars)
+	{
+		return ((pars["m"] - pars["c"]) * exp(pars["j"] - pars["k"]*x) * (pars["k"]*x/pars["j"])^pars["j"] +
+			pars["c"] - (pars["c"] - pars["n"])*exp(-pars["s"]*x));
+	}
+	
+	psi = function(x, pars)
+	{
+		r = r_func(x, pars)
+
+		return ( 1/pars["c"] * x^( 1 - (log(r) - log(pars["c"])) / log(x) ) )
+	}
+
+	# Compare Vallet vs my ratio fit
+	# plot(x = nfi_data[, bole_volume_m3], y = nfi_data[, r_vallet], pch = 19, col = "#FAB255",
+	# 	xlab = "Bole volume", ylab = "Predicted ratio", axes = FALSE)
+	# curve(r_func(x, paramsVec), add = TRUE, col = "#0F7BA2", lwd = 4)
+	# legend(x = "topright", legend = c("Vallet", "Me"), fill = c("#FAB255", "#0F7BA2"), box.lwd = 0)
+	# axis(1)
+	# axis(2, las = 1)
+
+	# Mine vs predictor, with uncertainty
+	if (!is.null(n_draws))
+	{
+		n_sampling = fit$metadata()$iter_sampling
+		n_chains = fit$num_chains()
+
+		n_draws = min(n_draws, n_sampling*n_chains)
+		ind = sample(x = n_sampling*n_chains, size = n_draws)
+
+		aa = sim$draws("r_gen")
+		dt = data.table(bole_volume_m3 = rep(nfi_data[, bole_volume_m3], each = n_draws),
+			r_me = -Inf)
+		for (i in 1:dim(aa)[3])
+			dt[((i - 1)*n_draws + 1):(i*n_draws), r_me := aa[, , i][ind]]
+		
+		rm(aa)
+	}
+
+	ylim = range(nfi_data[, r_vallet])
+
+	if (!is.null(n_draws))
+		ylim = c(min(dt[, r_me], nfi_data[, r_vallet]), max(dt[, r_me], nfi_data[, r_vallet]))
+	
+	plot(x = nfi_data[, bole_volume_m3], y = nfi_data[, r_vallet], pch = 19, col = "#FAB255", ylim = ylim,
+		xlab = "Predicted bole volume", ylab = "Predicted ratio (me)", axes = FALSE)
+	if (!is.null(n_draws))
+		points(x = dt[, bole_volume_m3], y = dt[, r_me], pch = ".")
+	curve(r_func(x, paramsVec), add = TRUE, col = "#0F7BA2", lwd = 4)
+	axis(1)
+	axis(2, las = 1)
+	legend(x = "topright", legend = c("Vallet", "Me"), fill = c("#FAB255", "#0F7BA2"), box.lwd = 0)
+
+	# Predicted volumes vs circumference
+	plot(x = stanData$bole_volume_m3_new, y = stanData$total_volume_m3_new, pch = 19, col = "#FAB255",
+		xlab = "Predicted total volume", ylab = "Bole volume", axes = FALSE)
+	abline(a = 0, b = 1, lwd = 0.85, lty = "dashed", col = "#4A4A4A")
+	points(x = stanData$bole_volume_m3_new, y = v_tot_pred)
+	legend(x = "topright", legend = c("Ancient", "New"), fill = egypt[1:2], box.lwd = 0)
+	axis(1)
+	axis(2, las = 1)
+}
 ```
 
 ```{r}
@@ -304,9 +441,75 @@ if (!dir.exists(path_data))
 	stop(paste0("Folder <", path_data, "> does not exist! Did you run 01_prepare_data.qmd?"))
 
 tree_dt = readRDS(paste0(path_data, "data_Vtot.rds"))
+
+sp_list = readRDS(paste0(path_data, "species_dt.rds"))
+sp_list[, species_code_inra := NULL]
+sp_list = na.omit(sp_list)
+setkey(sp_list, speciesName_sci)
 ```
 
 <!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
 <!-- ---------------------------   MAIN CONTENT, R CODE   --------------------------- -->
 <!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
 
+```{r}
+#### Generate quantitities
+## Compile generator model
+genQ = cmdstan_model("./yang2024_genQ.stan")
+
+## Prepare data
+sp = "Fagus sylvatica"
+sp_code_nfi = sp_list[sp, species_code_nfi]
+
+nfi_data = get_nfi(sp_code_nfi)
+set.seed(1969 - 08 - 18) # woodstock seed
+nfi_data = nfi_data[method == "new"][sample(x = seq_len(.N), size = 1e4, replace = FALSE)]
+
+stanData = list(
+	N = tree_dt[.(sp)][, .N],
+	N_new = nfi_data[, .N],
+	bole_volume_m3 = tree_dt[.(sp)][, bole_volume_m3],
+	bole_volume_m3_new = nfi_data[, bole_volume_m3],
+	total_volume_m3 = tree_dt[.(sp)][, total_volume_m3],
+	total_volume_m3_new = nfi_data[, total_volume_m3]
+)
+
+## Load fitted model
+sp_file = stri_replace(str = sp, regex = " ", replacement = "-")
+filename = paste0("./yang/", sp_file)
+fit = readRDS(paste0(filename, ".rds"))
+
+## Common variables
+n_chains = fit$num_chains()
+woodstock_seed = 1969 - 08 - 18
+egypt = met.brewer("Egypt")
+
+nfi_data[, .N, by = method]
+nfi_data[, colour := ifelse(method == "ancient", egypt[1], egypt[2])]
+
+## Predict on new data
+sim = genQ$generate_quantities(fitted_params = fit, data = stanData,
+	seed = woodstock_seed, parallel_chains = min(n_chains, 4))
+
+v_tot_pred = apply(X = sim$draws("v_gen_mean"), MARGIN = 3, FUN = mean)
+
+## Plot
+# Mine vs Vallet
+plot(x = stanData$total_volume_m3_new, y = v_tot_pred, pch = 19, col = nfi_data[, colour],
+	xlab = "Predicted total volume (Vallet)", ylab = "Predicted total volume (me)", axes = FALSE)
+abline(a = 0, b = 1, lwd = 0.85, lty = "dashed", col = "#4A4A4A")
+legend(x = "topright", legend = c("Ancient", "New"), fill = egypt[1:2], box.lwd = 0)
+axis(1)
+axis(2, las = 1)
+
+# Ratio vallet and fit vs predictor
+ratio_vallet_fit(fit, sim, nfi_data, n_draws = 10)
+
+# Predicted volumes vs circumference
+plot(x = nfi_data[, circumference_m], y = nfi_data[, total_volume_m3], pch = 19, col = "#FAB255",
+	xlab = "Circumference", ylab = "Total volume", axes = FALSE)
+points(x = nfi_data[, circumference_m], y = v_tot_pred, col = "#0F7BA2", pch = 19, cex = 0.65)
+legend(x = "topleft", legend = c("M1", "M2"), fill = c("#FAB255", "#0F7BA2"), box.lwd = 0)
+axis(1)
+axis(2, las = 1)
+```
