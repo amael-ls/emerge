@@ -417,6 +417,294 @@ ratio_vallet_fit = function(fit, sim, nfi_data, n_draws = NULL, simplif = FALSE)
 	axis(1)
 	axis(2, las = 1)
 }
+
+## Function to compare models, based on PSIS-LOO
+comparison = function(sp, tree_dt, woodstock_seed = 1969 - 08 - 18, printPlot = FALSE)
+{
+	#### Generate quantitities
+	## Compile generator models
+	genQ_old = cmdstan_model("./yang2024-genQ_old.stan")
+	genQ_new = cmdstan_model("./yang2024_genQ.stan")
+	genQ_sub = cmdstan_model("./yang2024-genQ_submodel.stan")
+
+	## Prepare data
+	stanData = list(
+		N = tree_dt[.(sp)][, .N],
+		N_new = tree_dt[.(sp)][, .N],
+		bole_volume_m3 = tree_dt[.(sp)][, bole_volume_m3],
+		bole_volume_m3_new = tree_dt[.(sp)][, bole_volume_m3],
+		total_volume_m3 = tree_dt[.(sp)][, total_volume_m3],
+		total_volume_m3_new = tree_dt[.(sp)][, total_volume_m3]
+	)
+
+	## Load fitted model
+	old_file = paste0("./yang/", stri_replace(str = sp, regex = " ", replacement = "-"))
+	new_file = paste0("./yang/", stri_replace(str = sp, regex = " ", replacement = "-"), "_new")
+	sub_file = paste0("./yang/", stri_replace(str = sp, regex = " ", replacement = "-"), "_submodel")
+
+	if (sp == "Quercus sp.")
+		new_file = stri_replace(str = new_file, regex = "._", replacement = "_")
+
+	old = readRDS(paste0(old_file, ".rds"))
+	new = readRDS(paste0(new_file, ".rds"))
+	sub = readRDS(paste0(sub_file, ".rds"))
+
+	n_chains = old$num_chains()
+
+	## Predict on new data
+	sim_old = genQ_old$generate_quantities(fitted_params = old, data = stanData,
+		seed = woodstock_seed, parallel_chains = min(n_chains, 4))
+
+	sim_new = genQ_new$generate_quantities(fitted_params = new, data = stanData,
+		seed = woodstock_seed, parallel_chains = min(n_chains, 4))
+	
+	sim_sub = genQ_sub$generate_quantities(fitted_params = sub, data = stanData,
+		seed = woodstock_seed, parallel_chains = min(n_chains, 4))
+
+	## Save simulations
+	v_gen_mean_old = apply(X = sim_old$draws("v_gen_mean"), MARGIN = 3, FUN = mean)
+	v_gen_mean_new = apply(X = sim_new$draws("v_gen_mean"), MARGIN = 3, FUN = mean)
+	v_gen_mean_sub = apply(X = sim_sub$draws("v_gen_mean"), MARGIN = 3, FUN = mean)
+
+	saveRDS(data.table(old = v_gen_mean_old, new = v_gen_mean_new, sub = v_gen_mean_sub),
+		paste0(old_file, "_simV.rds"))
+
+	if (printPlot)
+	{
+		plot(x = v_gen_mean_old, y = v_gen_mean_new, pch = 19, xlab = "Old", ylab = "New", axes = FALSE)
+		abline(a = 0, b = 1, col = "#CD212A")
+		axis(1)
+		axis(2, las = 1)
+		
+		plot(x = v_gen_mean_old, y = v_gen_mean_sub, pch = 19, xlab = "Old", ylab = "Sub", axes = FALSE)
+		abline(a = 0, b = 1, col = "#CD212A")
+		axis(1)
+		axis(2, las = 1)
+
+		plot(x = v_gen_mean_sub, y = v_gen_mean_new, pch = 19, xlab = "Sub", ylab = "New", axes = FALSE)
+		abline(a = 0, b = 1, col = "#CD212A")
+		axis(1)
+		axis(2, las = 1)
+		
+		plot(v_gen_mean_old - v_gen_mean_new, pch = 19, xlab = "Rank", ylab = "Diff")
+		abline(a = 1, b = 0, lwd = 2, col = "#CD212A")
+	}
+
+	## Compute PSIS-LOO...
+	# ... for old
+	r_eff_old = loo::relative_eff(exp(sim_old$draws("log_lik")), cores = 8)
+	loo_old = loo::loo(x = sim_old$draws("log_lik"), r_eff = r_eff_old, cores = 8)
+
+	# ... for new
+	r_eff_new = loo::relative_eff(exp(sim_new$draws("log_lik")), cores = 8)
+	loo_new = loo::loo(x = sim_new$draws("log_lik"), r_eff = r_eff_new, cores = 8)
+	
+	# ... for submodel
+	r_eff_sub = loo::relative_eff(exp(sim_sub$draws("log_lik")), cores = 8)
+	loo_sub = loo::loo(x = sim_sub$draws("log_lik"), r_eff = r_eff_sub, cores = 8)
+
+	warning_loo_old = FALSE
+	if (any(loo_old$diagnostics$pareto_k >= 0.7))
+		warning_loo_old = TRUE
+
+	warning_loo_new = FALSE
+	if (any(loo_new$diagnostics$pareto_k >= 0.7))
+		warning_loo_new = TRUE
+	
+	warning_loo_sub = FALSE
+	if (any(loo_sub$diagnostics$pareto_k >= 0.7))
+		warning_loo_sub = TRUE
+
+	warn = warning_loo_old | warning_loo_new | warning_loo_sub
+
+	## Compare both models based on psisloo and weights
+	comp = loo::loo_compare(list(old = loo_old, new = loo_new, sub = loo_sub))
+	best = rownames(comp)[1]
+
+	weights = head(loo::loo_model_weights(x = list(old = loo_old, new = loo_new, sub = loo_sub),
+		method = "stacking")) # I use head to return a named vector
+
+	## R squared
+	var_fit_old = apply(X = posterior::as_draws_matrix(sim_old$draws("v_gen_mean")),
+		MARGIN = 1, FUN = var)
+	var_res_old = sim_old$draws("sigma_var")
+
+	var_fit_new = apply(X = posterior::as_draws_matrix(sim_new$draws("v_gen_mean")),
+		MARGIN = 1, FUN = var)
+	var_res_new = sim_new$draws("sigma_var")
+	
+	var_fit_sub = apply(X = posterior::as_draws_matrix(sim_sub$draws("v_gen_mean")),
+		MARGIN = 1, FUN = var)
+	var_res_sub = sim_sub$draws("sigma_var")
+
+	rsq_old = var_fit_old / (var_fit_old + var_res_old)
+	rsq_new = var_fit_new / (var_fit_new + var_res_new)
+	rsq_sub = var_fit_sub / (var_fit_sub + var_res_sub)
+
+	## Return results
+	return (list(
+		best = best, comploo = comp, weights = weights,
+		warning_loo_old = warning_loo_old, warning_loo_new = warning_loo_new, warning_loo_sub = warning_loo_sub,
+		avg_old = mean(rsq_old), avg_new = mean(rsq_new), avg_sub = mean(rsq_sub),
+		warning = warn))
+}
+
+## Function to compare model new version with submodel, based on PSIS-LOO
+comparison_yang_sub = function(sp, tree_dt, woodstock_seed = 1969 - 08 - 18, printPlot = FALSE)
+{
+	#### Generate quantitities
+	## Compile generator models
+	genQ_new = cmdstan_model("./yang2024_genQ.stan")
+	genQ_sub = cmdstan_model("./yang2024-genQ_submodel.stan")
+
+	## Prepare data
+	stanData = list(
+		N = tree_dt[.(sp)][, .N],
+		N_new = tree_dt[.(sp)][, .N],
+		bole_volume_m3 = tree_dt[.(sp)][, bole_volume_m3],
+		bole_volume_m3_new = tree_dt[.(sp)][, bole_volume_m3],
+		total_volume_m3 = tree_dt[.(sp)][, total_volume_m3],
+		total_volume_m3_new = tree_dt[.(sp)][, total_volume_m3]
+	)
+
+	## Load fitted model
+	new_file = paste0("./yang/", stri_replace(str = sp, regex = " ", replacement = "-"), "_new")
+	sub_file = paste0("./yang/", stri_replace(str = sp, regex = " ", replacement = "-"), "_submodel")
+
+	if (sp == "Quercus sp.")
+		new_file = stri_replace(str = new_file, regex = "._", replacement = "_")
+
+	new = readRDS(paste0(new_file, ".rds"))
+	sub = readRDS(paste0(sub_file, ".rds"))
+
+	n_chains = new$num_chains()
+
+	## Compute max rhat for Yang and submodel
+	rhat_yang = posterior::summarise_draws(new$draws(), posterior::rhat)
+	rhat_yang_m = max(rhat_yang[, "posterior::rhat"])
+	rhat_sub = posterior::summarise_draws(sub$draws(), posterior::rhat)
+	rhat_sub_m = max(rhat_sub[, "posterior::rhat"])
+
+	## Predict on new data
+	sim_new = genQ_new$generate_quantities(fitted_params = new, data = stanData,
+		seed = woodstock_seed, parallel_chains = min(n_chains, 4))
+	
+	sim_sub = genQ_sub$generate_quantities(fitted_params = sub, data = stanData,
+		seed = woodstock_seed, parallel_chains = min(n_chains, 4))
+
+	## Save simulations
+	v_gen_mean_new = apply(X = sim_new$draws("v_gen_mean"), MARGIN = 3, FUN = mean)
+	v_gen_mean_sub = apply(X = sim_sub$draws("v_gen_mean"), MARGIN = 3, FUN = mean)
+
+	if (printPlot)
+	{	
+		plot(x = v_gen_mean_sub, y = v_gen_mean_new, pch = 19, xlab = "Sub", ylab = "New", axes = FALSE)
+		abline(a = 0, b = 1, col = "#CD212A")
+		axis(1)
+		axis(2, las = 1)
+	}
+
+	## Compute PSIS-LOO...
+	# ... for new
+	r_eff_new = loo::relative_eff(exp(sim_new$draws("log_lik")), cores = 8)
+	loo_new = loo::loo(x = sim_new$draws("log_lik"), r_eff = r_eff_new, cores = 8)
+	
+	# ... for submodel
+	r_eff_sub = loo::relative_eff(exp(sim_sub$draws("log_lik")), cores = 8)
+	loo_sub = loo::loo(x = sim_sub$draws("log_lik"), r_eff = r_eff_sub, cores = 8)
+
+	warning_loo_new = FALSE
+	if (any(loo_new$diagnostics$pareto_k >= 0.7))
+		warning_loo_new = TRUE
+	
+	warning_loo_sub = FALSE
+	if (any(loo_sub$diagnostics$pareto_k >= 0.7))
+		warning_loo_sub = TRUE
+
+	warn = warning_loo_new | warning_loo_sub
+
+	## Compare both models based on psisloo and weights
+	comp = loo::loo_compare(list(yang = loo_new, sub = loo_sub))
+	best = rownames(comp)[1]
+
+	weights = head(loo::loo_model_weights(x = list(yang = loo_new, sub = loo_sub),
+		method = "stacking")) # I use head to return a named vector
+
+	## R squared
+	var_fit_new = apply(X = posterior::as_draws_matrix(sim_new$draws("v_gen_mean")),
+		MARGIN = 1, FUN = var)
+	var_res_new = sim_new$draws("sigma_var")
+	
+	var_fit_sub = apply(X = posterior::as_draws_matrix(sim_sub$draws("v_gen_mean")),
+		MARGIN = 1, FUN = var)
+	var_res_sub = sim_sub$draws("sigma_var")
+
+	rsq_new = var_fit_new / (var_fit_new + var_res_new)
+	rsq_sub = var_fit_sub / (var_fit_sub + var_res_sub)
+
+	## Return results
+	return (list(
+		best = best, comploo = comp, weights = weights,
+		warning_loo_yang = warning_loo_new, warning_loo_sub = warning_loo_sub, warning = warn,
+		avg_yang = mean(rsq_new), avg_sub = mean(rsq_sub),
+		rhat_yang = rhat_yang_m, rhat_sub = rhat_sub_m))
+}
+
+rhat_temp = function(sp, tree_dt)
+{
+	## Load fitted model
+	new_file = paste0("./yang/", stri_replace(str = sp, regex = " ", replacement = "-"), "_new")
+	sub_file = paste0("./yang/", stri_replace(str = sp, regex = " ", replacement = "-"), "_submodel")
+
+	if (sp == "Quercus sp.")
+		new_file = stri_replace(str = new_file, regex = "._", replacement = "_")
+
+	new = readRDS(paste0(new_file, ".rds"))
+	sub = readRDS(paste0(sub_file, ".rds"))
+
+	n_chains = new$num_chains()
+
+	## Compute max rhat for Yang and submodel
+	rhat_yang = posterior::summarise_draws(new$draws(), posterior::rhat)
+	rhat_yang_m = max(rhat_yang[, "posterior::rhat"])
+	rhat_sub = posterior::summarise_draws(sub$draws(), posterior::rhat)
+	rhat_sub_m = max(rhat_sub[, "posterior::rhat"])
+
+	## Return
+	return(list(rhat_yang = rhat_yang_m, rhat_sub = rhat_sub_m))
+}
+
+rebuilt_comp = function(save_ls)
+{
+	ls_species = names(save_ls)
+	
+	comp = data.table(species = ls_species, best = "", elpd_diff_old = -Inf, se_diff_old = -Inf,
+		elpd_diff_new = -Inf, se_diff_new = -Inf,
+		elpd_diff_sub = -Inf, se_diff_sub = -Inf,
+		warning = FALSE, key = "species")
+	weights_dt = data.table(species = ls_species, best = "", old = -Inf, new = -Inf, sub = -Inf, key = "species")
+	R2D2 = data.table(species = ls_species, R2_old = -Inf, R2_new = -Inf, R2_sub = -Inf, key = "species")
+
+	for (sp in ls_species)
+	{
+		weights_dt[sp, c("old", "new", "sub") := as.list(round(save_ls[[sp]]$weights, digits = 3))]
+		R2D2[sp, c("R2_old", "R2_new", "R2_sub") :=
+			.(round(save_ls[[sp]]$avg_old, digits = 3),
+				round(save_ls[[sp]]$avg_new, digits = 3),
+				round(save_ls[[sp]]$avg_sub, digits = 3))]
+		
+		comp[sp, c("best", "warning") := .(save_ls[[sp]]$best, save_ls[[sp]]$warning)]
+		
+		comp[sp, c("elpd_diff_old", "se_diff_old") :=
+				as.list(round(save_ls[[sp]]$comploo["old", c("elpd_diff", "se_diff")], digits = 2))]
+		comp[sp, c("elpd_diff_new", "se_diff_new") :=
+				as.list(round(save_ls[[sp]]$comploo["new", c("elpd_diff", "se_diff")], digits = 2))]
+		comp[sp, c("elpd_diff_sub", "se_diff_sub") :=
+				as.list(round(save_ls[[sp]]$comploo["sub", c("elpd_diff", "se_diff")], digits = 2))]
+	}
+
+	return(list(comp = comp, weights_dt = weights_dt, R2D2 = R2D2))
+}
 ```
 
 ```{r}
@@ -451,6 +739,139 @@ setkey(sp_list, speciesName_sci)
 <!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
 <!-- ---------------------------   MAIN CONTENT, R CODE   --------------------------- -->
 <!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+## Comparison Old/new Yang 2024 and my simplified version
+
+I will do two comparison:
+1. Old vs new Yang 2024 vs sub, in order to check if new and old are the same for species that are working with old version, and to see if new is able to replace sub in some cases.
+2. New Yang 2024 vs sub, once I validated that Old and New mostly agree and that performance are the same.
+
+### Old vs new Yang 2024 vs sub
+
+```{r}
+ls_species = tree_dt[, unique(speciesName_sci)]
+comp = data.table(species = ls_species, best = "", elpd_diff = -Inf, se_diff = -Inf,
+	warning = FALSE, key = "species")
+
+weights_dt = data.table(species = ls_species, best = "", old = -Inf, new = -Inf, sub = -Inf, key = "species")
+
+R2D2 = data.table(species = ls_species, R2_old = -Inf, R2_new = -Inf, R2_sub = -Inf, key = "species")
+
+if (file.exists("./yang/comparison.rds"))
+{
+	save_ls = readRDS("./yang/comparison.rds")
+} else {
+	save_ls = vector(mode = "list", length = length(ls_species))
+	names(save_ls) = ls_species
+
+	for (sp in ls_species)
+	{
+		temp = comparison(sp = sp, tree_dt = tree_dt)
+		save_ls[[sp]] = temp
+		comp[.(sp), c("best", "elpd_diff", "se_diff", "warning") :=
+			.(temp$best, round(temp$comploo[2, 1], 2), round(temp$comploo[2, 2], 2), temp$warning)]
+
+		weights_dt[.(sp), c("best", "old", "new", "sub") :=
+			.(temp$best, temp$weights["old"], temp$weights["new"], temp$weights["sub"])]
+
+		R2D2[.(sp), c("R2_old", "R2_new", "R2_sub") := .(temp[["avg_old"]], temp[["avg_new"]], temp[["avg_sub"]])]
+	}
+
+	saveRDS(save_ls, "./yang/comparison.rds")
+}
+```
+
+*In fine*, it seems that old and new are quite similare, with non-significative differences. Therefore, I can now process only with the new version, which I will use in the article (and the old one not being reported, as it does not follow eactly the method section, with the hidden dependance of $s$ to $$j$ and $k$).
+
+### New vs sub
+
+```{r}
+ls_species = tree_dt[, unique(speciesName_sci)]
+comp = data.table(species = ls_species, best = "", elpd_diff = -Inf, se_diff = -Inf,
+	warning = FALSE, key = "species")
+
+weights_dt = data.table(species = ls_species, best = "", W_yang = -Inf, W_sub = -Inf, key = "species")
+
+rhat_dt = data.table(species = ls_species, Rhat_yang = -Inf, Rhat_sub = -Inf, key = "species")
+
+R2D2 = data.table(species = ls_species, R2_yang = -Inf, R2_sub = -Inf, key = "species")
+
+if (file.exists("./yang/comparison_new-sub.rds"))
+{
+	save_ls = readRDS("./yang/comparison_new-sub.rds")
+} else {
+	save_ls = vector(mode = "list", length = length(ls_species))
+	names(save_ls) = ls_species
+
+	for (sp in ls_species)
+	{
+		temp = comparison_yang_sub(sp = sp, tree_dt = tree_dt)
+		save_ls[[sp]] = temp
+		comp[.(sp), c("best", "elpd_diff", "se_diff", "warning") :=
+			.(temp$best, temp$comploo[2, 1], temp$comploo[2, 2], temp$warning)]
+
+		weights_dt[.(sp), c("best", "W_yang", "W_sub") :=
+			.(temp$best, temp$weights["yang"], temp$weights["sub"])]
+
+		R2D2[.(sp), c("R2_yang", "R2_sub") := .(temp[["avg_yang"]], temp[["avg_sub"]])]
+
+		rhat_dt[sp, c("Rhat_yang", "Rhat_sub") := .(temp[["rhat_yang"]], temp[["rhat_sub"]])]
+	}
+
+	comp = merge.data.table(comp, rhat_dt, by = "species")
+	comp = merge.data.table(comp, tree_dt[, .N, by = speciesName_sci], by.x = "species", by.y = "speciesName_sci")
+	saveRDS(save_ls, "./yang/comparison_new-sub.rds")
+	fwrite(R2D2, "../../../writing/article_allometry/data/rsquared.csv")
+}
+```
+
+## Reading @McLatchie2024
+
+I am testing the appendix A of @McLatchie2024, and more specifically the pseudo-BMA+ weights, equation A4. My coding of equation A2 might be surprising, but read well equation A2! It is:
+$$
+	P[A > B],
+$$
+
+which equals
+
+$$
+	1 - P[A < B],
+$$
+
+and since $\int \text{dnorm}$ returns $P[A < B]$ I need the $1 - $ stuff! Not that it is also equivalent to integrate the function Gauss from 0 to $\infty$...
+
+Finally, note that I use `pnorm` as I noticed the `integrate` function is unstable for large values of $\Delta \text{ELPD}$...
+
+```{r}
+diff_elpd = 4
+se_elpd = 2
+gauss = function(x, diff_elpd, se_elpd)
+	return(dnorm(x, mean = diff_elpd, sd = se_elpd))
+
+f = function(x, diff_elpd, se_elpd)
+	return(dnorm(x, mean = 0, sd = se_elpd)/(1 + exp(-diff_elpd - x)))
+
+1 - integrate(gauss, lower = -Inf, upper = 0, diff_elpd = diff_elpd, se_elpd = se_elpd)$value # Eq A2
+
+pnorm(0, mean = diff_elpd, sd = se_elpd, lower.tail = FALSE) # Eq A2, equivalent
+
+integrate(f, lower = -Inf, upper = +Inf, diff_elpd = diff_elpd, se_elpd = se_elpd)$value # Eq A4
+
+
+comp[, eq_A2 := -Inf]
+comp[, eq_A2_bis := -Inf]
+comp[, pseudo_bma := -Inf]
+
+comp[, eq_A2 := integrate(gauss, lower = 0, upper = +Inf, diff_elpd = abs(elpd_diff), se_elpd = se_diff)$value,
+	by = species]
+comp[, eq_A2_bis := pnorm(0, mean = abs(elpd_diff), sd = se_diff, lower.tail = FALSE),
+	by = species]
+comp[, pseudo_bma := integrate(f, lower = -Inf, upper = +Inf, diff_elpd = abs(elpd_diff), se_elpd = se_diff)$value,
+	by = species]
+
+fwrite(comp, "../../../writing/article_allometry/data/comparison.csv")
+```
+
+## Other stuff, to compare Vallet with my model
 
 ```{r}
 #### Generate quantitities
