@@ -91,6 +91,44 @@ library(loo)
 
 ## Tool function
 source("./toolFunctions.R")
+
+## Function that computes PSIS-LOO, residuals, predictions, R squared on validation dataset
+pred_fct = function(sp, florence_dt, nfi_data, woodstock_seed = 1969 - 08 - 18)
+{	
+	#### Generate quantities...
+	## Prepare data
+	stanData_gen = list(
+		N = florence_dt[sp][(type == "ajust"), .N],
+		
+		circumference_m = florence_dt[sp][(type == "ajust"), c13],
+		taper_height_flo = florence_dt[sp][(type == "ajust"), hdecro],
+		height = florence_dt[sp][(type == "ajust"), htot],
+
+		N_new = nfi_data[sp][, .N],
+
+		circumference_m_new = nfi_data[sp][, circumference_m],
+		taper_height_flo_new = nfi_data[sp][, taper_height_flo],
+		height_new = nfi_data[sp][, height],
+		bole_volume_m3_new = nfi_data[sp][, bole_volume_m3]
+	)
+
+	## ... for Florence++
+	heterosked_genQ = cmdstan_model("../../gohon_florence/florence-genQ_gamma.stan")
+	fit_flopp = readRDS(paste0("../../gohon_florence/", sp, "/florence-gamma_heterosked.rds"))
+	n_chains = fit_flopp$num_chains()
+
+	sim_flopp = heterosked_genQ$generate_quantities(fit_flopp, data = stanData_gen,
+		seed = woodstock_seed, parallel_chains = min(n_chains, 4))
+
+	rm(fit_flopp)
+
+	## Predictions and residuals
+	pred_flopp = apply(X = sim_flopp$draws("sim_bole"), MARGIN = 3, FUN = mean)
+	pred_flopp_quant = apply(X = sim_flopp$draws("sim_bole"), MARGIN = 3, FUN = quantile,
+		probs = c(0.1, 0.9))
+
+	return (list(pred = pred_flopp, quant = pred_flopp_quant))
+}
 ```
 
 ```{r}
@@ -135,10 +173,10 @@ sp_code_nfi = paste0("'", paste(nfi_codes[, species_code_nfi], collapse = "','")
 ## French NFI data query
 db = connect_db()
 
-# In Ancient Method (am), the inventory was done by cycles rather than homogeneously distributed everywhere
+## In Ancient Method (am), the inventory was done by cycles rather than homogeneously distributed everywhere
 nfi_data_am = exec_req(conn = db, req = paste0("
 	SELECT
-		tree.NPP, tree.A, tree.ESS, tree.C13, tree.HTOT, tree.R, tree.V, tree.VTOT
+		tree.NPP, tree.A, tree.ESS, tree.C13, tree.HTOT, tree.HDEC, tree.DDEC, tree.V
 
 	FROM
 		inv_exp_am.g3arbre AS tree
@@ -146,15 +184,16 @@ nfi_data_am = exec_req(conn = db, req = paste0("
 	WHERE
 		tree.ESS IN (", sp_code_nfi, ") AND -- Selected tree species
 		tree.MC IN ('4', '5') AND -- Circumference measured, and not diameter
+		tree.CUBE = 'M' AND -- Cubed trees, remove 439 trees that have hdec but were not cubed, so ok
 		(tree.DOM BETWEEN '0' AND '5') -- Alive and no pollarded nor heavily pruned tree
 
 	ORDER BY
 		NPP, A;"), DT = TRUE)
 
-# New method
+## New method
 nfi_data_nm = exec_req(conn = db, req = paste0("
 	SELECT
-		tree.NPP, tree.A, tree.ESS, tree.C13, tree.HTOT, tree.R, tree.V, tree.V0 AS VTOT
+		tree.NPP, tree.A, tree.ESS, tree.C13, tree.HTOT, tree.HDEC, tree.DDEC, tree.V, tree.DECOUPE
 
 	FROM
 		inv_exp_nm.g3arbre AS tree
@@ -165,25 +204,56 @@ nfi_data_nm = exec_req(conn = db, req = paste0("
 		COALESCE(tree.forme, 'X') NOT IN ('0', 'Z') AND -- No pollarded nor heavily pruned tree
 		COALESCE(tree.tige, '1') = '1' -- No twin, forked, or heavily broken trees
 
+	UNION ALL
+
+	SELECT
+		treep.NPP, treep.A, treep.ESS, treep.C13, treep.HTOT, treep.HDEC, treep.DDEC, treep.V, treep.DECOUPE
+
+	FROM
+		inv_exp_nm.p3arbre AS treep
+
+	WHERE
+		treep.ESS IN (", sp_code_nfi, ") AND -- Selected tree species
+		(treep.veget = '0' OR treep.veget = 'Z') AND -- Alive
+		COALESCE(treep.forme, 'X') NOT IN ('0', 'Z') AND -- No pollarded nor heavily pruned tree
+		COALESCE(treep.tige, '1') = '1' -- No twin, forked, or heavily broken trees
+
 	ORDER BY
 		NPP, A;"), DT = TRUE)
 
 disconnect_db(db)
 
-# Merge data
+## Remove NAs and compute hdecro (hdec from Florence, never knew why it was called hdecro...)
+nfi_data_am = nfi_data_am[!is.na(ddec)]
+nfi_data_am[, hdecro := hdec]
+nfi_data_am[ddec == 0.07, hdecro := htot]
+
+nfi_data_nm = nfi_data_nm[!is.na(hdec)]
+nfi_data_nm[, hdecro := hdec]
+nfi_data_nm[decoupe == "0", hdecro := htot] # Regulare trees
+
+## Merge data
+# Add origin
 nfi_data_am[, method := "ancient"]
 nfi_data_nm[, method := "new"]
 
+# Remove non-common columns
+nfi_data_am[, ddec := NULL]
+nfi_data_nm[, c("decoupe", "ddec") := NULL]
+
+# Merging
 nfi_data = rbindlist(list(nfi_data_am, nfi_data_nm))
 
-# Change names
-setnames(nfi_data, new = c("plot_id", "tree_id", "sp_code", "circumference_m", "height", "cull",
-	"bole_volume_m3", "total_volume_m3", "method"))
+## Change names
+setnames(nfi_data, new = c("plot_id", "tree_id", "sp_code", "circumference_m", "height",
+	"taper_height", "bole_volume_m3", "taper_height_flo", "method"))
 
-# Commpute ratio
-nfi_data[, r_vallet := bole_volume_m3/total_volume_m3]
+## Add scientific names
+nfi_data = merge.data.table(nfi_data, nfi_codes, by.x = "sp_code", by.y = "species_code_nfi")
+
+## Remove null volumes as judged irrealistic
+nfi_data = nfi_data[bole_volume_m3 > 0]
 ```
-
 
 <!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
 <!-- ---------------------------   MAIN CONTENT, R CODE   --------------------------- -->
@@ -192,10 +262,32 @@ nfi_data[, r_vallet := bole_volume_m3/total_volume_m3]
 ## Introduction
 
 This script is generates data to plot figures in pgfplots in the article. The figures that I have currently in mind are:
-1. $\Vtot$ vs $\Vbft$ with 90% credibility interval (CI). Ideally, there would be two colours, one for the training range, and one for the NFI range if larger than training range (which I expect)
+1. $\Vtot$ vs $\Vbft$ with 90% credibility interval (CI). Ideally, there would be two colours, one for the training range, and one for the NFI range if larger than training range (which I expect). Note that I will use the new formula for bole volumes rather than the values provided in the database...
 
 ## Figure `Vtot` vs `Vbole` with CI
 
-```{r}
+I noticed that the range of values provided by the NFI are sometimes incoherent, such as 40 cubic meters for *Pinus laricio*, which is far beyond its usual range I think (although it is a tree 42.4 m tall and 5.52 m circumference)...
 
+```{r}
+range_dt = merge.data.table(
+	training_dt[, .(min_t = min(bole_volume_m3), max_t = max(bole_volume_m3)), by = speciesName_sci],
+	nfi_data[, .(min_nfi = min(bole_volume_m3), max_nfi = max(bole_volume_m3)), by = speciesName_sci])
+```
+
+### Predict the bole volumes based on Flopp model
+
+This is done in ?? steps:
+1. Load the training dataset of Florence
+2. 
+
+```{r}
+#### Reading data
+florence_dt = readRDS("../../gohon_florence/arbComp.rds")
+setkey(florence_dt, "ess")
+
+florence_dt = florence_dt[nfi_codes[, species_code_nfi]]
+setkey(florence_dt, "ess")
+
+for (sp in nfi_codes[, species_code_nfi])
+	pred_fct(sp, florence_dt, nfi_data)
 ```
