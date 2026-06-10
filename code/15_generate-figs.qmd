@@ -1,5 +1,5 @@
 ---
-title: "Run the ratio models (complete and submodel)"
+title: "Generate figures and pgfplots data from model outputs"
 date: today
 author: Amaël Le Squin
 date-format: iso
@@ -96,7 +96,7 @@ source("./toolFunctions.R")
 ```{r}
 #| output: false
 
-#### Load the data
+#### Load the training data
 ## Path
 os = Sys.info()[['sysname']]
 mnt_point = "/mnt/local_share/"
@@ -114,46 +114,74 @@ path_data = paste0(mnt_point, "data/")
 if (!dir.exists(path_data))
 	stop(paste0("Folder <", path_data, "> does not exist! Did you run 01_prepare_data.qmd?"))
 
-opt = "_inra"
+## Loading training dataset
+training_dt = readRDS(paste0(path_data, "data_Vtot.rds"))
 
-# Loading Emerge data
-inra = readRDS(paste0(path_data, "nfi-inra_dt", opt, ".rds"))
-inra = inra[, .(speciesName_sci, tree_id = unique_id, plot_id, fct_type, year, circumference_m, height,
-	taper_height = taper_height_flo, bole_volume_m3, total_volume_m3)]
-setkey(inra, speciesName_sci)
+## List parametrised species and get their NFI code
+ls_species = training_dt[, unique(speciesName_sci)]
 
-# Loading Swiss data
-swiss = readRDS(paste0(mnt_point, "data/switzerland.rds"))
-swiss = unique(swiss[, .(speciesName_sci, tree_id, plot_id, fct_type, year, circumference_m, height,
-	taper_height = hdec, bole_volume_m3, total_volume_m3)])
-setkey(swiss, speciesName_sci)
+nfi_codes = readRDS(paste0(path_data, "species_dt.rds"))[!is.na(species_code_nfi),
+	.(speciesName_sci, species_code_nfi)]
+setkey(nfi_codes, speciesName_sci)
 
-## Modern Emerge data
-emerge = readRDS(paste0(mnt_point, "data/emerge_2009-2010.rds"))
-emerge[, year := as.integer(stringi::stri_replace_all(str = dataset, replacement = "", regex = "emerge_"))]
-emerge = emerge[, .(speciesName_sci, tree_id, fct_type, year, circumference_m, height, taper_height,
-	bole_volume_m3 = bole_volume_conic_m3, total_volume_m3)]
+nfi_codes = nfi_codes[ls_species]
+setkey(nfi_codes, speciesName_sci)
 
-## Bind everything
-tree_dt = rbindlist(list(inra = inra, swiss = swiss, emerge = emerge), idcol = "origin", fill = TRUE)
+nfi_codes["Fraxinus excelsior", species_code_nfi := 17] # Manually assigned Fraxinus sp. code
 
-# Add colours France vs Swiss
-ls_colours = met.brewer("Egypt")[1:4]
-names(ls_colours) = c("fr_comp", "fr", "ch_comp", "ch")
-tree_dt[, colour := ls_colours["fr"]] # Inra and Emerge, in blue
-tree_dt[origin == "swiss", colour := ls_colours["ch"]] # Swiss, in yellow
+sp_code_nfi = paste0("'", paste(nfi_codes[, species_code_nfi], collapse = "','"), "'")
 
-# Remove NAs
-tree_dt = tree_dt[!is.na(bole_volume_m3)]
+#### Loading NFI data
+## French NFI data query
+db = connect_db()
 
-# Remove species with less than 150 individuals
-tree_dt[, n_indiv := .N, by = speciesName_sci]
-tree_dt = tree_dt[n_indiv > 150]
+# In Ancient Method (am), the inventory was done by cycles rather than homogeneously distributed everywhere
+nfi_data_am = exec_req(conn = db, req = paste0("
+	SELECT
+		tree.NPP, tree.A, tree.ESS, tree.C13, tree.HTOT, tree.R, tree.V, tree.VTOT
 
-tree_dt[, .N, by = .(speciesName_sci, colour)][order(speciesName_sci)]
+	FROM
+		inv_exp_am.g3arbre AS tree
 
-# Set key to sort by species and colour (i.e., France vs Switzerland)
-setkey(tree_dt, speciesName_sci, colour)
+	WHERE
+		tree.ESS IN (", sp_code_nfi, ") AND -- Selected tree species
+		tree.MC IN ('4', '5') AND -- Circumference measured, and not diameter
+		(tree.DOM BETWEEN '0' AND '5') -- Alive and no pollarded nor heavily pruned tree
+
+	ORDER BY
+		NPP, A;"), DT = TRUE)
+
+# New method
+nfi_data_nm = exec_req(conn = db, req = paste0("
+	SELECT
+		tree.NPP, tree.A, tree.ESS, tree.C13, tree.HTOT, tree.R, tree.V, tree.V0 AS VTOT
+
+	FROM
+		inv_exp_nm.g3arbre AS tree
+
+	WHERE
+		tree.ESS IN (", sp_code_nfi, ") AND -- Selected tree species
+		(tree.veget = '0' OR tree.veget = 'Z') AND -- Alive
+		COALESCE(tree.forme, 'X') NOT IN ('0', 'Z') AND -- No pollarded nor heavily pruned tree
+		COALESCE(tree.tige, '1') = '1' -- No twin, forked, or heavily broken trees
+
+	ORDER BY
+		NPP, A;"), DT = TRUE)
+
+disconnect_db(db)
+
+# Merge data
+nfi_data_am[, method := "ancient"]
+nfi_data_nm[, method := "new"]
+
+nfi_data = rbindlist(list(nfi_data_am, nfi_data_nm))
+
+# Change names
+setnames(nfi_data, new = c("plot_id", "tree_id", "sp_code", "circumference_m", "height", "cull",
+	"bole_volume_m3", "total_volume_m3", "method"))
+
+# Commpute ratio
+nfi_data[, r_vallet := bole_volume_m3/total_volume_m3]
 ```
 
 
@@ -164,7 +192,7 @@ setkey(tree_dt, speciesName_sci, colour)
 ## Introduction
 
 This script is generates data to plot figures in pgfplots in the article. The figures that I have currently in mind are:
-1. `Vtot` vs `Vbole` with 90% credibility interval (CI). Ideally, there would be two colours, one for the training range, and one for the NFI range if larger than training range (which I expect)
+1. $\Vtot$ vs $\Vbft$ with 90% credibility interval (CI). Ideally, there would be two colours, one for the training range, and one for the NFI range if larger than training range (which I expect)
 
 ## Figure `Vtot` vs `Vbole` with CI
 
