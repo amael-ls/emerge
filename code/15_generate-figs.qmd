@@ -1,0 +1,173 @@
+---
+title: "Run the ratio models (complete and submodel)"
+date: today
+author: Amaël Le Squin
+date-format: iso
+filters:
+  - fontawesome
+  - siunitx-quarto
+  - imagify
+imagify:
+  header-includes: |
+    \usepackage{pgfplots}
+    \pgfplotsset{compat=1.18}
+    \usepgfplotslibrary{fillbetween}
+    \usetikzlibrary{positioning}
+    \usetikzlibrary{calc}
+  pdf-engine: lualatex
+pdf-engine: lualatex
+keep-tex: true
+execute:
+  error: true
+  echo: false
+  warning: false
+  message: false
+bibliography: /home/ALe-Squin/work/library/bib_file/references.bib
+lightbox:
+  match: auto
+css: style.css
+knitr:
+  opts_chunk: 
+    dev: ragg_png
+    crop: null
+    out.width: "70%"
+    fig.width: 6
+    fig.asp: 0.618
+    fig.align: "center"
+format:
+  html:
+    toc: true
+    include-in-header: mathjax.html
+    code-fold: true
+    df-print: paged
+    number-sections: true
+    theme:
+      light: cerulean
+      dark: darkly
+    margin: 5% 0;
+  pdf:
+    mathspec: true
+    include-in-header:
+      - text: |
+          \usepackage{unicode-math}
+---
+
+<!-- New command -->
+\newcommand{\ie}{*i.e.,*}
+
+<!-- Math commands -->
+\newcommand{\Vbft}{V_{\text{BFT}}}
+\newcommand{\Fbft}{F_{\text{BFT}}}
+\newcommand{\Vtot}{V_{\text{tot}}}
+\newcommand{\Vzh}{V_{\text{Zhou}}}
+\newcommand{\hdec}{h_{\text{dec}}}
+\newcommand{\fmax}{f_{\text{max}}}
+
+<!-- Math operators -->
+<!-- \DeclareMathOperator{\ln}{ln} -->
+
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+<!-- ---------------------------   LOADING DATA, R CODE   --------------------------- -->
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+
+```{r}
+#| output: false
+
+#### Clear space and load packages
+rm(list = ls())
+graphics.off()
+
+options(max.print = 500)
+
+library(data.table)
+library(MetBrewer)
+library(bayesplot)
+library(cmdstanr)
+	register_knitr_engine(override = TRUE)
+library(stringi)
+library(inventR)
+library(interp)
+library(loo)
+
+## Tool function
+source("./toolFunctions.R")
+```
+
+```{r}
+#| output: false
+
+#### Load the data
+## Path
+os = Sys.info()[['sysname']]
+mnt_point = "/mnt/local_share/"
+if (os == "Linux" || os == "Darwin")
+{
+	if (!dir.exists(mnt_point))
+		stop(paste0("The mounting point <", mnt_point, "> does not exist"))
+} else if (os == "Windows") {
+	stop("TO DO!!! No idea how that works on Windows!")
+} else {
+	stop(paste("Unknown Operating System:", os))
+}
+
+path_data = paste0(mnt_point, "data/")
+if (!dir.exists(path_data))
+	stop(paste0("Folder <", path_data, "> does not exist! Did you run 01_prepare_data.qmd?"))
+
+opt = "_inra"
+
+# Loading Emerge data
+inra = readRDS(paste0(path_data, "nfi-inra_dt", opt, ".rds"))
+inra = inra[, .(speciesName_sci, tree_id = unique_id, plot_id, fct_type, year, circumference_m, height,
+	taper_height = taper_height_flo, bole_volume_m3, total_volume_m3)]
+setkey(inra, speciesName_sci)
+
+# Loading Swiss data
+swiss = readRDS(paste0(mnt_point, "data/switzerland.rds"))
+swiss = unique(swiss[, .(speciesName_sci, tree_id, plot_id, fct_type, year, circumference_m, height,
+	taper_height = hdec, bole_volume_m3, total_volume_m3)])
+setkey(swiss, speciesName_sci)
+
+## Modern Emerge data
+emerge = readRDS(paste0(mnt_point, "data/emerge_2009-2010.rds"))
+emerge[, year := as.integer(stringi::stri_replace_all(str = dataset, replacement = "", regex = "emerge_"))]
+emerge = emerge[, .(speciesName_sci, tree_id, fct_type, year, circumference_m, height, taper_height,
+	bole_volume_m3 = bole_volume_conic_m3, total_volume_m3)]
+
+## Bind everything
+tree_dt = rbindlist(list(inra = inra, swiss = swiss, emerge = emerge), idcol = "origin", fill = TRUE)
+
+# Add colours France vs Swiss
+ls_colours = met.brewer("Egypt")[1:4]
+names(ls_colours) = c("fr_comp", "fr", "ch_comp", "ch")
+tree_dt[, colour := ls_colours["fr"]] # Inra and Emerge, in blue
+tree_dt[origin == "swiss", colour := ls_colours["ch"]] # Swiss, in yellow
+
+# Remove NAs
+tree_dt = tree_dt[!is.na(bole_volume_m3)]
+
+# Remove species with less than 150 individuals
+tree_dt[, n_indiv := .N, by = speciesName_sci]
+tree_dt = tree_dt[n_indiv > 150]
+
+tree_dt[, .N, by = .(speciesName_sci, colour)][order(speciesName_sci)]
+
+# Set key to sort by species and colour (i.e., France vs Switzerland)
+setkey(tree_dt, speciesName_sci, colour)
+```
+
+
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+<!-- ---------------------------   MAIN CONTENT, R CODE   --------------------------- -->
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+
+## Introduction
+
+This script is generates data to plot figures in pgfplots in the article. The figures that I have currently in mind are:
+1. `Vtot` vs `Vbole` with 90% credibility interval (CI). Ideally, there would be two colours, one for the training range, and one for the NFI range if larger than training range (which I expect)
+
+## Figure `Vtot` vs `Vbole` with CI
+
+```{r}
+
+```
