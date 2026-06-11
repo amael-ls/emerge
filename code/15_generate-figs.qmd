@@ -92,27 +92,10 @@ library(loo)
 ## Tool function
 source("./toolFunctions.R")
 
-## Function that computes PSIS-LOO, residuals, predictions, R squared on validation dataset
-pred_fct = function(sp, florence_dt, nfi_data, woodstock_seed = 1969 - 08 - 18)
+## Function to predict bole volume, using Flo++ model 
+pred_fct_flopp = function(sp, stanData_gen, woodstock_seed = 1969 - 08 - 18)
 {	
-	#### Generate quantities...
-	## Prepare data
-	stanData_gen = list(
-		N = florence_dt[sp][(type == "ajust"), .N],
-		
-		circumference_m = florence_dt[sp][(type == "ajust"), c13],
-		taper_height_flo = florence_dt[sp][(type == "ajust"), hdecro],
-		height = florence_dt[sp][(type == "ajust"), htot],
-
-		N_new = nfi_data[sp][, .N],
-
-		circumference_m_new = nfi_data[sp][, circumference_m],
-		taper_height_flo_new = nfi_data[sp][, taper_height_flo],
-		height_new = nfi_data[sp][, height],
-		bole_volume_m3_new = nfi_data[sp][, bole_volume_m3]
-	)
-
-	## ... for Florence++
+	## Generate quantities for Florence++
 	heterosked_genQ = cmdstan_model("../../gohon_florence/florence-genQ_gamma.stan")
 	fit_flopp = readRDS(paste0("../../gohon_florence/", sp, "/florence-gamma_heterosked.rds"))
 	n_chains = fit_flopp$num_chains()
@@ -122,12 +105,68 @@ pred_fct = function(sp, florence_dt, nfi_data, woodstock_seed = 1969 - 08 - 18)
 
 	rm(fit_flopp)
 
-	## Predictions and residuals
+	## Predictions and quantiles (includes the residual variance for pred_flopp_quant_uncertainty)
 	pred_flopp = apply(X = sim_flopp$draws("sim_bole"), MARGIN = 3, FUN = mean)
-	pred_flopp_quant = apply(X = sim_flopp$draws("sim_bole"), MARGIN = 3, FUN = quantile,
-		probs = c(0.1, 0.9))
+	pred_flopp_quant_uncertainty = quantile(sim_flopp$draws("sim_bole"), probs = c(0, 0.005, 0.025, 0.975, 0.995, 1))
+	pred_flopp_quant = quantile(pred_flopp, probs = c(0, 0.005, 0.025, 0.975, 0.995, 1))
 
-	return (list(pred = pred_flopp, quant = pred_flopp_quant))
+	return (list(pred = pred_flopp, quant_mean_pred = pred_flopp_quant,
+		quant_uncertain_pred = pred_flopp_quant_uncertainty))
+}
+
+## Function to predict total above-ground volume, using adapted Yang model
+pred_fct_yang = function(sp, stanData_gen, simplif = FALSE, n_points = 5, woodstock_seed = 1969 - 08 - 18)
+{	
+	## Generate quantities for Yang 2024
+	genQ = cmdstan_model("./yang2024-genQ.stan")
+	if (simplif)
+		genQ = cmdstan_model("./yang2024-genQ_submodel.stan")
+	
+	fit = readRDS(paste0("./yang/", sp, "_new.rds"))
+	n_chains = fit$num_chains()
+	n_iter = fit$metadata()$iter_sampling
+
+	sim = genQ$generate_quantities(fit, data = stanData_gen,
+		seed = woodstock_seed, parallel_chains = min(n_chains, 4))
+
+	if (!simplif)
+	{
+		paramsVec = getParams(model_cmdstan = fit, params_names = c("c", "j", "k", "m", "n", "s"), type = "mean")
+	} else {
+		paramsVec_simplif = getParams(model_cmdstan = fit,
+			params_names = c("alpha", "beta_", "gamma", "delta"), type = "mean")
+		paramsVec = c(
+			c = unname(paramsVec_simplif["alpha"]),
+			j = 1,
+			k = unname(paramsVec_simplif["beta_"]),
+			m = unname(exp(-1)*paramsVec_simplif["gamma"]/paramsVec_simplif["beta_"] + paramsVec_simplif["alpha"]),
+			n = unname(paramsVec_simplif["delta"] + paramsVec_simplif["alpha"]),
+			s = unname(paramsVec_simplif["beta_"])
+		)
+	}
+
+	rm(fit)
+
+	## Predictions on the mean value. This excludes the residual variance
+	pred = apply(X = sim$draws("v_gen_mean"), MARGIN = 3, FUN = mean)
+	pred_quant_mean = apply(X = sim$draws("v_gen_mean"), MARGIN = 3, FUN = quantile, probs = c(0.05, 0.95))
+	pred_points = sim$draws("v_gen")
+	pred_quant = data.table(Vbole = stanData_gen$bole_volume_m3_new,
+		q05 = rep(-Inf, stanData_gen$N_new), q95 = rep(-Inf, stanData_gen$N_new))
+
+	# pred_quant = apply(X = sim$draws("v_gen"), MARGIN = 3, FUN = quantile,
+	# 	probs = c(0, 0.005, 0.025, 0.975, 0.995, 1))
+	
+	dt = matrix(data = -Inf, nrow = stanData_gen$N_new, ncol = n_points)
+	set.seed(woodstock_seed)
+	for (i in seq_len(stanData_gen$N_new))
+	{
+		dt[i,] = pred_points[, , i][sample(x = 1:(n_iter*n_chains), size = n_points, replace = FALSE)]
+		pred_quant[i, c("q05", "q95") := as.list(quantile(pred_points[, , i], prob = c(0.05, 0.95)))]
+	}
+		
+	return (list(pred = pred, quant_mean = pred_quant_mean, quant = pred_quant,
+		paramsVec = paramsVec, randomSample = dt, n_points = n_points))
 }
 ```
 
@@ -271,23 +310,175 @@ I noticed that the range of values provided by the NFI are sometimes incoherent,
 ```{r}
 range_dt = merge.data.table(
 	training_dt[, .(min_t = min(bole_volume_m3), max_t = max(bole_volume_m3)), by = speciesName_sci],
-	nfi_data[, .(min_nfi = min(bole_volume_m3), max_nfi = max(bole_volume_m3)), by = speciesName_sci])
+	nfi_data[, .(min_nfi = min(bole_volume_m3), max_nfi = max(bole_volume_m3),
+		q025_nfi = quantile(bole_volume_m3, 0.025), q975_nfi = quantile(bole_volume_m3, 0.975),
+		q005_nfi = quantile(bole_volume_m3, 0.005), q995_nfi = quantile(bole_volume_m3, 0.995)), by = speciesName_sci])
 ```
 
 ### Predict the bole volumes based on Flopp model
 
 This is done in ?? steps:
 1. Load the training dataset of Florence
-2. 
+2. Use the function `pred_fct_flopp`, which returns the range of bole volume predictions on new data (here the NFI dataset already prepaired)
 
 ```{r}
 #### Reading data
+## Training data
 florence_dt = readRDS("../../gohon_florence/arbComp.rds")
 setkey(florence_dt, "ess")
 
 florence_dt = florence_dt[nfi_codes[, species_code_nfi]]
 setkey(florence_dt, "ess")
 
-for (sp in nfi_codes[, species_code_nfi])
-	pred_fct(sp, florence_dt, nfi_data)
+## Keeping for predictions only small and large trees as otherwise I overload tempdir() folder i.e., /tmp/Rtmp***
+nfi_data[, c("q15", "q85") := as.list(quantile(bole_volume_m3, prob = c(0.15, 0.85))), by = speciesName_sci]
+nfi_data_full = copy(nfi_data)
+nfi_data = nfi_data[bole_volume_m3 < q15 | bole_volume_m3 > q85]
+filename = "./range_nfi-pred_Vbole.rds"
+
+if (file.exists(filename))
+{
+	range_dt = readRDS(filename)
+} else {
+	select_cols = c("min_nfi_flopp", "q005_flopp", "q025_flopp", "q975_flopp", "q995_flopp", "max_nfi_flopp")
+	select_cols_u = c("min_nfi_flopp_u", "q005_flopp_u", "q025_flopp_u", "q975_flopp_u",
+		"q995_flopp_u", "max_nfi_flopp_u")
+	range_dt[, c(select_cols) :=
+		.(-Inf, -Inf,-Inf, -Inf, -Inf, -Inf)]
+	range_dt[, c(select_cols_u) :=
+		.(-Inf, -Inf,-Inf, -Inf, -Inf, -Inf)]
+	for (sp in nfi_codes[, species_code_nfi])
+	{
+		current_sp = nfi_codes[species_code_nfi == sp, speciesName_sci]
+		print(current_sp)
+
+		if (sp == "01")
+		{
+			warning("Not possible to run it simply for this species, so skiping")
+			next
+		}
+
+		## Prepare data
+		stanData_gen = list(
+			N = florence_dt[sp][(type == "ajust"), .N],
+			
+			circumference_m = florence_dt[sp][(type == "ajust"), c13],
+			taper_height_flo = florence_dt[sp][(type == "ajust"), hdecro],
+			height = florence_dt[sp][(type == "ajust"), htot],
+
+			N_new = nfi_data[sp][, .N],
+
+			circumference_m_new = nfi_data[sp][, circumference_m],
+			taper_height_flo_new = nfi_data[sp][, taper_height_flo],
+			height_new = nfi_data[sp][, height],
+			bole_volume_m3_new = nfi_data[sp][, bole_volume_m3]
+		)
+
+		temp = pred_fct_flopp(sp, stanData_gen)
+		range_dt[current_sp, c(select_cols) := as.list(temp$quant_mean_pred)] # Without residual variance
+		range_dt[current_sp, c(select_cols_u) := as.list(temp$quant_uncertain_pred)] # Incl. residual var.
+		rm(temp)
+	}
+	saveRDS(range_dt, filename)
+}
+
+range_dt["Quercus sp.", q995_flopp_u := q995_nfi] # Because there is nothing, and I will use q995_flopp_u after
+range_dt["Quercus sp.", min_nfi_flopp := min_nfi]
+
+# Species need an extension if 110% max_t is below q995_flopp
+range_dt[, need_extension := 1.1*max_t < q995_flopp_u]
+range_dt[, .(speciesName_sci, max_t, q995_flopp, q995_flopp_u, need_extension)]
 ```
+
+As can be seen, for some species, the NFI goes below the minimum limit of the training dataset. However, since the limits are so close to zero, I will never been able to distinguish any prolungation outside of the lower range! So I simply plot up to 0.
+
+### Compute total volumes and quantiles
+
+The total above-ground volumes are computed on the largest range the training dataset and the 99.5 percentile of NFI bole volume (predicted by Flopp rather than Morneau). I only use 500 points equally spaced, spanning the whole range. For the generated data, a column is added to know whether or not we are in extrapolation.
+
+```{r}
+#### Make figures and generate data for pgfplots
+n_indiv = 500
+
+for (sp in nfi_codes[, species_code_nfi])
+{
+	## Simulate total above ground volume on nfi or training range (depends which is largest)
+	current_sp = nfi_codes[species_code_nfi == sp, speciesName_sci]	
+	stanData = list(
+		N = training_dt[current_sp, .N],
+		bole_volume_m3 = training_dt[current_sp, bole_volume_m3],
+		total_volume_m3 = training_dt[current_sp, total_volume_m3],
+		N_new = n_indiv,
+		bole_volume_m3_new = seq(range_dt[current_sp, min(min_t, min_nfi_flopp)],
+			range_dt[current_sp, max(max_t, q995_flopp_u)], length.out = n_indiv)
+	)
+
+	stanData$total_volume_m3_new = 1.3*stanData$bole_volume_m3_new # Useless here, but must be provided for genQ to run
+	
+	sp_filename = stri_replace(str = current_sp, replacement = "-", regex = " ")
+	if (current_sp == "Quercus sp.")
+		sp_filename = stri_replace(str = sp_filename, replacement = "", regex = "\\.")
+	temp = pred_fct_yang(sp_filename, stanData)
+
+	dt = data.table(bole_volume_m3 = stanData$bole_volume_m3_new, pred_avg = temp$pred,
+		q05_u = temp$quant[, q05], q95_u = temp$quant[, q95],
+		q05 = temp$quant_mean["5%", ], q95 = temp$quant_mean["95%", ])
+	dt[, beyond_rg := bole_volume_m3 > range_dt[current_sp, max_t]]
+	dt[, beyond_rg_int := as.integer(beyond_rg)]
+
+	## Plot
+	max_x = dt[, max(bole_volume_m3)]
+	max_y = max(temp$quant[, q95])
+
+	# lala = loess(q95_u ~ bole_volume_m3, dt)
+
+	m05 = mgcv::gam(q05_u ~ s(bole_volume_m3, k = 30), data = dt)
+	m95 = mgcv::gam(q95_u ~ s(bole_volume_m3, k = 30), data = dt)
+
+	dt[, q05_u_s := predict(m05)]
+	if (dt[, any(q05_u_s < 0)])
+	{
+		warning("Negative values due to smoothing out. Replacing by original value")
+		dt[q05_u_s < 0, q05_u_s := q05_u]
+	}
+	
+	dt[, q95_u_s := predict(m95)]
+	if (dt[, any(q95_u_s < 0)])
+	{
+		warning("Negative values due to smoothing out. Replacing by original value")
+		dt[q95_u_s < 0, q95_u_s := q95_u]
+	}
+
+	# Empty plot with good extent
+	plot(0, type = "n", xlim = c(0, max_x), ylim = c(0, max_y), axes = FALSE,
+		xlab = "Bole volume", ylab = "Above-ground volume")
+	
+	lines(dt[!(beyond_rg), bole_volume_m3], dt[!(beyond_rg), pred_avg], lwd = 2)
+	lines(dt[(beyond_rg), bole_volume_m3], dt[(beyond_rg), pred_avg], lwd = 2, lty = "dashed")
+
+	abline(a = 0, b = 1, lwd = 0.85, col = "#5A5A5A", lty = "dotted")
+	
+	lines(dt[!(beyond_rg), bole_volume_m3], dt[!(beyond_rg), q95_u_s], col = "#0F7BA2", lwd = 1)
+	lines(dt[(beyond_rg), bole_volume_m3], dt[(beyond_rg), q95_u_s], col = "#0F7BA2", lwd = 1, lty = "dashed")
+	lines(dt[!(beyond_rg), bole_volume_m3], dt[!(beyond_rg), q05_u_s], col = "#0F7BA2", lwd = 1)
+	lines(dt[(beyond_rg), bole_volume_m3], dt[(beyond_rg), q05_u_s], col = "#0F7BA2", lwd = 1, lty = "dashed")
+	
+	polygon(c(dt[, bole_volume_m3], rev(dt[, bole_volume_m3])),
+		c(dt[, q95_u_s], rev(dt[, q05_u_s])), col = "#0F7BA266", lty = 0)
+	
+	lines(dt[!(beyond_rg), bole_volume_m3], dt[!(beyond_rg), q95], col = "#DD5129", lwd = 1)
+	lines(dt[(beyond_rg), bole_volume_m3], dt[(beyond_rg), q95], col = "#DD5129", lwd = 1, lty = "dashed")
+	lines(dt[!(beyond_rg), bole_volume_m3], dt[!(beyond_rg), q05], col = "#DD5129", lwd = 1)
+	lines(dt[(beyond_rg), bole_volume_m3], dt[(beyond_rg), q05], col = "#DD5129", lwd = 1, lty = "dashed")
+	
+	polygon(c(dt[, bole_volume_m3], rev(dt[, bole_volume_m3])),
+		c(dt[, q95], rev(dt[, q05])), col = "#DD512966", lty = 0)
+	
+	axis(1)
+	axis(2, las = 1)
+
+	## Save data for pgfplots
+	fwrite(dt, paste0("../../../writing/article_allometry/data/pred/", sp_filename, ".csv"))
+}
+```
+
