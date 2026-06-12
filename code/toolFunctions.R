@@ -15,18 +15,34 @@
 ## Get fixed values parameters (will not work for draws with third dimension > 1)
 getParams = function(model_cmdstan, params_names, type = "mean", ...)
 {
-	if (!(type %in% c("all", "chain-iter", "mean", "median", "quantile")))
+	if (!(type %in% c("all", "chain", "chain-iter", "mean", "median", "quantile")))
 		stop("Unknown type. Please choose all, iter-chain, mean, median, or quantile")
 
 	args = list(...)
 
-	if (type %in% c("chain-iter", "mean", "median"))
+	if (type %in% c("chain", "chain-iter", "mean", "median"))
 	{
 		vals = numeric(length(params_names))
 		names(vals) = params_names
 
-		if (type == "chain-iter")
+		if (type == "chain")
 		{
+			if (!("chain" %in% names(args)))
+				stop("You must provide chain number when using the option chain")
+
+			chain = args[["chain"]]
+			if (chain > model_cmdstan$num_chains())
+				stop("chain cannot be larger than num_chains")
+
+			for (i in seq_along(params_names))
+			{
+				draws = model_cmdstan$draws(params_names[i])
+				if (dim(draws)[3] != 1)
+					stop("This function is not yet designed to handle a multi-params")
+				vals[i] = mean(draws[, chain, 1])
+			}
+			return(vals)
+		} else if (type == "chain-iter") {
 			if (!all(c("iter", "chain") %in% names(args)))
 				stop("You must provide iter and chain when using the option iter-chain")
 			iter = args[["iter"]]
@@ -88,7 +104,7 @@ lazyTrace = function(draws, filename = NULL, ...)
 
 	n_chains = dim(draws)[2]
 	n_iter = dim(draws)[1]
-	colours = MetBrewer::met.brewer("Hokusai3", n_chains)
+	colours = MetBrewer::met.brewer("Egypt", n_chains)
 	colours_str = grDevices::colorRampPalette(colours)(n_chains)
 
 	min_val = min(draws)
@@ -169,6 +185,8 @@ lazyTrace = function(draws, filename = NULL, ...)
 		for (iter in ls_names[iter_ind])
 			abline(v = providedArgs[[iter]], col = "#66666644", lwd = 0.2)
 	}
+
+	legend("topright", legend = paste("Chain", seq_len(n_chains)), fill = colours)
 
 	if (!is.null(filename))
 		dev.off()
