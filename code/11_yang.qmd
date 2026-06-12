@@ -663,11 +663,13 @@ for (sp in ls_species)
 }
 ```
 
-## Composition of the data
+## Composition of the data and save the training dataset
 
 ```{r}
 tree_dt[origin == "swiss", .N] # 15931
 tree_dt[origin != "swiss", .N] # 11962, Emerge modern or inra (Oudin, alias old emerge kept by INRAE)
+
+saveRDS(tree_dt, paste0(path_data, "data_Vtot.rds"))
 ```
 
 ## First run brute force!
@@ -688,10 +690,11 @@ for (sp in ls_species)
 {
 	print(paste("Running", sp))
 
-	filename = stri_replace(str = sp, regex = " ", replacement = "---TEST_m-in-[c,1]---")
+	filename = paste0(stri_replace(str = sp, regex = " ", replacement = "-"), "_new")
 
 	if (sp == "Quercus sp.")
 	{
+		filename = stri_replace(str = filename, regex = "\\.", replacement = "")
 		sp = ls_species[stri_detect(str = ls_species, regex = "Quercus")]
 		warning("For quercus sp., I also add all the other Quercus")
 	}
@@ -750,7 +753,8 @@ Some species have multimodal likelihood due to the merge of intermediate stage w
 ## Compile model
 model = cmdstan_model("./yang2024_submodel.stan")
 
-for (sp in c("Fraxinus excelsior", "Larix decidua", "Picea abies", "Pinus laricio", "Pinus sylvestris"))
+# for (sp in c("Fraxinus excelsior", "Larix decidua", "Picea abies", "Pinus laricio", "Pinus sylvestris"))
+for (sp in ls_species)
 {
 	print(paste("Running", sp))
 	
