@@ -61,6 +61,7 @@ transformed parameters {
 
 generated quantities {
 	array[N_new] real r_gen;
+	vector [N_new] r_gen_mean = r_yang_6(bole_volume_m3_new, [c, j, k, m, n, s]); // Average ratio
 	vector[N_new] v_gen;
 	vector[N_new] v_gen_mean;
 	vector [N_new] log_lik; // Log likelihood of newly observed volumes given fitted params on (other) data
