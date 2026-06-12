@@ -122,7 +122,11 @@ pred_fct_yang = function(sp, stanData_gen, simplif = FALSE, n_points = 5, woodst
 	if (simplif)
 		genQ = cmdstan_model("./yang2024-genQ_submodel.stan")
 	
-	fit = readRDS(paste0("./yang/", sp, "_new.rds"))
+	fitname = paste0("./yang/", sp, "_new.rds")
+	if (simplif)
+		fitname = paste0("./yang/", sp, "_submodel.rds")
+	
+	fit = readRDS(fitname)
 	n_chains = fit$num_chains()
 	n_iter = fit$metadata()$iter_sampling
 
@@ -147,26 +151,38 @@ pred_fct_yang = function(sp, stanData_gen, simplif = FALSE, n_points = 5, woodst
 
 	rm(fit)
 
-	## Predictions on the mean value. This excludes the residual variance
+	## Predictions on volume
 	pred = apply(X = sim$draws("v_gen_mean"), MARGIN = 3, FUN = mean)
 	pred_quant_mean = apply(X = sim$draws("v_gen_mean"), MARGIN = 3, FUN = quantile, probs = c(0.05, 0.95))
 	pred_points = sim$draws("v_gen")
 	pred_quant = data.table(Vbole = stanData_gen$bole_volume_m3_new,
 		q05 = rep(-Inf, stanData_gen$N_new), q95 = rep(-Inf, stanData_gen$N_new))
 
+	## Predictions on ratio
+	pred_r = apply(X = sim$draws("r_gen_mean"), MARGIN = 3, FUN = mean)
+	pred_r_quant_mean = apply(X = sim$draws("r_gen_mean"), MARGIN = 3, FUN = quantile, probs = c(0.05, 0.95))
+	pred_r_points = sim$draws("r_gen")
+	pred_r_quant = data.table(Vbole = stanData_gen$bole_volume_m3_new,
+		q05 = rep(-Inf, stanData_gen$N_new), q95 = rep(-Inf, stanData_gen$N_new))
+
 	# pred_quant = apply(X = sim$draws("v_gen"), MARGIN = 3, FUN = quantile,
 	# 	probs = c(0, 0.005, 0.025, 0.975, 0.995, 1))
 	
-	dt = matrix(data = -Inf, nrow = stanData_gen$N_new, ncol = n_points)
+	dt_v = matrix(data = -Inf, nrow = stanData_gen$N_new, ncol = n_points)
+	dt_r = matrix(data = -Inf, nrow = stanData_gen$N_new, ncol = n_points)
 	set.seed(woodstock_seed)
 	for (i in seq_len(stanData_gen$N_new))
 	{
-		dt[i,] = pred_points[, , i][sample(x = 1:(n_iter*n_chains), size = n_points, replace = FALSE)]
+		rand_ind = sample(x = 1:(n_iter*n_chains), size = n_points, replace = FALSE)
+		dt_v[i,] = pred_points[, , i][rand_ind]
+		dt_r[i,] = pred_points[, , i][rand_ind]
 		pred_quant[i, c("q05", "q95") := as.list(quantile(pred_points[, , i], prob = c(0.05, 0.95)))]
+		pred_r_quant[i, c("q05", "q95") := as.list(quantile(pred_r_points[, , i], prob = c(0.05, 0.95)))]
 	}
 		
 	return (list(pred = pred, quant_mean = pred_quant_mean, quant = pred_quant,
-		paramsVec = paramsVec, randomSample = dt, n_points = n_points))
+		pred_r = pred_r, quant_mean_r = pred_r_quant_mean, quant_r = pred_r_quant,
+		paramsVec = paramsVec, randomSample_v = dt_v, randomSample_r = dt_r, n_points = n_points))
 }
 ```
 
@@ -418,35 +434,65 @@ for (sp in nfi_codes[, species_code_nfi])
 	sp_filename = stri_replace(str = current_sp, replacement = "-", regex = " ")
 	if (current_sp == "Quercus sp.")
 		sp_filename = stri_replace(str = sp_filename, replacement = "", regex = "\\.")
-	temp = pred_fct_yang(sp_filename, stanData)
 
-	dt = data.table(bole_volume_m3 = stanData$bole_volume_m3_new, pred_avg = temp$pred,
-		q05_u = temp$quant[, q05], q95_u = temp$quant[, q95],
-		q05 = temp$quant_mean["5%", ], q95 = temp$quant_mean["95%", ])
+	simplif = FALSE
+	if ((current_sp == "Fraxinus excelsior") || (current_sp == "Picea abies"))
+		simplif = TRUE
+	
+	temp = pred_fct_yang(sp = sp_filename, stanData_gen = stanData, simplif = simplif)
+
+	dt = data.table(bole_volume_m3 = stanData$bole_volume_m3_new, pred_avg = temp$pred, pred_avg_r = temp$pred_r,
+		q05_v_u = temp$quant[, q05], q95_v_u = temp$quant[, q95],
+		q05_v = temp$quant_mean["5%", ], q95_v = temp$quant_mean["95%", ],
+		q05_r_u = temp$quant_r[, q05], q95_r_u = temp$quant_r[, q95],
+		q05_r = temp$quant_mean_r["5%", ], q95_r = temp$quant_mean_r["95%", ]
+	)
 	dt[, beyond_rg := bole_volume_m3 > range_dt[current_sp, max_t]]
 	dt[, beyond_rg_int := as.integer(beyond_rg)]
 
 	## Plot
+	# Compute boundaries
 	max_x = dt[, max(bole_volume_m3)]
 	max_y = max(temp$quant[, q95])
+	min_y_r = min(temp$quant_r[, q05])
+	max_y_r = max(temp$quant_r[, q95])
+	if (max_y_r > 1)
+		warning("Uncertainty leads beyond 1! How come with a Beta distribution??")
 
-	# lala = loess(q95_u ~ bole_volume_m3, dt)
+	# Smooth out the uncertainties, only to rmove small wiggles in the quantiles...
+	m05_v = mgcv::gam(q05_v_u ~ s(bole_volume_m3, k = 30), data = dt)
+	m95_v = mgcv::gam(q95_v_u ~ s(bole_volume_m3, k = 30), data = dt)
+	m05_r = mgcv::gam(q05_r_u ~ s(bole_volume_m3, k = 30), data = dt)
+	m95_r = mgcv::gam(q95_r_u ~ s(bole_volume_m3, k = 30), data = dt)
 
-	m05 = mgcv::gam(q05_u ~ s(bole_volume_m3, k = 30), data = dt)
-	m95 = mgcv::gam(q95_u ~ s(bole_volume_m3, k = 30), data = dt)
-
-	dt[, q05_u_s := predict(m05)]
-	if (dt[, any(q05_u_s < 0)])
+	# ... of volumes
+	dt[, q05_v_u_s := predict(m05_v)]
+	if (dt[, any(q05_v_u_s < 0)])
 	{
 		warning("Negative values due to smoothing out. Replacing by original value")
-		dt[q05_u_s < 0, q05_u_s := q05_u]
+		dt[q05_v_u_s < 0, q05_v_u_s := q05_v_u]
 	}
 	
-	dt[, q95_u_s := predict(m95)]
-	if (dt[, any(q95_u_s < 0)])
+	dt[, q95_v_u_s := predict(m95_v)]
+	if (dt[, any(q95_v_u_s < 0)])
 	{
 		warning("Negative values due to smoothing out. Replacing by original value")
-		dt[q95_u_s < 0, q95_u_s := q95_u]
+		dt[q95_v_u_s < 0, q95_v_u_s := q95_v_u]
+	}
+	
+	# ... of ratios
+	dt[, q05_r_u_s := predict(m05_r)]
+	if (dt[, any(q05_r_u_s < 0)])
+	{
+		warning("Negative values due to smoothing out. Replacing by original value")
+		dt[q05_r_u_s < 0, q05_r_u_s := q05_r_u]
+	}
+	
+	dt[, q95_r_u_s := predict(m95_r)]
+	if (dt[, any(q95_r_u_s < 0)])
+	{
+		warning("Negative values due to smoothing out. Replacing by original value")
+		dt[q95_r_u_s < 0, q95_r_u_s := q95_r_u]
 	}
 
 	# Empty plot with good extent
@@ -458,21 +504,44 @@ for (sp in nfi_codes[, species_code_nfi])
 
 	abline(a = 0, b = 1, lwd = 0.85, col = "#5A5A5A", lty = "dotted")
 	
-	lines(dt[!(beyond_rg), bole_volume_m3], dt[!(beyond_rg), q95_u_s], col = "#0F7BA2", lwd = 1)
-	lines(dt[(beyond_rg), bole_volume_m3], dt[(beyond_rg), q95_u_s], col = "#0F7BA2", lwd = 1, lty = "dashed")
-	lines(dt[!(beyond_rg), bole_volume_m3], dt[!(beyond_rg), q05_u_s], col = "#0F7BA2", lwd = 1)
-	lines(dt[(beyond_rg), bole_volume_m3], dt[(beyond_rg), q05_u_s], col = "#0F7BA2", lwd = 1, lty = "dashed")
+	lines(dt[!(beyond_rg), bole_volume_m3], dt[!(beyond_rg), q95_v_u_s], col = "#0F7BA2", lwd = 1)
+	lines(dt[(beyond_rg), bole_volume_m3], dt[(beyond_rg), q95_v_u_s], col = "#0F7BA2", lwd = 1, lty = "dashed")
+	lines(dt[!(beyond_rg), bole_volume_m3], dt[!(beyond_rg), q05_v_u_s], col = "#0F7BA2", lwd = 1)
+	lines(dt[(beyond_rg), bole_volume_m3], dt[(beyond_rg), q05_v_u_s], col = "#0F7BA2", lwd = 1, lty = "dashed")
 	
 	polygon(c(dt[, bole_volume_m3], rev(dt[, bole_volume_m3])),
-		c(dt[, q95_u_s], rev(dt[, q05_u_s])), col = "#0F7BA266", lty = 0)
+		c(dt[, q95_v_u_s], rev(dt[, q05_v_u_s])), col = "#0F7BA266", lty = 0)
 	
-	lines(dt[!(beyond_rg), bole_volume_m3], dt[!(beyond_rg), q95], col = "#DD5129", lwd = 1)
-	lines(dt[(beyond_rg), bole_volume_m3], dt[(beyond_rg), q95], col = "#DD5129", lwd = 1, lty = "dashed")
-	lines(dt[!(beyond_rg), bole_volume_m3], dt[!(beyond_rg), q05], col = "#DD5129", lwd = 1)
-	lines(dt[(beyond_rg), bole_volume_m3], dt[(beyond_rg), q05], col = "#DD5129", lwd = 1, lty = "dashed")
+	lines(dt[!(beyond_rg), bole_volume_m3], dt[!(beyond_rg), q95_v], col = "#DD5129", lwd = 1)
+	lines(dt[(beyond_rg), bole_volume_m3], dt[(beyond_rg), q95_v], col = "#DD5129", lwd = 1, lty = "dashed")
+	lines(dt[!(beyond_rg), bole_volume_m3], dt[!(beyond_rg), q05_v], col = "#DD5129", lwd = 1)
+	lines(dt[(beyond_rg), bole_volume_m3], dt[(beyond_rg), q05_v], col = "#DD5129", lwd = 1, lty = "dashed")
 	
 	polygon(c(dt[, bole_volume_m3], rev(dt[, bole_volume_m3])),
-		c(dt[, q95], rev(dt[, q05])), col = "#DD512966", lty = 0)
+		c(dt[, q95_v], rev(dt[, q05_v])), col = "#DD512966", lty = 0)
+	
+	# Empty plot with good extent for ratio
+	plot(0, type = "n", xlim = c(0, max_x), ylim = c(min_y_r, max_y_r), axes = FALSE,
+		xlab = "Bole volume", ylab = "Above-ground volume")
+	
+	lines(dt[!(beyond_rg), bole_volume_m3], dt[!(beyond_rg), pred_avg_r], lwd = 2)
+	lines(dt[(beyond_rg), bole_volume_m3], dt[(beyond_rg), pred_avg_r], lwd = 2, lty = "dashed")
+	
+	lines(dt[!(beyond_rg), bole_volume_m3], dt[!(beyond_rg), q95_r_u_s], col = "#0F7BA2", lwd = 1)
+	lines(dt[(beyond_rg), bole_volume_m3], dt[(beyond_rg), q95_r_u_s], col = "#0F7BA2", lwd = 1, lty = "dashed")
+	lines(dt[!(beyond_rg), bole_volume_m3], dt[!(beyond_rg), q05_r_u_s], col = "#0F7BA2", lwd = 1)
+	lines(dt[(beyond_rg), bole_volume_m3], dt[(beyond_rg), q05_r_u_s], col = "#0F7BA2", lwd = 1, lty = "dashed")
+	
+	polygon(c(dt[, bole_volume_m3], rev(dt[, bole_volume_m3])),
+		c(dt[, q95_r_u_s], rev(dt[, q05_r_u_s])), col = "#0F7BA266", lty = 0)
+	
+	lines(dt[!(beyond_rg), bole_volume_m3], dt[!(beyond_rg), q95_r], col = "#DD5129", lwd = 1)
+	lines(dt[(beyond_rg), bole_volume_m3], dt[(beyond_rg), q95_r], col = "#DD5129", lwd = 1, lty = "dashed")
+	lines(dt[!(beyond_rg), bole_volume_m3], dt[!(beyond_rg), q05_r], col = "#DD5129", lwd = 1)
+	lines(dt[(beyond_rg), bole_volume_m3], dt[(beyond_rg), q05_r], col = "#DD5129", lwd = 1, lty = "dashed")
+	
+	polygon(c(dt[, bole_volume_m3], rev(dt[, bole_volume_m3])),
+		c(dt[, q95_r], rev(dt[, q05_r])), col = "#DD512966", lty = 0)
 	
 	axis(1)
 	axis(2, las = 1)
