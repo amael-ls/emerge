@@ -94,7 +94,7 @@ source("./toolFunctions.R")
 
 ## Function to predict bole volume, using Flo++ model 
 pred_fct_flopp = function(sp, stanData_gen, woodstock_seed = 1969 - 08 - 18)
-{	
+{
 	## Generate quantities for Florence++
 	heterosked_genQ = cmdstan_model("../../gohon_florence/florence-genQ_gamma.stan")
 	fit_flopp = readRDS(paste0("../../gohon_florence/", sp, "/florence-gamma_heterosked.rds"))
@@ -434,6 +434,9 @@ for (sp in nfi_codes[, species_code_nfi])
 	sp_filename = stri_replace(str = current_sp, replacement = "-", regex = " ")
 	if (current_sp == "Quercus sp.")
 		sp_filename = stri_replace(str = sp_filename, replacement = "", regex = "\\.")
+
+	fwrite(data.table(obs_bole_volume = stanData$bole_volume_m3, obs_total_volume = stanData$total_volume_m3),
+		paste0("../../../writing/article_allometry/data/pred/", sp_filename, "_obs-data.csv"))
 
 	simplif = FALSE
 	if ((current_sp == "Fraxinus excelsior") || (current_sp == "Picea abies"))
