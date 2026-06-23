@@ -90,9 +90,12 @@ library(loo)
 # source("./toolFunctions.R")
 
 # Function to predict total volume from Vallet 2006
-form_vallet = function(circumference_cm, height, params, n_params)
+form_vallet = function(circumference_cm, height, params, n_params, is_douglas)
 {
 	res = params["alpha"] + params["beta"]*circumference_cm
+
+	if (is_douglas == 1)
+		return(res*(1 + params["delta"]/circumference_cm^2))
 	
 	if (n_params >= 3)
 		res = res + params["gamma"]*sqrt(circumference_cm)/height
@@ -225,7 +228,7 @@ vallet_dt = data.table(speciesName_sci = c("Abies alba", "Fagus sylvatica", "Pic
 	delta = c(NA, 45.4, NA, 198.8, 204.0, 56.6, NA),
 	sd_delta = c(NA, 4, NA, 40, 26.6, 13.8, NA),
 	var_res = c(0.0031, 0.0036, 0.0023, 0.0079, 0.0028, 0.0041 , 0.004),
-	n_params = c(3, 4, 2, 4, 4, NA, 3), key = "speciesName_sci")
+	n_params = c(3, 4, 2, 4, 4, 3, 3), key = "speciesName_sci")
 ```
 
 <!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
@@ -248,8 +251,11 @@ Here is the model (taken from `06_zhou.qmd`):
 //| echo: true
 
 functions {
-	vector vallet(vector circumference, vector hdn, vector params, int N_params)
+	vector vallet(vector circumference, vector hdn, vector params, int N_params, int is_douglas)
 	{
+		if (is_douglas == 1)
+			return (params[1] + params[2]*circumference).*(1 + params[3]./circumference.^2);
+		
 		if (N_params == 4)
 			return (params[1] + params[2]*circumference + params[3]*hdn).*(1 + params[4]./circumference.^2);
 		
@@ -264,6 +270,7 @@ data{
 	// Dimensions
 	int <lower = 1> N; // Number of trees
 	int <lower = 2, upper = 4> N_params; // Number of parameters
+	int <lower = 0, upper = 1> is_douglas; // 0 if not, and 1 otherwise
 
 	// Predictors
 	vector[N] circumference_cm; // In m, while in cm in Vallet2006
@@ -286,23 +293,24 @@ model {
 	target += normal_lpdf(vec_params[1] | 0, 0.4);
 	target += normal_lpdf(vec_params[2] | 0, 0.0005);
 
-	if (N_params > 2)
+	if (N_params > 2 && is_douglas != 1)
 		target += normal_lpdf(vec_params[3] | 0, 0.4);
+	
+	if (is_douglas == 1)
+		target += normal_lpdf(vec_params[3] | 45, 10);
 
 	if (N_params == 4)
 		target += normal_lpdf(vec_params[4] | 45, 10);
 	
 	target += gamma_lpdf(sigma | 0.06^2/0.01, 0.06/0.01);
 	
-	target += normal_lpdf(total_volume_m3 |
-		vallet(circumference_cm, hdn, vec_params, N_params) ./ (40000*pi()) .* circumference_cm.^2 .* height, sigma);
+	target += normal_lpdf(total_volume_m3 | vallet(circumference_cm, hdn, vec_params, N_params, is_douglas) ./
+		(40000*pi()) .* circumference_cm.^2 .* height, sigma);
 }
 
 ```
 
-I now run it on the four species of interest: *Abies alba*, *Fagus sylvatica*, *Picea abies*, and *Quercus petraea*. Note that Douglas fir cannot be parametrised with the way I wrote the model, as it is a particular case with $\alpha$, $\beta$, and $\delta$ estimated (while all the other three-parameter species have $\gamma$ estimated rather than the correction parameter $\delta$). Therefore, in `vallet_dt` I set `n_params` to `NA`.
-
-Actually, I run it for the seven species, with a quick and dirty adjustment for Douglas fir that I do not save...
+I now run it on the species parametrised in @Vallet2006
 
 ```{r}
 #| fig-cap: Bayesian vs Frequentist Vallet 2006
@@ -310,6 +318,9 @@ Actually, I run it for the seven species, with a quick and dirty adjustment for 
 #|   - "Abies alba"
 #|   - "Fagus sylvatica"
 #|   - "Picea abies"
+#|   - "Pinus pinaster"
+#|   - "Pinus sylvestris"
+#|   - "Pseudotsuga menziesii"
 #|   - "Quercus petraea"
 #| layout-ncol: 2
 #| label: fig-bayesFreq
@@ -330,16 +341,16 @@ vallet_bayesian = cmdstan_model("./vallet.stan")
 
 for (sp in ls_species)
 {
-	if (sp == "Pseudotsuga menziesii")
-		next;
-	
 	sp_filename = stri_replace(str = sp, replacement = "-", regex = " ")
 	filename = paste0(output_dir, sp_filename, ".rds")
+	is_douglas = ifelse(sp == "Pseudotsuga menziesii", 1, 0) # Boolean style compatible with Stan language
+
 	if (!file.exists(filename))
 	{
 		stanData = list(
 			N = training_dt[sp, .N],
 			N_params = vallet_dt[sp, n_params],
+			is_douglas = is_douglas,
 
 			circumference_cm = training_dt[sp, 100*circumference_m], # Was in cm in Vallet2006!
 			height = training_dt[sp, height],
@@ -370,6 +381,13 @@ for (sp in ls_species)
 		names(params) = c("alpha", "beta", "gamma")
 		freq_params = vallet_dt[sp, c(alpha, beta, gamma)]
 		names(freq_params) = names(params)
+
+		if (is_douglas)
+		{
+			names(params) = c("alpha", "beta", "delta")
+			freq_params = vallet_dt[sp, c(alpha, beta, delta)]
+			names(freq_params) = names(params)
+		}
 	}
 	
 	if (vallet_dt[sp, n_params] == 4)
@@ -379,8 +397,10 @@ for (sp in ls_species)
 		names(freq_params) = names(params)
 	}
 	
-	training_dt[sp, bayes_vallet := form_vallet(100*circumference_m, height, params, vallet_dt[sp, n_params])]
-	training_dt[sp, freq_vallet := form_vallet(100*circumference_m, height, freq_params, vallet_dt[sp, n_params])]
+	training_dt[sp, bayes_vallet :=
+			form_vallet(100*circumference_m, height, params, vallet_dt[sp, n_params], is_douglas)]
+	training_dt[sp, freq_vallet :=
+			form_vallet(100*circumference_m, height, freq_params, vallet_dt[sp, n_params], is_douglas)]
 
 	## Plot Bayes vs Freq
 	plot(training_dt[sp, freq_vallet], training_dt[sp, bayes_vallet], pch = 19, cex = 0.55,
@@ -389,5 +409,8 @@ for (sp in ls_species)
 	axis(1)
 	axis(2, las = 1)
 }
+
+if (!file.exists("./bayesian_vallet/pred_dt-7species.rds"))
+	saveRDS(training_dt, "./bayesian_vallet/pred_dt-7species.rds")
 ```
 
