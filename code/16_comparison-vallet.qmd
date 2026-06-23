@@ -81,15 +81,154 @@ options(max.print = 500)
 
 library(data.table)
 library(MetBrewer)
-library(bayesplot)
 library(cmdstanr)
 	register_knitr_engine(override = TRUE)
 library(stringi)
-library(inventR)
-library(interp)
 library(loo)
 
 ## Tool function
 # source("./toolFunctions.R")
+```
+
+```{r}
+#| output: false
+
+#### Load the training data
+## Path
+os = Sys.info()[['sysname']]
+mnt_point = "/mnt/local_share/"
+if (os == "Linux" || os == "Darwin")
+{
+	if (!dir.exists(mnt_point))
+		stop(paste0("The mounting point <", mnt_point, "> does not exist"))
+} else if (os == "Windows") {
+	stop("TO DO!!! No idea how that works on Windows!")
+} else {
+	stop(paste("Unknown Operating System:", os))
+}
+
+path_data = paste0(mnt_point, "data/")
+if (!dir.exists(path_data))
+	stop(paste0("Folder <", path_data, "> does not exist! Did you run 01_prepare_data.qmd?"))
+
+## Loading training dataset
+training_dt = readRDS(paste0(path_data, "data_Vtot.rds"))
+training_dt = training_dt[(!is.na(circumference_m)) & (!is.na(height))]
+```
+
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+<!-- ---------------------------   MAIN CONTENT, R CODE   --------------------------- -->
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+
+## Introduction
+
+The aim of this document is to run a Bayesian version of @Vallet2006, and to compare it with:
+1. The fitted values from @Vallet2006 in Frequentist (to make sure I have similar predictions and that Bayesian does not deviate from the Frequentist)
+2. My model (which hopefully is better at predicting)
+
+Part of this stuff was already done in the exploratory file `06_zhou.qmd`. I just gather everything and add what is necessary.
+
+## Fit @Vallet2006 in Bayesian
+
+Here is the model (taken from `06_zhou.qmd`):
+
+```{stan output.var = "vallet_bayesian", cache = TRUE}
+//| echo: true
+
+functions {
+	vector vallet(vector circumference, vector hdn, vector params, int N_params)
+	{
+		if (N_params == 4)
+			return (params[1] + params[2]*circumference + params[3]*hdn).*(1 + params[4]./circumference.^2);
+		
+		if (N_params == 3)
+			return params[1] + params[2]*circumference + params[3]*hdn;
+		
+		return params[1] + params[2]*circumference; // 2 parameters, Norway spruce
+	}
+}
+
+data{
+	// Dimensions
+	int <lower = 1> N; // Number of trees // In m, while in cm in Vallet2006
+	int <lower = 3, upper = 4> N_params; // Number of parameters
+
+	// Predictors
+	vector[N] circumference_cm;
+	vector[N] height;
+
+	// Observations
+	vector[N] total_volume_m3;
+}
+
+transformed data {
+	vector[N] hdn = sqrt(circumference_cm) ./ height;
+}
+
+parameters {
+	vector[N_params] vec_params;
+	real<lower = 0> sigma;
+}
+
+model {
+	target += normal_lpdf(vec_params[1] | 0, 1);
+	target += normal_lpdf(vec_params[2] | 0, 0.01);
+	target += normal_lpdf(vec_params[3] | 0, 1);
+
+	if (N_params == 4)
+		target += normal_lpdf(vec_params[4] | 45, 10);
+	
+	target += gamma_lpdf(sigma | 0.06^2/0.01, 0.06/0.01);
+	
+	target += normal_lpdf(total_volume_m3 |
+		vallet(circumference_cm, hdn, vec_params, N_params) ./ (40000*pi()) .* circumference_cm.^2 .* height, sigma);
+}
+
+```
+
+I now run it on the four species of interest: *Abies alba*, *Fagus sylvatica*, *Picea abies*, and *Quercus petraea*. Note that Douglas fir cannot be parametrised with the way I wrote the model, as it is a particular case with $\alpha$, $\beta$, and $\delta$ estimated (while all the other three-parameter species have $\gamma$ estimated rather than the correction parameter $\delta$).
+
+```{r}
+ls_species = c("Abies alba", "Fagus sylvatica", "Picea abies", "Quercus petraea")
+training_dt = training_dt[ls_species]
+
+
+training_dt[is.na(circumference_m)]
+training_dt[, .N, by = speciesName_sci]
+
+# Table containing number of parameters (taken from Vallet 2006) as Vallet uses submodels
+n_params = data.table(speciesName_sci = ls_species, n_params = c(3, 4, 2, 3), key = "speciesName_sci") 
+
+output_dir = "./bayesian_vallet/"
+if (!dir.exists(output_dir))
+	dir.create(output_dir)
+
+n_chains = 4
+
+for (sp in ls_species)
+{
+	sp_filename = stri_replace(str = sp, replacement = "-", regex = " ")
+	filename = paste0(output_dir, sp_filename, ".rds")
+	if (!file.exists(filename))
+	{
+		stanData = list(
+			N = training_dt[sp, .N],
+			N_params = n_params[sp, n_params],
+
+			circumference_cm = training_dt[sp, 100*circumference_m], # Was in cm in Vallet2006!
+			height = training_dt[sp, height],
+
+			total_volume_m3 = training_dt[sp, total_volume_m3]
+		)
+
+		results = vallet_bayesian$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4),
+			max_treedepth = 12)
+
+		results$save_output_files(dir = output_dir, basename = sp_filename, random = FALSE)
+		saveRDS(results, filename)
+	} else {
+		results = readRDS(filename)
+	}
+}
 ```
 
