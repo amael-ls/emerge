@@ -329,8 +329,6 @@ ls_species = c("Abies alba", "Fagus sylvatica", "Picea abies", "Pinus pinaster",
 	"Pseudotsuga menziesii", "Quercus petraea")
 training_dt = training_dt[ls_species]
 
-training_dt[, .N, by = speciesName_sci]
-
 output_dir = "./bayesian_vallet/"
 if (!dir.exists(output_dir))
 	dir.create(output_dir)
@@ -471,21 +469,40 @@ parameters {
 }
 
 generated quantities {
-	vector[N_new] v_gen_mean = vallet(circumference_cm_new, hdn_new, vec_params, N_params, is_douglas);
-	array[N_new] real v_gen =
-		normal_rng(v_gen_mean ./ (40000*pi()) .* circumference_cm_new.^2 .* height_new, sigma);
+	vector[N_new] v_gen_mean = vallet(circumference_cm_new, hdn_new, vec_params, N_params, is_douglas) ./
+		(40000*pi()) .* circumference_cm_new.^2 .* height_new;
+	array[N_new] real v_gen = normal_rng(v_gen_mean, sigma);
 	
 	// Log likelihood of newly observed volumes given fitted params on (other) data
 	vector [N_new] log_lik;
 	
 	for (i in 1:N_new)
-		log_lik[i] = normal_lpdf(total_volume_m3_new[i] |
-		v_gen_mean[i] ./ (40000*pi()) .* circumference_cm_new[i].^2 .* height_new[i], sigma);
+		log_lik[i] = normal_lpdf(total_volume_m3_new[i] | v_gen_mean[i], sigma);
 }
 	
 ```
 
 ```{r}
+#| fig-cap: Vallet2006 vs mine (i.e., Yang2024 modified)
+#| fig-subcap:
+#|   - "Abies alba"
+#|   - "Abies alba"
+#|   - "Fagus sylvatica"
+#|   - "Fagus sylvatica"
+#|   - "Picea abies"
+#|   - "Picea abies"
+#|   - "Pinus pinaster"
+#|   - "Pinus pinaster"
+#|   - "Pinus sylvestris"
+#|   - "Pinus sylvestris"
+#|   - "Pseudotsuga menziesii"
+#|   - "Pseudotsuga menziesii"
+#|   - "Quercus petraea"
+#|   - "Quercus petraea"
+#| layout-ncol: 2
+#| label: fig-valletYang
+#| output: false
+
 vallet_genQ = cmdstan_model("./vallet.stan")
 genQ = cmdstan_model("./yang2024-genQ.stan")
 genQ_sub = cmdstan_model("./yang2024-genQ_submodel.stan")
@@ -529,6 +546,7 @@ for (sp in ls_species)
 	if (sp %in% c("Fraxinus excelsior", "Picea abies"))
 	{
 		sp_filename = paste0(sp_filename, "_submodel")
+		filename = paste0("./yang/", sp_filename, ".rds")
 		fit = readRDS(filename)
 		sim = genQ_sub$generate_quantities(fitted_params = fit, data = stanData_gen,
 			parallel_chains = min(4, n_chains))
@@ -572,6 +590,33 @@ for (sp in ls_species)
 		.(rownames(comp)[1], comp[2, "elpd_diff"], comp[2, "se_diff"])]
 	comp_dt[sp, c("wrn_yang", "wrn_vallet") :=
 		.(warning_yang, warning_vallet)]
+
+	## Check pred vs obs
+	pred_vallet = apply(X = sim_vallet$draws("v_gen_mean"), MARGIN = 3, FUN = mean)
+	pred_yang = apply(X = sim$draws("v_gen_mean"), MARGIN = 3, FUN = mean)
+	
+	rm(sim, sim_vallet, fit, fit_vallet)
+	
+	plot(pred_vallet, stanData_gen$total_volume_m3, pch = 19, cex = 0.65,
+		xlab = "Predicted", ylab = "Observed", axes = FALSE)
+	points(pred_vallet, pred_yang, col = "#FAB255", pch = 19, cex = 0.45)
+	axis(1)
+	axis(2, las = 1)
+	abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
+	
+	## Check pred vs bole volume, is it always above the 1:1 line?
+	plot(stanData_gen$bole_volume_m3, pred_vallet, pch = 19, cex = 0.65,
+		xlab = "Predicted", ylab = "Observed", axes = FALSE)
+	points(stanData_gen$bole_volume_m3, pred_yang, col = "#FAB255", pch = 19, cex = 0.45)
+	ind = pred_vallet < stanData_gen$bole_volume_m3
+	if (any(ind))
+		points(stanData_gen$bole_volume_m3[ind], pred_vallet[ind], col = "#0F7BA2",
+			pch = 19, cex = 0.75)
+	axis(1)
+	axis(2, las = 1)
+	abline(a = 0, b = 1, lty = "dotted")
 }
 
+if (!file.exists("./bayesian_vallet/comparison_vallet-yang.rds"))
+	saveRDS(comp_dt, "./bayesian_vallet/comparison_vallet-yang.rds")
 ```
