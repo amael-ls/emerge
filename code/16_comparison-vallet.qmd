@@ -88,6 +88,105 @@ library(loo)
 
 ## Tool function
 # source("./toolFunctions.R")
+
+# Function to predict total volume from Vallet 2006
+form_vallet = function(circumference_cm, height, params, n_params)
+{
+	res = params["alpha"] + params["beta"]*circumference_cm
+	
+	if (n_params >= 3)
+		res = res + params["gamma"]*sqrt(circumference_cm)/height
+
+	if (n_params == 4)
+		res = res*(1 + params["delta"]/circumference_cm^2)
+	
+	res = res/(40000*pi) * circumference_cm^2*height # Conversion to volume
+	return(res)
+}
+
+# Get fixed values parameters (will not work for draws with third dimension > 1)
+getParams = function(model_cmdstan, params_names, type = "mean", ...)
+{
+	if (!(type %in% c("all", "chain", "chain-iter", "mean", "median", "quantile")))
+		stop("Unknown type. Please choose all, iter-chain, mean, median, or quantile")
+
+	args = list(...)
+
+	if (type %in% c("chain", "chain-iter", "mean", "median"))
+	{
+		vals = numeric(length(params_names))
+		names(vals) = params_names
+
+		if (type == "chain")
+		{
+			if (!("chain" %in% names(args)))
+				stop("You must provide chain number when using the option chain")
+
+			chain = args[["chain"]]
+			if (chain > model_cmdstan$num_chains())
+				stop("chain cannot be larger than num_chains")
+
+			for (i in seq_along(params_names))
+			{
+				draws = model_cmdstan$draws(params_names[i])
+				if (dim(draws)[3] != 1)
+					stop("This function is not yet designed to handle a multi-params")
+				vals[i] = mean(draws[, chain, 1])
+			}
+			return(vals)
+		} else if (type == "chain-iter") {
+			if (!all(c("iter", "chain") %in% names(args)))
+				stop("You must provide iter and chain when using the option iter-chain")
+			iter = args[["iter"]]
+			chain = args[["chain"]]
+
+			if (iter > model_cmdstan$metadata()$iter_sampling)
+				stop("iter cannot be larger than iter_sampling")
+
+			if (chain > model_cmdstan$num_chains())
+				stop("chain cannot be larger than num_chains")
+
+			for (i in seq_along(params_names))
+			{
+				draws = model_cmdstan$draws(params_names[i])
+				if (dim(draws)[3] != 1)
+					stop("This function is not yet designed to handle a multi-params")
+				vals[i] = draws[iter, chain, 1]
+			}
+			return(vals)
+		} else {
+			for (i in seq_along(params_names))
+			{
+				vals[i] = ifelse(type == "mean",
+					mean(model_cmdstan$draws(params_names[i])),
+					median(model_cmdstan$draws(params_names[i])))
+			}
+			return(vals)
+		}
+	} else if (type == "quantile") {
+		if (!("probs" %in% names(args)))
+		{
+			probs = c(0, 0.05, 0.5, 0.95, 1)
+			vals = data.table(parameter = params_names, min = 0, q05 = 0, med = 0, avg = 0, q95 = 0, max = 0)
+		}
+		if ("probs" %in% names(args))
+		{
+			warning("I have not yet coded the general output, so far I use probs = c(0, 0.05, 0.5, 0.95, 1)")
+			probs = c(0, 0.05, 0.5, 0.95, 1)
+			vals = data.table(parameter = params_names, min = 0, q05 = 0, med = 0, avg = 0, q95 = 0, max = 0)
+		}
+		for (i in seq_along(params_names))
+		{
+			vals[i, c("min", "q05", "med", "q95", "max") := as.list(quantile(model_cmdstan$draws(params_names[i]), c(0, 0.05, 0.5, 0.95, 1)))]
+			vals[i, avg := mean(model_cmdstan$draws(params_names[i]))]
+		}
+		return(vals)
+	}
+
+	vals = model_cmdstan$draws(params_names)
+
+	return(vals)
+}
 ```
 
 ```{r}
@@ -114,6 +213,19 @@ if (!dir.exists(path_data))
 ## Loading training dataset
 training_dt = readRDS(paste0(path_data, "data_Vtot.rds"))
 training_dt = training_dt[(!is.na(circumference_m)) & (!is.na(height))]
+
+## Table 5 from Vallet2006
+vallet_dt = data.table(speciesName_sci = c("Abies alba", "Fagus sylvatica", "Picea abies", "Pinus pinaster", "Pinus sylvestris", "Pseudotsuga menziesii", "Quercus petraea"),
+	alpha = c(0.550, 0.395, 0.631, 0.235, 0.297, 0.534, 0.471),
+	sd_alpha = c(0.015, 0.01, 0.007, 0.041, 0.025, 0.01, 0.014),
+	beta = c(7.49e-4, 2.66e-4, -9.46e-4, 9.7e-4, 3.18e-4, -5.3e-4, -3.45e-4),
+	sd_beta = c(3.9e-5, 4.9e-5, 7.2e-5, 4.06e-4, 1.4e-4, 9.7e-5, 1.3e-5),
+	gamma = c(0.277, 0.421, NA, 0.396, 0.384, NA, 0.377),
+	sd_gamma = c(0.034, 0.025, NA, 0.057, 0.058, NA, 0.031),
+	delta = c(NA, 45.4, NA, 198.8, 204.0, 56.6, NA),
+	sd_delta = c(NA, 4, NA, 40, 26.6, 13.8, NA),
+	var_res = c(0.0031, 0.0036, 0.0023, 0.0079, 0.0028, 0.0041 , 0.004),
+	n_params = c(3, 4, 2, 4, 4, NA, 3), key = "speciesName_sci")
 ```
 
 <!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
@@ -150,11 +262,11 @@ functions {
 
 data{
 	// Dimensions
-	int <lower = 1> N; // Number of trees // In m, while in cm in Vallet2006
-	int <lower = 3, upper = 4> N_params; // Number of parameters
+	int <lower = 1> N; // Number of trees
+	int <lower = 2, upper = 4> N_params; // Number of parameters
 
 	// Predictors
-	vector[N] circumference_cm;
+	vector[N] circumference_cm; // In m, while in cm in Vallet2006
 	vector[N] height;
 
 	// Observations
@@ -171,9 +283,11 @@ parameters {
 }
 
 model {
-	target += normal_lpdf(vec_params[1] | 0, 1);
-	target += normal_lpdf(vec_params[2] | 0, 0.01);
-	target += normal_lpdf(vec_params[3] | 0, 1);
+	target += normal_lpdf(vec_params[1] | 0, 0.4);
+	target += normal_lpdf(vec_params[2] | 0, 0.0005);
+
+	if (N_params > 2)
+		target += normal_lpdf(vec_params[3] | 0, 0.4);
 
 	if (N_params == 4)
 		target += normal_lpdf(vec_params[4] | 45, 10);
@@ -186,18 +300,25 @@ model {
 
 ```
 
-I now run it on the four species of interest: *Abies alba*, *Fagus sylvatica*, *Picea abies*, and *Quercus petraea*. Note that Douglas fir cannot be parametrised with the way I wrote the model, as it is a particular case with $\alpha$, $\beta$, and $\delta$ estimated (while all the other three-parameter species have $\gamma$ estimated rather than the correction parameter $\delta$).
+I now run it on the four species of interest: *Abies alba*, *Fagus sylvatica*, *Picea abies*, and *Quercus petraea*. Note that Douglas fir cannot be parametrised with the way I wrote the model, as it is a particular case with $\alpha$, $\beta$, and $\delta$ estimated (while all the other three-parameter species have $\gamma$ estimated rather than the correction parameter $\delta$). Therefore, in `vallet_dt` I set `n_params` to `NA`.
+
+Actually, I run it for the seven species, with a quick and dirty adjustment for Douglas fir that I do not save...
 
 ```{r}
-ls_species = c("Abies alba", "Fagus sylvatica", "Picea abies", "Quercus petraea")
+#| fig-cap: Bayesian vs Frequentist Vallet 2006
+#| fig-subcap:
+#|   - "Abies alba"
+#|   - "Fagus sylvatica"
+#|   - "Picea abies"
+#|   - "Quercus petraea"
+#| layout-ncol: 2
+#| label: fig-bayesFreq
+
+ls_species = c("Abies alba", "Fagus sylvatica", "Picea abies", "Pinus pinaster", "Pinus sylvestris",
+	"Pseudotsuga menziesii", "Quercus petraea")
 training_dt = training_dt[ls_species]
 
-
-training_dt[is.na(circumference_m)]
 training_dt[, .N, by = speciesName_sci]
-
-# Table containing number of parameters (taken from Vallet 2006) as Vallet uses submodels
-n_params = data.table(speciesName_sci = ls_species, n_params = c(3, 4, 2, 3), key = "speciesName_sci") 
 
 output_dir = "./bayesian_vallet/"
 if (!dir.exists(output_dir))
@@ -205,15 +326,20 @@ if (!dir.exists(output_dir))
 
 n_chains = 4
 
+vallet_bayesian = cmdstan_model("./vallet.stan")
+
 for (sp in ls_species)
 {
+	if (sp == "Pseudotsuga menziesii")
+		next;
+	
 	sp_filename = stri_replace(str = sp, replacement = "-", regex = " ")
 	filename = paste0(output_dir, sp_filename, ".rds")
 	if (!file.exists(filename))
 	{
 		stanData = list(
 			N = training_dt[sp, .N],
-			N_params = n_params[sp, n_params],
+			N_params = vallet_dt[sp, n_params],
 
 			circumference_cm = training_dt[sp, 100*circumference_m], # Was in cm in Vallet2006!
 			height = training_dt[sp, height],
@@ -229,6 +355,39 @@ for (sp in ls_species)
 	} else {
 		results = readRDS(filename)
 	}
+
+	params = getParams(results, paste0("vec_params[", 1:vallet_dt[sp, n_params], "]"), type = "mean")
+	
+	if (vallet_dt[sp, n_params] == 2)
+	{
+		names(params) = c("alpha", "beta")
+		freq_params = vallet_dt[sp, c(alpha, beta)]
+		names(freq_params) = names(params)
+	}
+	
+	if (vallet_dt[sp, n_params] == 3)
+	{
+		names(params) = c("alpha", "beta", "gamma")
+		freq_params = vallet_dt[sp, c(alpha, beta, gamma)]
+		names(freq_params) = names(params)
+	}
+	
+	if (vallet_dt[sp, n_params] == 4)
+	{
+		names(params) = c("alpha", "beta", "gamma", "delta")
+		freq_params = vallet_dt[sp, c(alpha, beta, gamma, delta)]
+		names(freq_params) = names(params)
+	}
+	
+	training_dt[sp, bayes_vallet := form_vallet(100*circumference_m, height, params, vallet_dt[sp, n_params])]
+	training_dt[sp, freq_vallet := form_vallet(100*circumference_m, height, freq_params, vallet_dt[sp, n_params])]
+
+	## Plot Bayes vs Freq
+	plot(training_dt[sp, freq_vallet], training_dt[sp, bayes_vallet], pch = 19, cex = 0.55,
+		axes = FALSE, xlab = "Frequentist", ylab = "Bayesian")
+	abline(a = 0, b = 1, lwd = 1.5, col = "#CD212A")
+	axis(1)
+	axis(2, las = 1)
 }
 ```
 
