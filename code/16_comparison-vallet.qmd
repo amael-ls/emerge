@@ -1,0 +1,95 @@
+---
+title: "Comparison with Vallet and output preparation for pgfplots"
+date: today
+author: Amaël Le Squin
+date-format: iso
+filters:
+  - fontawesome
+  - siunitx-quarto
+  - imagify
+imagify:
+  header-includes: |
+    \usepackage{pgfplots}
+    \pgfplotsset{compat=1.18}
+    \usepgfplotslibrary{fillbetween}
+    \usetikzlibrary{positioning}
+    \usetikzlibrary{calc}
+  pdf-engine: lualatex
+pdf-engine: lualatex
+keep-tex: true
+execute:
+  error: true
+  echo: false
+  warning: false
+  message: false
+bibliography: /home/ALe-Squin/work/library/bib_file/references.bib
+lightbox:
+  match: auto
+css: style.css
+knitr:
+  opts_chunk: 
+    dev: ragg_png
+    crop: null
+    out.width: "70%"
+    fig.width: 6
+    fig.asp: 0.618
+    fig.align: "center"
+format:
+  html:
+    toc: true
+    include-in-header: mathjax.html
+    code-fold: true
+    df-print: paged
+    number-sections: true
+    theme:
+      light: cerulean
+      dark: darkly
+    margin: 5% 0;
+  pdf:
+    mathspec: true
+    include-in-header:
+      - text: |
+          \usepackage{unicode-math}
+---
+
+<!-- New command -->
+\newcommand{\ie}{*i.e.,*}
+
+<!-- Math commands -->
+\newcommand{\Vbft}{V_{\text{BFT}}}
+\newcommand{\Fbft}{F_{\text{BFT}}}
+\newcommand{\Vtot}{V_{\text{tot}}}
+\newcommand{\Vzh}{V_{\text{Zhou}}}
+\newcommand{\hdec}{h_{\text{dec}}}
+\newcommand{\fmax}{f_{\text{max}}}
+
+<!-- Math operators -->
+<!-- \DeclareMathOperator{\ln}{ln} -->
+
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+<!-- ---------------------------   LOADING DATA, R CODE   --------------------------- -->
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+
+```{r}
+#| output: false
+
+#### Clear space and load packages
+rm(list = ls())
+graphics.off()
+
+options(max.print = 500)
+
+library(data.table)
+library(MetBrewer)
+library(bayesplot)
+library(cmdstanr)
+	register_knitr_engine(override = TRUE)
+library(stringi)
+library(inventR)
+library(interp)
+library(loo)
+
+## Tool function
+# source("./toolFunctions.R")
+```
+
