@@ -497,7 +497,7 @@ In this script, I parametrise species groups rather than species-specific models
 The overlap is quite good for all the groups.
 
 ```{r}
-#| fig-cap Overlap Fr-Ch by group
+#| fig-cap: Overlap Fr-Ch by group
 #| label: fig-overlap
 #| fig-subcap: 
 #|   - "A1"
