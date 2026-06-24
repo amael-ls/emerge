@@ -81,6 +81,7 @@ options(max.print = 500)
 
 library(data.table)
 library(MetBrewer)
+library(bayesplot)
 library(cmdstanr)
 	register_knitr_engine(override = TRUE)
 library(stringi)
@@ -88,7 +89,7 @@ library(stringi)
 ## Tool function
 source("./toolFunctions.R")
 
-plot_sp = function(fit, sp, forest = tree_dt[.(sp)], pred = TRUE, simplif = FALSE,
+plot_gr = function(fit, gr, forest = tree_dt[.(gr)], pred = TRUE, simplif = FALSE,
 	n_bins = 4, pal = "Hiroshige", selected_variable = NULL, print_plot = TRUE)
 {
 	# Get parameters
@@ -162,7 +163,7 @@ plot_sp = function(fit, sp, forest = tree_dt[.(sp)], pred = TRUE, simplif = FALS
 	{
 		plot(forest[, bole_volume_m3], forest[, r], pch = 19, col = forest[, colour], axes = FALSE,
 			xlab = "Bole volume", ylab = "Ratio bole/tot volumes", lwd = 0, cex = 0.75,
-			main = ifelse(is.null(selected_variable), sp, paste(sp, "(", selected_variable, ")")))
+			main = ifelse(is.null(selected_variable), gr, paste(gr, "(", selected_variable, ")")))
 		if (!is.null(selected_variable))
 			legend("topright", fill = colours, title = paste(selected_variable, "classes"),
 				legend = levels(forest[, cut(.SD[[selected_variable]], breaks = n_bins, dig.lab = 1)]))
@@ -180,7 +181,7 @@ plot_sp = function(fit, sp, forest = tree_dt[.(sp)], pred = TRUE, simplif = FALS
 		{
 			plot(sim, forest[, total_volume_m3], pch = 19, col = forest[, colour], axes = FALSE,
 				xlab = "Predicted total volume", ylab = "Observed total volume",
-				main = ifelse(is.null(selected_variable), sp, paste(sp, "(", selected_variable, ")")))
+				main = ifelse(is.null(selected_variable), gr, paste(gr, "(", selected_variable, ")")))
 			if (!is.null(selected_variable))
 				legend("topright", fill = colours, title = paste(selected_variable, "classes"),
 					legend = levels(forest[, cut(.SD[[selected_variable]], breaks = n_bins, dig.lab = 1)]))
@@ -190,7 +191,7 @@ plot_sp = function(fit, sp, forest = tree_dt[.(sp)], pred = TRUE, simplif = FALS
 
 			plot(forest[, bole_volume_m3], forest[, total_volume_m3], pch = 19, col = forest[, colour],
 				axes = FALSE, xlab = "Observed bole volume", ylab = "Observed total volume",
-				main = ifelse(is.null(selected_variable), sp, paste(sp, "(", selected_variable, ")")))
+				main = ifelse(is.null(selected_variable), gr, paste(gr, "(", selected_variable, ")")))
 			if (!is.null(selected_variable))
 				legend("topright", fill = colours, title = paste(selected_variable, "classes"),
 					legend = levels(forest[, cut(.SD[[selected_variable]], breaks = n_bins, dig.lab = 1)]))
@@ -214,12 +215,12 @@ plot_sp = function(fit, sp, forest = tree_dt[.(sp)], pred = TRUE, simplif = FALS
 	{
 		if (!simplif)
 		{
-			lazyTrace(fit$draws("c"), main = paste0(sp, ", c"))
-			lazyTrace(fit$draws("j"), main = paste0(sp, ", j"))
-			lazyTrace(fit$draws("k"), main = paste0(sp, ", k"))
-			lazyTrace(fit$draws("m"), main = paste0(sp, ", m"))
-			lazyTrace(fit$draws("n"), main = paste0(sp, ", n"))
-			lazyTrace(fit$draws("s"), main = paste0(sp, ", s"))
+			lazyTrace(fit$draws("c"), main = paste0(gr, ", c"))
+			lazyTrace(fit$draws("j"), main = paste0(gr, ", j"))
+			lazyTrace(fit$draws("k"), main = paste0(gr, ", k"))
+			lazyTrace(fit$draws("m"), main = paste0(gr, ", m"))
+			lazyTrace(fit$draws("n"), main = paste0(gr, ", n"))
+			lazyTrace(fit$draws("s"), main = paste0(gr, ", s"))
 
 			paramsVec1 = getParams(model_cmdstan = fit, params_names = c("c", "j", "k", "m", "n", "s"),
 				type = "chain", chain = 1)
@@ -277,7 +278,7 @@ plot_sp = function(fit, sp, forest = tree_dt[.(sp)], pred = TRUE, simplif = FALS
 			)
 		}
 		plot(forest[, bole_volume_m3], forest[, r], pch = 19, axes = FALSE, lwd = 0,
-			xlab = "Bole volume", ylab = "Ratio bole/tot volumes", main = sp)
+			xlab = "Bole volume", ylab = "Ratio bole/tot volumes", main = gr)
 		curve(r_func(x, paramsVec), add = TRUE, lwd = 3)
 		curve(r_func(x, paramsVec1), lwd = 3, add = TRUE, col = met.brewer("Egypt")[1])
 		curve(r_func(x, paramsVec2), lwd = 3, add = TRUE, col = met.brewer("Egypt")[2])
@@ -497,6 +498,7 @@ The overlap is quite good for all the groups.
 
 ```{r}
 #| fig-cap Overlap Fr-Ch by group
+#| label: fig-overlap
 #| fig-subcap: 
 #|   - "A1"
 #|   - "A3"
@@ -521,5 +523,71 @@ for (gr in ls_groups)
 	legend(x = "topright", legend = c("France", "Switzerland"), fill = ls_colours[c("fr", "ch")])
 	axis(1)
 	axis(2, las = 1)
+}
+```
+
+## First run brute force!
+
+```{r}
+#| fig-cap: Output of the model
+#| label: fig-output 
+#| fig-subcap: 
+#|   - "A1"
+#|   - "A3"
+#|   - "B1"
+#|   - "B2"
+#|   - "C1"
+#|   - "C2"
+#|   - "C3"
+#|   - "D1"
+#|   - "D2"
+#|   - "E1"
+#|   - "E2"
+#| lightbox: 
+#|   group: output
+
+## Compile model
+model = cmdstan_model("./yang2024.stan")
+tree_dt[, r := bole_volume_m3/total_volume_m3]
+
+## Common variables
+n_chains = 4
+
+savePath = "./yang/"
+if (!dir.exists(savePath))
+	stop("You should run '11_yang.qmd'")
+
+## Run model
+for (gr in ls_groups)
+{
+	print(paste("Running", gr))
+
+	# Subset to targeted group for stanData
+	stanData = list(
+		N = tree_dt[.(gr)][, .N],
+		bole_volume_m3 = tree_dt[.(gr)][, bole_volume_m3],
+		total_volume_m3 = tree_dt[.(gr)][, total_volume_m3]
+	)
+
+	## Run model
+	if (file.exists(paste0(savePath, gr, ".rds")))
+	{
+		fit = readRDS(paste0(savePath, gr, ".rds"))
+	} else {
+		fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4),
+			iter_warmup = 1500, iter_sampling = 1000, max_treedepth = 10)
+
+		## Save results
+		fit$save_output_files(dir = savePath, basename = gr, random = FALSE)
+		saveRDS(fit, paste0(savePath, gr, ".rds"))
+	}
+
+	div = plot_gr(fit, gr, simplif = FALSE, n_bins = 4, pal = "Hiroshige", selected_variable = "height",
+		print_plot = TRUE)
+
+	# pars = getParams(model_cmdstan = fit, params_names = c("m", "c", "j", "k", "n", "s"))
+
+	if (div[["any_div"]])
+		warning(paste("Divergences for", gr))
 }
 ```
