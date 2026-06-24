@@ -387,15 +387,109 @@ names(ls_colours) = c("fr_comp", "fr", "ch_comp", "ch")
 tree_dt[, colour := ls_colours["fr"]] # Inra and Emerge, in blue
 tree_dt[origin == "swiss", colour := ls_colours["ch"]] # Swiss, in yellow
 
-# Remove NAs
+# Remove NAs (bole volumes only, I do not car if circumference or height have NAs)
 tree_dt = tree_dt[!is.na(bole_volume_m3)]
-
-# Remove species with less than 150 individuals
-tree_dt[, n_indiv := .N, by = speciesName_sci]
-tree_dt = tree_dt[n_indiv > 150]
-
-tree_dt[, .N, by = .(speciesName_sci, colour)][order(speciesName_sci)]
 
 # Set key to sort by species and colour (i.e., France vs Switzerland)
 setkey(tree_dt, speciesName_sci, colour)
+
+## Prepare species groups
+# Load data
+sp_sci = readRDS("../../gohon_florence/species.rds")[, .(tarif, speciesName_sci)]
+sp_code = readRDS("../../gohon_florence/espar.rds")[, .(ess, Group_ess, espar, nom_espar)]
+
+# Merging
+sp_code = merge.data.table(sp_code, sp_sci, by.x = "ess", by.y = "tarif", all.x = TRUE)
+
+# Unambiguous matching (done by chatGPT and checked manually)
+unambiguous = data.table(
+	speciesName_sci = c(
+		"Abies nordmanniana",
+		"Alnus sp.",
+		"Cedrus atlantica",
+		"Chamaecyparis sp.",
+		"Eucalyptus sp.",
+		"Fraxinus sp.",
+		"Pinus cembra",
+		"Pinus laricio",
+		"Pinus laricio",
+		"Pinus mugo",
+		"Pinus strobus",
+		"Pinus uncinata",
+		"Quercus coccinea",
+		"Tilia sp.",
+		"Tilia sp.",
+		"Tilia sp."
+	),
+	nom_espar = c(
+		"Sapin de Nordmann",
+		"Aulne vert",
+		"Cèdre de l'Atlas",
+		"Cyprès de Lawson",
+		"Eucalyptus (genre)",
+		"Frêne d'Amérique",
+		"Pin cembro",
+		"Pin laricio de Corse",
+		"Pin laricio de Calabre",
+		"Pin mugo",
+		"Pin Weymouth",
+		"Pin à crochets",
+		"Chêne écarlate",
+		"Tilleul d'Amérique du Nord",
+		"Tilleul argenté",
+		"Tilleul vert"
+	),
+	key = "speciesName_sci"
+)
+
+# Joining sp_code with unambiguous
+sp_code = sp_code[unambiguous, speciesName_sci := fcoalesce(speciesName_sci, i.speciesName_sci),
+	on = "nom_espar"]
+
+# Species from tree_dt without group
+ls_species = tree_dt[, unique(speciesName_sci)]
+no_group = ls_species[!(ls_species %in% sp_code[, speciesName_sci])]
+
+ls_genra = unique(stri_sub(str = no_group, to = stri_locate_first(str = no_group, regex = " ")[, "start"] - 1))
+sp_code[, genra := stri_sub(str = speciesName_sci,
+	to = stri_locate_first(str = speciesName_sci, regex = " ")[, "start"] - 1)]
+
+matching = unique(sp_code[genra %in% ls_genra, .(genra, Group_ess)])
+matching[, n_choices := .N, by = genra]
+
+## Assigning groups manually
+# For species that have only one choice anyway
+manual_groups = data.table(speciesName_sci = no_group,
+	genra = stri_sub(str = no_group, to = stri_locate_first(str = no_group, regex = " ")[, "start"] - 1),
+	Group_ess = "", key = "genra")
+
+manual_groups[matching[n_choices == 1], Group_ess := i.Group_ess, on = "genra"]
+
+# For Pinus halepensis, Pinus sp., and Quercus sp.
+manual_groups[genra == "Pinus", Group_ess := "B2"] # Rk: Pinus halepensis was listed as Pinus halepensis/Brutia
+manual_groups[genra == "Quercus", Group_ess := "E2"] # Rk: Quercus sp. contains petraea, robur, pubescens
+
+## Assigning groups to tree_dt
+final_groups = unique(rbindlist(list(sp_code[!is.na(speciesName_sci), .(speciesName_sci, group = Group_ess)],
+	manual_groups[,.(speciesName_sci, group = Group_ess)])))
+
+if (!all(ls_species %in% final_groups[, unique(speciesName_sci)]))
+	stop("Some species have no group! Do it manually, or whatever, bu do it! Just do it")
+
+tree_dt = merge.data.table(tree_dt, final_groups, by = "speciesName_sci")
+```
+
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+<!-- ---------------------------   MAIN CONTENT, R CODE   --------------------------- -->
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+
+## Introduction
+
+This script try to parametrise the total volume in function of the bole volume, that is to say, to use the basic definition of allometry: the dimension of an organ $y$ is proportional to an organ $x$, such as in this power-law $y = a x^b$. Here, $y$ is the total volume and $x$ is the bole volume. In @Yang2024, they do it with above-ground biomass as $y$ and stem biomass as $x$. I expect to be able to apply the same type of functions to volume, as volume and biomass are related by wood density. It should be the same if wood density is constant between the crown and the bole, and only the scale should change! According to @Knapic2011 there is little variation within tree oaks, while there can be for pines @Repola2006.
+
+In this script, I parametrise species groups rather than species-specific models. The groups have been defined during the Emerge project (see @Deleuze2014 or @Longuetaud2013). For more details on the functional forms of the ratio, please check `11_yang.qmd`.
+
+## Checking overlap of ratios from French and Swiss data
+ 
+```{r}
 ```
