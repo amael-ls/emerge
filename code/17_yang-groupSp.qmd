@@ -1,0 +1,401 @@
+---
+title: "Run the ratio models (complete and submodel) for species groups"
+date: today
+author: Amaël Le Squin
+date-format: iso
+filters:
+  - fontawesome
+  - siunitx-quarto
+  - imagify
+imagify:
+  header-includes: |
+    \usepackage{pgfplots}
+    \pgfplotsset{compat=1.18}
+    \usepgfplotslibrary{fillbetween}
+    \usetikzlibrary{positioning}
+    \usetikzlibrary{calc}
+  pdf-engine: lualatex
+pdf-engine: lualatex
+keep-tex: true
+execute:
+  error: true
+  echo: false
+  warning: false
+  message: false
+bibliography: /home/ALe-Squin/work/library/bib_file/references.bib
+lightbox:
+  match: auto
+css: style.css
+knitr:
+  opts_chunk: 
+    dev: ragg_png
+    crop: null
+    out.width: "70%"
+    fig.width: 6
+    fig.asp: 0.618
+    fig.align: "center"
+format:
+  html:
+    toc: true
+    include-in-header: mathjax.html
+    code-fold: true
+    df-print: paged
+    number-sections: true
+    theme:
+      light: cerulean
+      dark: darkly
+    margin: 5% 0;
+  pdf:
+    mathspec: true
+    include-in-header:
+      - text: |
+          \usepackage{unicode-math}
+---
+
+<!-- New command -->
+\newcommand{\ie}{*i.e.,*}
+
+<!-- Math commands -->
+\newcommand{\Vbft}{V_{\text{BFT}}}
+\newcommand{\Fbft}{F_{\text{BFT}}}
+\newcommand{\Vtot}{V_{\text{tot}}}
+\newcommand{\Vzh}{V_{\text{Zhou}}}
+\newcommand{\hdec}{h_{\text{dec}}}
+\newcommand{\fmax}{f_{\text{max}}}
+
+<!-- Math operators -->
+<!-- \DeclareMathOperator{\ln}{ln} -->
+
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+<!-- ---------------------------   LOADING DATA, R CODE   --------------------------- -->
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+
+```{r}
+#| output: false
+
+#### Clear space and load packages
+rm(list = ls())
+graphics.off()
+
+options(max.print = 500)
+
+library(data.table)
+library(MetBrewer)
+library(cmdstanr)
+	register_knitr_engine(override = TRUE)
+library(stringi)
+
+## Tool function
+source("./toolFunctions.R")
+
+plot_sp = function(fit, sp, forest = tree_dt[.(sp)], pred = TRUE, simplif = FALSE,
+	n_bins = 4, pal = "Hiroshige", selected_variable = NULL, print_plot = TRUE)
+{
+	# Get parameters
+	n_sampling = fit$metadata()$iter_sampling
+	n_chains = fit$num_chains()
+
+	if (n_chains != nrow(fit$metadata()$time))
+	{
+		warning("Some chains are missing probably because they could not start! Using the number of successful chains")
+		n_chains = nrow(fit$metadata()$time)
+	}
+
+	# Add colour to the measured points according to selected variable
+	if (!is.null(selected_variable))
+	{
+		if (!(selected_variable %in% colnames(forest)))
+			stop(paste0("'", selected_variable, "' is not a column of forest"))
+		
+		colours = MetBrewer::met.brewer(pal, n_bins)[1:n_bins]
+		forest[, colour_ind := as.numeric(cut(.SD[[selected_variable]], breaks = n_bins))] # Indices per category
+		forest[, colour := colours[colour_ind]] # Map selected variable to colour using indices
+	} else {
+		forest[, colour := "#3355AA33"] # Default colour
+	}
+
+	# Define fitted functions (depends if simplified model 2 stages vs 3 stages)
+	if (!simplif)
+	{
+		paramsVec = getParams(model_cmdstan = fit, params_names = c("c", "j", "k", "m", "n", "s"), type = "mean")
+	} else {
+		paramsVec_simplif = getParams(model_cmdstan = fit,
+			params_names = c("alpha", "beta_", "gamma", "delta"), type = "mean")
+		paramsVec = c(
+			c = unname(paramsVec_simplif["alpha"]),
+			j = 1,
+			k = unname(paramsVec_simplif["beta_"]),
+			m = unname(exp(-1)*paramsVec_simplif["gamma"]/paramsVec_simplif["beta_"] + paramsVec_simplif["alpha"]),
+			n = unname(paramsVec_simplif["delta"] + paramsVec_simplif["alpha"]),
+			s = unname(paramsVec_simplif["beta_"])
+		)
+	}
+
+	r_func = function(x, pars)
+	{
+		return ((pars["m"] - pars["c"]) * exp(pars["j"] - pars["k"]*x) * (pars["k"]*x/pars["j"])^pars["j"] +
+			pars["c"] - (pars["c"] - pars["n"])*exp(-pars["s"]*x));
+	}
+	
+	psi = function(x, pars)
+	{
+		r = r_func(x, pars)
+
+		return ( 1/pars["c"] * x^( 1 - (log(r) - log(pars["c"])) / log(x) ) )
+	}
+
+	# Check rhats
+	pars_names = names(paramsVec)
+	if (simplif)
+		pars_names = c("alpha", "beta_", "gamma", "delta")
+	rhats = rhat(object = fit, pars = pars_names)
+
+	# Divergence check up
+	params = getParams(model_cmdstan = fit, params_names = pars_names, type = "all")
+	div = posterior::subset_draws(fit$sampler_diagnostics(), variable = "divergent__")
+
+	if (!print_plot & !pred)
+		return (list(any_div = any(div != 0), loc = div, rhats = rhats))
+
+	# Plot figure r vs bole and fitted curve
+	if (print_plot)
+	{
+		plot(forest[, bole_volume_m3], forest[, r], pch = 19, col = forest[, colour], axes = FALSE,
+			xlab = "Bole volume", ylab = "Ratio bole/tot volumes", lwd = 0, cex = 0.75,
+			main = ifelse(is.null(selected_variable), sp, paste(sp, "(", selected_variable, ")")))
+		if (!is.null(selected_variable))
+			legend("topright", fill = colours, title = paste(selected_variable, "classes"),
+				legend = levels(forest[, cut(.SD[[selected_variable]], breaks = n_bins, dig.lab = 1)]))
+		curve(r_func(x, paramsVec), add = TRUE, lwd = 3)
+		axis(1)
+		axis(2, las = 1)
+	}
+
+	# Plot predictions
+	if (pred)
+	{
+		sim = apply(X = fit$draws("v_gen_mean"), MARGIN = 3, FUN = mean)
+
+		if (print_plot)
+		{
+			plot(sim, forest[, total_volume_m3], pch = 19, col = forest[, colour], axes = FALSE,
+				xlab = "Predicted total volume", ylab = "Observed total volume",
+				main = ifelse(is.null(selected_variable), sp, paste(sp, "(", selected_variable, ")")))
+			if (!is.null(selected_variable))
+				legend("topright", fill = colours, title = paste(selected_variable, "classes"),
+					legend = levels(forest[, cut(.SD[[selected_variable]], breaks = n_bins, dig.lab = 1)]))
+			abline(a = 0, b = 1, lty = "dashed", lwd = 1.5, col = "#2E2E2E")
+			axis(1)
+			axis(2, las = 1)
+
+			plot(forest[, bole_volume_m3], forest[, total_volume_m3], pch = 19, col = forest[, colour],
+				axes = FALSE, xlab = "Observed bole volume", ylab = "Observed total volume",
+				main = ifelse(is.null(selected_variable), sp, paste(sp, "(", selected_variable, ")")))
+			if (!is.null(selected_variable))
+				legend("topright", fill = colours, title = paste(selected_variable, "classes"),
+					legend = levels(forest[, cut(.SD[[selected_variable]], breaks = n_bins, dig.lab = 1)]))
+			abline(a = 0, b = 1, lty = "dashed", lwd = 0.85, col = "#2E2E2E")
+			curve(psi(x, paramsVec), add = TRUE, lwd = 3)
+			axis(1)
+			axis(2, las = 1)
+		}
+	}
+
+	if (!print_plot & pred)
+	{
+		return (list(any_div = any(div != 0), loc = div, rhats = rhats, pred_tot = sim,
+			obs_bole = forest[, bole_volume_m3], obs_tot = forest[, total_volume_m3], params = paramsVec))
+	}
+
+	print("Hello 3")
+
+	# Plot chains if any rhat problem
+	if (any(rhats > 1.05))
+	{
+		if (!simplif)
+		{
+			lazyTrace(fit$draws("c"), main = paste0(sp, ", c"))
+			lazyTrace(fit$draws("j"), main = paste0(sp, ", j"))
+			lazyTrace(fit$draws("k"), main = paste0(sp, ", k"))
+			lazyTrace(fit$draws("m"), main = paste0(sp, ", m"))
+			lazyTrace(fit$draws("n"), main = paste0(sp, ", n"))
+			lazyTrace(fit$draws("s"), main = paste0(sp, ", s"))
+
+			paramsVec1 = getParams(model_cmdstan = fit, params_names = c("c", "j", "k", "m", "n", "s"),
+				type = "chain", chain = 1)
+			paramsVec2 = getParams(model_cmdstan = fit, params_names = c("c", "j", "k", "m", "n", "s"),
+				type = "chain", chain = 2)
+			paramsVec3 = getParams(model_cmdstan = fit, params_names = c("c", "j", "k", "m", "n", "s"),
+				type = "chain", chain = 3)
+			paramsVec4 = getParams(model_cmdstan = fit, params_names = c("c", "j", "k", "m", "n", "s"),
+				type = "chain", chain = 4)
+		} else {
+			lazyTrace(fit$draws("alpha"), main = "alpha")
+			lazyTrace(fit$draws("beta_"), main = "beta_")
+			lazyTrace(fit$draws("gamma"), main = "gamma")
+			lazyTrace(fit$draws("delta"), main = "delta")
+
+			paramsVec_simplif = getParams(model_cmdstan = fit, params_names = c("alpha", "beta_", "gamma", "delta"),
+				type = "chain", chain = 1)
+			paramsVec1 = c(
+				c = paramsVec_simplif["alpha"],
+				j = 1,
+				k = paramsVec_simplif["beta_"],
+				m = exp(-1)*paramsVec_simplif["gamma"]/paramsVec_simplif["beta_"] + paramsVec_simplif["alpha"],
+				n = paramsVec_simplif["delta"] + paramsVec_simplif["alpha"],
+				s = paramsVec_simplif["beta_"]
+			)
+			paramsVec_simplif = getParams(model_cmdstan = fit, params_names = c("alpha", "beta_", "gamma", "delta"),
+				type = "chain", chain = 2)
+			paramsVec2 = c(
+				c = paramsVec_simplif["alpha"],
+				j = 1,
+				k = paramsVec_simplif["beta_"],
+				m = exp(-1)*paramsVec_simplif["gamma"]/paramsVec_simplif["beta_"] + paramsVec_simplif["alpha"],
+				n = paramsVec_simplif["delta"] + paramsVec_simplif["alpha"],
+				s = paramsVec_simplif["beta_"]
+			)
+			paramsVec_simplif = getParams(model_cmdstan = fit, params_names = c("alpha", "beta_", "gamma", "delta"),
+				type = "chain", chain = 3)
+			paramsVec3 = c(
+				c = paramsVec_simplif["alpha"],
+				j = 1,
+				k = paramsVec_simplif["beta_"],
+				m = exp(-1)*paramsVec_simplif["gamma"]/paramsVec_simplif["beta_"] + paramsVec_simplif["alpha"],
+				n = paramsVec_simplif["delta"] + paramsVec_simplif["alpha"],
+				s = paramsVec_simplif["beta_"]
+			)
+			paramsVec_simplif = getParams(model_cmdstan = fit, params_names = c("alpha", "beta_", "gamma", "delta"),
+				type = "chain", chain = 4)
+			paramsVec4 = c(
+				c = paramsVec_simplif["alpha"],
+				j = 1,
+				k = paramsVec_simplif["beta_"],
+				m = exp(-1)*paramsVec_simplif["gamma"]/paramsVec_simplif["beta_"] + paramsVec_simplif["alpha"],
+				n = paramsVec_simplif["delta"] + paramsVec_simplif["alpha"],
+				s = paramsVec_simplif["beta_"]
+			)
+		}
+		plot(forest[, bole_volume_m3], forest[, r], pch = 19, axes = FALSE, lwd = 0,
+			xlab = "Bole volume", ylab = "Ratio bole/tot volumes", main = sp)
+		curve(r_func(x, paramsVec), add = TRUE, lwd = 3)
+		curve(r_func(x, paramsVec1), lwd = 3, add = TRUE, col = met.brewer("Egypt")[1])
+		curve(r_func(x, paramsVec2), lwd = 3, add = TRUE, col = met.brewer("Egypt")[2])
+		curve(r_func(x, paramsVec3), lwd = 3, add = TRUE, col = met.brewer("Egypt")[3])
+		curve(r_func(x, paramsVec4), lwd = 3, add = TRUE, col = met.brewer("Egypt")[4])
+		axis(1)
+		axis(2, las = 1)
+	}
+
+	return (list(any_div = any(div != 0), loc = div, rhats = rhats))
+}
+
+plot_divergences = function(fit, div, simplif = FALSE)
+{
+	params = getParams(model_cmdstan = fit, params_names = c("c", "j", "k", "m", "n", "s"), type = "all")
+
+	div_c = posterior::subset_draws(params[, , "c"], draw = which(div == 1))
+	div_j = posterior::subset_draws(params[, , "j"], draw = which(div == 1))
+	div_m = posterior::subset_draws(params[, , "m"], draw = which(div == 1))
+	div_k = posterior::subset_draws(params[, , "k"], draw = which(div == 1))
+	div_s = posterior::subset_draws(params[, , "s"], draw = which(div == 1))
+
+	# Plot divergence for c and j
+	plot(params[, , "c"], params[, , "j"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "c", ylab = "j", main = "c and j")
+	points(div_c, div_j, pch = 18, col = "#0F7BA2")
+
+	# Plot divergence for c and k
+	plot(params[, , "c"], params[, , "k"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "c", ylab = "k", main = "c and k")
+	points(div_c, div_k, pch = 18, col = "#0F7BA2")
+
+	# Plot divergence for c and m
+	plot(params[, , "c"], params[, , "m"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "c", ylab = "m", main = "c and m")
+	points(div_c, div_m, pch = 18, col = "#0F7BA2")
+
+	# Plot divergence for j and k
+	plot(params[, , "j"], params[, , "k"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "j", ylab = "k", main = "j and k")
+	points(div_j, div_k, pch = 18, col = "#0F7BA2")
+
+	# Plot divergence for j and m
+	plot(params[, , "j"], params[, , "m"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "j", ylab = "m", main = "j and m")
+	points(div_j, div_m, pch = 18, col = "#0F7BA2")
+
+	# Plot divergence for k and m
+	plot(params[, , "k"], params[, , "m"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "k", ylab = "m", main = "k and m")
+	points(div_k, div_m, pch = 18, col = "#0F7BA2")
+	
+	# Bonus plots of susceptible correlated parameters: k and s
+	plot(params[, , "k"], params[, , "s"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "k", ylab = "s", main = "k and s")
+	points(div_k, div_s, pch = 18, col = "#0F7BA2")
+}
+```
+
+```{r}
+#| output: false
+
+#### Load the data
+## Path
+os = Sys.info()[['sysname']]
+mnt_point = "/mnt/local_share/"
+if (os == "Linux" || os == "Darwin")
+{
+	if (!dir.exists(mnt_point))
+		stop(paste0("The mounting point <", mnt_point, "> does not exist"))
+} else if (os == "Windows") {
+	stop("TO DO!!! No idea how that works on Windows!")
+} else {
+	stop(paste("Unknown Operating System:", os))
+}
+
+path_data = paste0(mnt_point, "data/")
+if (!dir.exists(path_data))
+	stop(paste0("Folder <", path_data, "> does not exist! Did you run 01_prepare_data.qmd?"))
+
+opt = "_inra"
+
+# Loading Emerge data
+inra = readRDS(paste0(path_data, "nfi-inra_dt", opt, ".rds"))
+inra = inra[, .(speciesName_sci, tree_id = unique_id, plot_id, fct_type, year, circumference_m, height,
+	taper_height = taper_height_flo, bole_volume_m3, total_volume_m3)]
+setkey(inra, speciesName_sci)
+
+# Loading Swiss data
+swiss = readRDS(paste0(mnt_point, "data/switzerland.rds"))
+swiss = unique(swiss[, .(speciesName_sci, tree_id, plot_id, fct_type, year, circumference_m, height,
+	taper_height = hdec, bole_volume_m3, total_volume_m3)])
+setkey(swiss, speciesName_sci)
+
+## Modern Emerge data
+emerge = readRDS(paste0(mnt_point, "data/emerge_2009-2010.rds"))
+emerge[, year := as.integer(stringi::stri_replace_all(str = dataset, replacement = "", regex = "emerge_"))]
+emerge = emerge[, .(speciesName_sci, tree_id, fct_type, year, circumference_m, height, taper_height,
+	bole_volume_m3 = bole_volume_conic_m3, total_volume_m3)]
+
+## Bind everything
+tree_dt = rbindlist(list(inra = inra, swiss = swiss, emerge = emerge), idcol = "origin", fill = TRUE)
+
+# Add colours France vs Swiss
+ls_colours = met.brewer("Egypt")[1:4]
+names(ls_colours) = c("fr_comp", "fr", "ch_comp", "ch")
+tree_dt[, colour := ls_colours["fr"]] # Inra and Emerge, in blue
+tree_dt[origin == "swiss", colour := ls_colours["ch"]] # Swiss, in yellow
+
+# Remove NAs
+tree_dt = tree_dt[!is.na(bole_volume_m3)]
+
+# Remove species with less than 150 individuals
+tree_dt[, n_indiv := .N, by = speciesName_sci]
+tree_dt = tree_dt[n_indiv > 150]
+
+tree_dt[, .N, by = .(speciesName_sci, colour)][order(speciesName_sci)]
+
+# Set key to sort by species and colour (i.e., France vs Switzerland)
+setkey(tree_dt, speciesName_sci, colour)
+```
