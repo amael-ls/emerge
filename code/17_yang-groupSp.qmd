@@ -390,9 +390,6 @@ tree_dt[origin == "swiss", colour := ls_colours["ch"]] # Swiss, in yellow
 # Remove NAs (bole volumes only, I do not car if circumference or height have NAs)
 tree_dt = tree_dt[!is.na(bole_volume_m3)]
 
-# Set key to sort by species and colour (i.e., France vs Switzerland)
-setkey(tree_dt, speciesName_sci, colour)
-
 ## Prepare species groups
 # Load data
 sp_sci = readRDS("../../gohon_florence/species.rds")[, .(tarif, speciesName_sci)]
@@ -477,6 +474,11 @@ if (!all(ls_species %in% final_groups[, unique(speciesName_sci)]))
 	stop("Some species have no group! Do it manually, or whatever, bu do it! Just do it")
 
 tree_dt = merge.data.table(tree_dt, final_groups, by = "speciesName_sci")
+
+# Set key to sort by groups and colour (i.e., France vs Switzerland)
+setkey(tree_dt, group, colour)
+
+ls_groups = tree_dt[, unique(group)]
 ```
 
 <!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
@@ -491,5 +493,33 @@ In this script, I parametrise species groups rather than species-specific models
 
 ## Checking overlap of ratios from French and Swiss data
  
+The overlap is quite good for all the groups.
+
 ```{r}
+#| fig-cap Overlap Fr-Ch by group
+#| fig-subcap: 
+#|   - "A1"
+#|   - "A3"
+#|   - "B1"
+#|   - "B2"
+#|   - "C1"
+#|   - "C2"
+#|   - "C3"
+#|   - "D1"
+#|   - "D2"
+#|   - "E1"
+#|   - "E2"
+#| lightbox: 
+#|   group: species
+
+#### Plot data
+for (gr in ls_groups)
+{
+	plot(tree_dt[gr, bole_volume_m3], tree_dt[gr, bole_volume_m3/total_volume_m3],
+		col = tree_dt[gr, colour], xlab = "Bole volume", ylab = "r", axes = FALSE, pch = 19,
+		cex = 0.85)
+	legend(x = "topright", legend = c("France", "Switzerland"), fill = ls_colours[c("fr", "ch")])
+	axis(1)
+	axis(2, las = 1)
+}
 ```
