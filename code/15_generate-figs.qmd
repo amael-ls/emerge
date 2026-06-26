@@ -616,7 +616,7 @@ if (!file.exists("./yang/lambert_calculus.rds"))
 		epsilon_1 = 5e-3
 		epsilon_2 = 5e-3
 		epsilon = epsilon_1 + epsilon_2
-
+		
 		m = paramsVec["m"]
 		j = paramsVec["j"]
 		c = paramsVec["c"]
@@ -624,8 +624,20 @@ if (!file.exists("./yang/lambert_calculus.rds"))
 
 		if (epsilon > (m - c))
 		{
-			warning(paste("The condition epsilon < m - c is not respeced for species", sp))
-			next
+			warning(paste("The condition epsilon < m - c is not respeced for", sp))
+			count = 0
+			while (epsilon > (m - c) && count < 10)
+			{
+				count = count + 1
+				epsilon = epsilon/2
+			}
+
+			if (epsilon > (m - c))
+			{
+				warning(paste("Could not solve the problem for", sp, "by setting epsilon = epsilon/1024"))
+				next
+			}
+			warning(paste("Divided epsilon by", 2^count, "for", sp))
 		}
 
 		xi = -exp(-1)*(epsilon/(m - c))^(1/j)
