@@ -588,7 +588,10 @@ if (!file.exists("./yang/lambert_calculus.rds"))
 			simplif = TRUE
 		
 		sp_filename = stri_replace(str = sp, replacement = "-", regex = " ")
-		filename = paste0("./yang/", sp_filename, ifelse(simplif, "_submodel", ""), ".rds")
+		if (sp == "Quercus sp.")
+			sp_filename = stri_replace(str = sp_filename, replacement = "", regex = "\\.")
+		
+		filename = paste0("./yang/", sp_filename, ifelse(simplif, "_submodel", "_new"), ".rds")
 		fit = readRDS(filename)
 
 		if (!simplif)
