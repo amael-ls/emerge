@@ -619,6 +619,12 @@ if (!file.exists("./yang/lambert_calculus.rds"))
 		c = paramsVec["c"]
 		k = paramsVec["k"]
 
+		if (epsilon > (m - c))
+		{
+			warning(paste("The condition epsilon < m - c is not respeced for species", sp))
+			next
+		}
+
 		xi = -exp(-1)*(epsilon/(m - c))^(1/j)
 		wp = -j/k * lamW::lambertW0(xi)
 		wm = -j/k * lamW::lambertWm1(xi)
