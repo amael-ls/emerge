@@ -705,6 +705,27 @@ rebuilt_comp = function(save_ls)
 
 	return(list(comp = comp, weights_dt = weights_dt, R2D2 = R2D2))
 }
+
+rebuilt_comp2 = function(save_ls)
+{
+	ls_species = names(save_ls)
+	
+	comp = data.table(species = ls_species, best = "", elpd_diff = -Inf, se_diff = -Inf,
+		warning = FALSE, key = "species")
+	weights_dt = data.table(species = ls_species, best = "", W_yang = -Inf, W_sub = -Inf, key = "species")
+	R2D2 = data.table(species = ls_species, R2_yang = -Inf, R2_sub = -Inf, key = "species")
+
+	for (sp in ls_species)
+	{
+		weights_dt[sp, c("W_yang", "W_sub") := as.list(save_ls[[sp]]$weights)]
+		R2D2[sp, c("R2_yang", "R2_sub") := .(save_ls[[sp]]$avg_yang, save_ls[[sp]]$avg_sub)]
+		
+		comp[sp, c("best", "warning") := .(save_ls[[sp]]$best, save_ls[[sp]]$warning)]
+		comp[sp, c("elpd_diff", "se_diff") := as.list(save_ls[[sp]]$comploo[2, c("elpd_diff", "se_diff")])]
+	}
+
+	return(list(comp = comp, weights_dt = weights_dt, R2D2 = R2D2))
+}
 ```
 
 ```{r}
@@ -798,6 +819,10 @@ R2D2 = data.table(species = ls_species, R2_yang = -Inf, R2_sub = -Inf, key = "sp
 if (file.exists("./yang/comparison_new-sub.rds"))
 {
 	save_ls = readRDS("./yang/comparison_new-sub.rds")
+	rebuilt = rebuilt_comp2(save_ls)
+	comp = rebuilt$comp
+	weights_dt = rebuilt$weights_dt
+	R2D2 = rebuilt$R2D2
 } else {
 	save_ls = vector(mode = "list", length = length(ls_species))
 	names(save_ls) = ls_species
@@ -856,7 +881,6 @@ pnorm(0, mean = diff_elpd, sd = se_elpd, lower.tail = FALSE) # Eq A2, equivalent
 
 integrate(f, lower = -Inf, upper = +Inf, diff_elpd = diff_elpd, se_elpd = se_elpd)$value # Eq A4
 
-
 comp[, eq_A2 := -Inf]
 comp[, eq_A2_bis := -Inf]
 comp[, pseudo_bma := -Inf]
@@ -869,6 +893,11 @@ comp[, pseudo_bma := integrate(f, lower = -Inf, upper = +Inf, diff_elpd = abs(el
 	by = species]
 
 fwrite(comp, "../../../writing/article_allometry/data/comparison.csv")
+
+## Merge R2D2 with Flopp results
+flopp_r2 = readRDS("../../gohon_florence/rsquared.rds")[, .(speciesName_sci, R2_flopp, N)]
+R2D2 = merge.data.table(R2D2, flopp_r2, by.x = "species", by.y = "speciesName_sci")
+fwrite(R2D2, "../../../writing/article_allometry/data/rsquared.csv")
 ```
 
 ## Other stuff, to compare Vallet with my model
