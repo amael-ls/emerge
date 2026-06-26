@@ -184,6 +184,13 @@ pred_fct_yang = function(sp, stanData_gen, simplif = FALSE, n_points = 5, woodst
 		pred_r = pred_r, quant_mean_r = pred_r_quant_mean, quant_r = pred_r_quant,
 		paramsVec = paramsVec, randomSample_v = dt_v, randomSample_r = dt_r, n_points = n_points))
 }
+
+## Function that compute the average above-ground pred volume without params/residual uncertainty
+yang2024 = function(x, pars)
+{
+	return((pars["m"] - pars["c"]) * exp(pars["j"] - pars["k"]*x) * (pars["k"]*x/pars["j"])^pars["j"] +
+		pars["c"] - (pars["c"] - pars["n"])*exp(-pars["s"]*x));
+}
 ```
 
 ```{r}
@@ -223,7 +230,9 @@ setkey(nfi_codes, speciesName_sci)
 nfi_codes["Fraxinus excelsior", species_code_nfi := 17] # Manually assigned Fraxinus sp. code
 
 sp_code_nfi = paste0("'", paste(nfi_codes[, species_code_nfi], collapse = "','"), "'")
+```
 
+```{r}
 #### Loading NFI data
 ## French NFI data query
 db = connect_db()
@@ -403,7 +412,6 @@ range_dt["Quercus sp.", min_nfi_flopp := min_nfi]
 
 # Species need an extension if 110% max_t is below q995_flopp
 range_dt[, need_extension := 1.1*max_t < q995_flopp_u]
-range_dt[, .(speciesName_sci, max_t, q995_flopp, q995_flopp_u, need_extension)]
 ```
 
 As can be seen, for some species, the NFI goes below the minimum limit of the training dataset. However, since the limits are so close to zero, I will never been able to distinguish any prolungation outside of the lower range! So I simply plot up to 0.
@@ -554,3 +562,87 @@ for (sp in nfi_codes[, species_code_nfi])
 }
 ```
 
+## Ratio figure
+
+The asymptotic value of the ratio is surprisingly stable, around 0.8. Therefore, it would worth it to plot it for the four species of interest, *Abies alba*, *Fagus sylvatica*, *Picea abies*, and *Quercus petraea*. The aim is to compare at which bole volume do they reach the asymptote, and also check difference boradleaves/conifers. This could be discussed in the article, together with other traits
+
+```{r}
+#### Make figures and generate data for pgfplots
+vbole = seq(0, 6, length.out = 500)
+
+threshold_dt = data.table(speciesName_sci = training_dt[, unique(speciesName_sci)],
+	simplif = NA, x1 = -Inf, x2 = -Inf, diff_eps = NA_real_, key = "speciesName_sci")
+
+fct_output = matrix(data = NA_real_, nrow = threshold_dt[, .N], ncol = length(vbole))
+rownames(fct_output) = threshold_dt[, speciesName_sci]
+
+if (!file.exists("./yang/lambert_calculus.rds"))
+{
+	for (sp in training_dt[, unique(speciesName_sci)])
+	{
+		print(paste("Doing species", sp))
+		
+		## Get params
+		simplif = FALSE
+		if ((sp == "Fraxinus excelsior") || (sp == "Picea abies"))
+			simplif = TRUE
+		
+		sp_filename = stri_replace(str = sp, replacement = "-", regex = " ")
+		filename = paste0("./yang/", sp_filename, ifelse(simplif, "_submodel", ""), ".rds")
+		fit = readRDS(filename)
+
+		if (!simplif)
+		{
+			paramsVec = getParams(model_cmdstan = fit, params_names = c("c", "j", "k", "m", "n", "s"), type = "mean")
+		} else {
+			paramsVec_simplif = getParams(model_cmdstan = fit,
+				params_names = c("alpha", "beta_", "gamma", "delta"), type = "mean")
+			paramsVec = c(
+				c = unname(paramsVec_simplif["alpha"]),
+				j = 1,
+				k = unname(paramsVec_simplif["beta_"]),
+				m = unname(exp(-1)*paramsVec_simplif["gamma"]/paramsVec_simplif["beta_"] + paramsVec_simplif["alpha"]),
+				n = unname(paramsVec_simplif["delta"] + paramsVec_simplif["alpha"]),
+				s = unname(paramsVec_simplif["beta_"])
+			)
+		}
+
+		rm(fit)
+		fct_output[sp, ] = yang2024(vbole, paramsVec)
+
+		epsilon_1 = 5e-3
+		epsilon_2 = 5e-3
+		epsilon = epsilon_1 + epsilon_2
+
+		m = paramsVec["m"]
+		j = paramsVec["j"]
+		c = paramsVec["c"]
+		k = paramsVec["k"]
+
+		xi = -exp(-1)*(epsilon/(m - c))^(1/j)
+		wp = -j/k * lamW::lambertW0(xi)
+		wm = -j/k * lamW::lambertWm1(xi)
+
+		if (wm < j/k)
+			warning("My analytical calculus showed that this should not be possible...")
+
+		s = paramsVec["s"]
+		n = paramsVec["n"]
+
+		x2 = 1/s*(log(c - n) - log(epsilon))
+
+		diff = abs(yang2024(wm, paramsVec) - c) - epsilon
+
+		threshold_dt[sp,
+			c("simplif", "x1", "x2", "diff_eps") := .(..simplif, wm, ..x2, diff)]
+	}
+	saveRDS(threshold_dt, "./yang/lambert_calculus.rds")
+	saveRDS(fct_output, "./yang/ratio_output.rds")
+} else {
+	threshold_dt = readRDS("./yang/lambert_calculus.rds")
+	fct_output = readRDS("./yang/ratio_output.rds")
+}
+
+if (!file.exists("../../../writing/article_allometry/data/lambert.csv"))
+	fwrite(threshold_dt, "../../../writing/article_allometry/data/lambert.csv")
+```
