@@ -85,6 +85,7 @@ library(cmdstanr)
 	register_knitr_engine(override = TRUE)
 library(stringi)
 library(loo)
+library(gt)
 
 ## Tool function
 # source("./toolFunctions.R")
@@ -334,80 +335,82 @@ if (!dir.exists(output_dir))
 	dir.create(output_dir)
 
 n_chains = 4
-
-for (sp in ls_species)
+if (!file.exists("./bayesian_vallet/pred_dt-7species.rds"))
 {
-	sp_filename = stri_replace(str = sp, replacement = "-", regex = " ")
-	filename = paste0(output_dir, sp_filename, ".rds")
-	is_douglas = ifelse(sp == "Pseudotsuga menziesii", 1, 0) # Boolean style compatible with Stan language
-
-	if (!file.exists(filename))
+	for (sp in ls_species)
 	{
-		stanData = list(
-			N = training_dt[sp, .N],
-			N_params = vallet_dt[sp, n_params],
-			is_douglas = is_douglas,
+		sp_filename = stri_replace(str = sp, replacement = "-", regex = " ")
+		filename = paste0(output_dir, sp_filename, ".rds")
+		is_douglas = ifelse(sp == "Pseudotsuga menziesii", 1, 0) # Boolean style compatible with Stan language
 
-			circumference_cm = training_dt[sp, 100*circumference_m], # Was in cm in Vallet2006!
-			height = training_dt[sp, height],
-
-			total_volume_m3 = training_dt[sp, total_volume_m3]
-		)
-
-		results = vallet_bayesian$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4),
-			max_treedepth = 12)
-
-		results$save_output_files(dir = output_dir, basename = sp_filename, random = FALSE)
-		saveRDS(results, filename)
-	} else {
-		results = readRDS(filename)
-	}
-
-	params = getParams(results, paste0("vec_params[", 1:vallet_dt[sp, n_params], "]"), type = "mean")
-	
-	if (vallet_dt[sp, n_params] == 2)
-	{
-		names(params) = c("alpha", "beta")
-		freq_params = vallet_dt[sp, c(alpha, beta)]
-		names(freq_params) = names(params)
-	}
-	
-	if (vallet_dt[sp, n_params] == 3)
-	{
-		names(params) = c("alpha", "beta", "gamma")
-		freq_params = vallet_dt[sp, c(alpha, beta, gamma)]
-		names(freq_params) = names(params)
-
-		if (is_douglas)
+		if (!file.exists(filename))
 		{
-			names(params) = c("alpha", "beta", "delta")
-			freq_params = vallet_dt[sp, c(alpha, beta, delta)]
+			stanData = list(
+				N = training_dt[sp, .N],
+				N_params = vallet_dt[sp, n_params],
+				is_douglas = is_douglas,
+
+				circumference_cm = training_dt[sp, 100*circumference_m], # Was in cm in Vallet2006!
+				height = training_dt[sp, height],
+
+				total_volume_m3 = training_dt[sp, total_volume_m3]
+			)
+
+			results = vallet_bayesian$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4),
+				max_treedepth = 12)
+
+			results$save_output_files(dir = output_dir, basename = sp_filename, random = FALSE)
+			saveRDS(results, filename)
+		} else {
+			results = readRDS(filename)
+		}
+
+		params = getParams(results, paste0("vec_params[", 1:vallet_dt[sp, n_params], "]"), type = "mean")
+		
+		if (vallet_dt[sp, n_params] == 2)
+		{
+			names(params) = c("alpha", "beta")
+			freq_params = vallet_dt[sp, c(alpha, beta)]
 			names(freq_params) = names(params)
 		}
-	}
-	
-	if (vallet_dt[sp, n_params] == 4)
-	{
-		names(params) = c("alpha", "beta", "gamma", "delta")
-		freq_params = vallet_dt[sp, c(alpha, beta, gamma, delta)]
-		names(freq_params) = names(params)
-	}
-	
-	training_dt[sp, bayes_vallet :=
-			form_vallet(100*circumference_m, height, params, vallet_dt[sp, n_params], is_douglas)]
-	training_dt[sp, freq_vallet :=
-			form_vallet(100*circumference_m, height, freq_params, vallet_dt[sp, n_params], is_douglas)]
+		
+		if (vallet_dt[sp, n_params] == 3)
+		{
+			names(params) = c("alpha", "beta", "gamma")
+			freq_params = vallet_dt[sp, c(alpha, beta, gamma)]
+			names(freq_params) = names(params)
 
-	## Plot Bayes vs Freq
-	plot(training_dt[sp, freq_vallet], training_dt[sp, bayes_vallet], pch = 19, cex = 0.55,
-		axes = FALSE, xlab = "Frequentist", ylab = "Bayesian")
-	abline(a = 0, b = 1, lwd = 1.5, col = "#CD212A")
-	axis(1)
-	axis(2, las = 1)
-}
+			if (is_douglas)
+			{
+				names(params) = c("alpha", "beta", "delta")
+				freq_params = vallet_dt[sp, c(alpha, beta, delta)]
+				names(freq_params) = names(params)
+			}
+		}
+		
+		if (vallet_dt[sp, n_params] == 4)
+		{
+			names(params) = c("alpha", "beta", "gamma", "delta")
+			freq_params = vallet_dt[sp, c(alpha, beta, gamma, delta)]
+			names(freq_params) = names(params)
+		}
+		
+		training_dt[sp, bayes_vallet :=
+				form_vallet(100*circumference_m, height, params, vallet_dt[sp, n_params], is_douglas)]
+		training_dt[sp, freq_vallet :=
+				form_vallet(100*circumference_m, height, freq_params, vallet_dt[sp, n_params], is_douglas)]
 
-if (!file.exists("./bayesian_vallet/pred_dt-7species.rds"))
+		## Plot Bayes vs Freq
+		plot(training_dt[sp, freq_vallet], training_dt[sp, bayes_vallet], pch = 19, cex = 0.55,
+			axes = FALSE, xlab = "Frequentist", ylab = "Bayesian")
+		abline(a = 0, b = 1, lwd = 1.5, col = "#CD212A")
+		axis(1)
+		axis(2, las = 1)
+	}
 	saveRDS(training_dt, "./bayesian_vallet/pred_dt-7species.rds")
+} else {
+	training_dt = readRDS("./bayesian_vallet/pred_dt-7species.rds")
+}
 ```
 
 ## Compare Vallet Bayesian with my model
@@ -550,9 +553,8 @@ for (sp in ls_species)
 		fit = readRDS(filename)
 		sim = genQ_sub$generate_quantities(fitted_params = fit, data = stanData_gen,
 			parallel_chains = min(4, n_chains))
-
 	} else {
-		filename = paste0("./yang/", sp_filename, ".rds")
+		filename = paste0("./yang/", sp_filename, "_new.rds")
 		fit = readRDS(filename)
 		sim = genQ$generate_quantities(fitted_params = fit, data = stanData_gen,
 			parallel_chains = min(4, n_chains))
@@ -567,8 +569,13 @@ for (sp in ls_species)
 	if (any(loo_vallet$diagnostics$pareto_k >= 0.7))
 	{
 		warning_vallet = "bad"
+		n_bad = length(loo_vallet$diagnostics$pareto_k[(loo_vallet$diagnostics$pareto_k >= 0.7) &
+			(loo_vallet$diagnostics$pareto_k < 1)])
 		if (any(loo_vallet$diagnostics$pareto_k > 1))
+		{
 			warning_vallet = "very bad"
+			n_verybad = sum(loo_vallet$diagnostics$pareto_k > 1)
+		}
 	}
 	
 	# ... for my model/submodel
@@ -597,16 +604,21 @@ for (sp in ls_species)
 	
 	rm(sim, sim_vallet, fit, fit_vallet)
 	
-	plot(pred_vallet, stanData_gen$total_volume_m3, pch = 19, cex = 0.65,
-		xlab = "Predicted", ylab = "Observed", axes = FALSE)
-	points(pred_vallet, pred_yang, col = "#FAB255", pch = 19, cex = 0.45)
+	plot(stanData_gen$total_volume_m3, pred_vallet, pch = 19, cex = 0.65,
+		xlab = "Observed", ylab = "Predictions", axes = FALSE)
+	points(stanData_gen$total_volume_m3, pred_yang, col = "#FAB255", pch = 19, cex = 0.45)
+	ind = pred_vallet < stanData_gen$bole_volume_m3
+	if (any(ind))
+		points(stanData_gen$total_volume_m3[ind], pred_vallet[ind], col = "#0F7BA2",
+			pch = 19, cex = 0.75)
+	legend("topleft", legend = c("Vallet", "Yang", "Pb Vallet"), fill = c("#000000", "#FAB255", "#0F7BA2"))
 	axis(1)
 	axis(2, las = 1)
 	abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
 	
 	## Check pred vs bole volume, is it always above the 1:1 line?
 	plot(stanData_gen$bole_volume_m3, pred_vallet, pch = 19, cex = 0.65,
-		xlab = "Predicted", ylab = "Observed", axes = FALSE)
+		xlab = "Bole volume", ylab = "Predictions", axes = FALSE)
 	points(stanData_gen$bole_volume_m3, pred_yang, col = "#FAB255", pch = 19, cex = 0.45)
 	ind = pred_vallet < stanData_gen$bole_volume_m3
 	if (any(ind))
@@ -619,4 +631,38 @@ for (sp in ls_species)
 
 if (!file.exists("./bayesian_vallet/comparison_vallet-yang.rds"))
 	saveRDS(comp_dt, "./bayesian_vallet/comparison_vallet-yang.rds")
+```
+
+```{r}
+#| label: tbl-comp
+#| tbl-cap: Comparison of Vallet vs Yang. Highligts in blue when Vallet is rated as best.
+#| html-table-processing: none
+
+comp_dt |>
+	gt() |>
+	cols_label(
+		speciesName_sci = "Species",
+		best = "Best model",
+		elpd_diff = md("$\\Delta$ELPD"),
+		se_diff = md("Error $\\Delta$ELPD"),
+		wrn_yang = "Warning Yang",
+		wrn_vallet = "Warning Vallet"
+	) |>
+	tab_style(
+		style = cell_borders(sides = "all", style = NULL),
+		locations = cells_body()
+	) |>
+	tab_style(
+		style = cell_text(weight = "bold", align = "right"),
+		locations = list(cells_column_labels(), cells_column_spanners())
+	) |>
+	tab_style(
+		style = list(cell_fill(color = "#FFFFFF"), cell_text(color = "#122112", weight = "bold",
+			align = "right")),
+		locations = cells_body(columns = speciesName_sci)
+	) |>
+	tab_style(
+		style = cell_fill(color = "#80BCD8AA"),
+		locations = cells_body(row = best == "vallet")
+	)
 ```
