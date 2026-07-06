@@ -1,0 +1,161 @@
+---
+title: "Get informations on the French data"
+date: today
+author: Amaël Le Squin
+date-format: iso
+filters:
+  - fontawesome
+  - siunitx-quarto
+  - imagify
+imagify:
+  header-includes: |
+    \usepackage{pgfplots}
+    \pgfplotsset{compat=1.18}
+    \usepgfplotslibrary{fillbetween}
+    \usetikzlibrary{positioning}
+    \usetikzlibrary{calc}
+  pdf-engine: lualatex
+pdf-engine: lualatex
+keep-tex: true
+execute:
+  error: true
+  echo: false
+  warning: false
+  message: false
+bibliography: /home/ALe-Squin/work/library/bib_file/references.bib
+lightbox:
+  match: auto
+css: style.css
+knitr:
+  opts_chunk: 
+    dev: ragg_png
+    crop: null
+    out.width: "70%"
+    fig.width: 6
+    fig.asp: 0.618
+    fig.align: "center"
+format:
+  html:
+    toc: true
+    include-in-header: mathjax.html
+    code-fold: true
+    df-print: paged
+    number-sections: true
+    theme:
+      light: cerulean
+      dark: darkly
+    margin: 5% 0;
+  pdf:
+    mathspec: true
+    include-in-header:
+      - text: |
+          \usepackage{unicode-math}
+---
+
+<!-- New command -->
+\newcommand{\ie}{*i.e.,*}
+
+<!-- Math commands -->
+\newcommand{\Vbft}{V_{\text{BFT}}}
+\newcommand{\Fbft}{F_{\text{BFT}}}
+\newcommand{\Vtot}{V_{\text{tot}}}
+\newcommand{\Vzh}{V_{\text{Zhou}}}
+\newcommand{\hdec}{h_{\text{dec}}}
+\newcommand{\fmax}{f_{\text{max}}}
+
+<!-- Math operators -->
+<!-- \DeclareMathOperator{\ln}{ln} -->
+
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+<!-- ---------------------------   LOADING DATA, R CODE   --------------------------- -->
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+
+```{r}
+#| output: false
+
+#### Clear space and load packages
+rm(list = ls())
+graphics.off()
+
+options(max.print = 500)
+
+library(data.table)
+library(stringi)
+library(inventR)
+library(gt)
+```
+
+```{r}
+#### Loading data
+## Loading training dataset
+training_dt = readRDS(paste0(path_data, "data_Vtot.rds"))
+
+## French NFI data query
+db = connect_db()
+
+vol_dt = ocre_nm(ans = 2021:2025, vars = c("V", "V0"), vent_a = "ess:ESS")
+
+disconnect_db(db)
+
+## Path
+os = Sys.info()[['sysname']]
+mnt_point = "/mnt/local_share/"
+if (os == "Linux" || os == "Darwin")
+{
+	if (!dir.exists(mnt_point))
+		stop(paste0("The mounting point <", mnt_point, "> does not exist"))
+} else if (os == "Windows") {
+	stop("TO DO!!! No idea how that works on Windows!")
+} else {
+	stop(paste("Unknown Operating System:", os))
+}
+
+path_data = paste0(mnt_point, "data/")
+if (!dir.exists(path_data))
+	stop(paste0("Folder <", path_data, "> does not exist! Did you run 01_prepare_data.qmd?"))
+
+## Get species name (sci) from NFI codes
+nfi_codes = readRDS(paste0(path_data, "species_dt.rds"))[!is.na(species_code_nfi),
+	.(speciesName_sci, species_code_nfi)]
+setkey(nfi_codes, speciesName_sci)
+
+# lala = copy(vol_dt)
+# vol_dt = copy(lala)
+```
+
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+<!-- ---------------------------   MAIN CONTENT, R CODE   --------------------------- -->
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+
+```{r}
+#### Cleaning the data
+## Keep column of interest and rename
+vol_dt = vol_dt[, .(sp_code = ess.ess, vars, total = tot)]
+vol_dt = vol_dt[(sp_code != "")]
+
+## List species code that do not have a scientific name
+missing_sp = vol_dt[which(!(sp_code %in% nfi_codes[, species_code_nfi])), unique(sp_code)]
+missing_vol = vol_dt[sp_code %in% missing_sp, .(total = sum(total)), by = .(vars)]
+
+## Sum sp-specific total volumes and bole volumes (before merge, so even missing sp are included)
+vbole_sum = vol_dt[vars == "V", sum(total)]
+vtot_sum = vol_dt[vars == "V0", sum(total)]
+
+## Merge data
+vol_dt = merge.data.table(vol_dt, nfi_codes, by.x = "sp_code", by.y = "species_code_nfi")
+```
+
+```{r}
+#### Compute sp-specific percentage of volumes in French forest
+percent_bole = vol_dt[vars == "V", .(percent = total/vbole_sum*100), by = speciesName_sci]
+percent_tot = vol_dt[vars == "V0", .(percent = total/vtot_sum*100), by = speciesName_sci]
+
+setkey(percent_bole, speciesName_sci)
+setkey(percent_tot, speciesName_sci)
+
+ls_trained_sp = training_dt[, unique(speciesName_sci)]
+
+percent_bole[ls_trained_sp, sum(percent, na.rm = TRUE)]
+percent_tot[ls_trained_sp, sum(percent, na.rm = TRUE)]
+```
+
