@@ -388,7 +388,7 @@ names(ls_colours) = c("fr_comp", "fr", "ch_comp", "ch")
 tree_dt[, colour := ls_colours["fr"]] # Inra and Emerge, in blue
 tree_dt[origin == "swiss", colour := ls_colours["ch"]] # Swiss, in yellow
 
-# Remove NAs (bole volumes only, I do not car if circumference or height have NAs)
+# Remove NAs (bole volumes only, I do not care if circumference or height have NAs)
 tree_dt = tree_dt[!is.na(bole_volume_m3)]
 
 ## Prepare species groups
@@ -478,6 +478,7 @@ tree_dt = merge.data.table(tree_dt, final_groups, by = "speciesName_sci")
 
 # Save groups
 saveRDS(final_groups, "./yang/ls-groups.rds")
+saveRDS(tree_dt, paste0(path_data, "data_Vtot-group.rds"))
 
 # Set key to sort by groups and colour (i.e., France vs Switzerland)
 setkey(tree_dt, group, colour)
@@ -649,6 +650,8 @@ for (gr in ls_pb)
 	if (div[["any_div"]])
 		warning(paste("Divergences for", gr))
 }
+
+success_dt[, success_sub := rhat_ok_sub & no_div_sub]
 
 if (!file.exists("./yang/group-success.rds"))
 	saveRDS(success_dt, "./yang/group-success.rds")
