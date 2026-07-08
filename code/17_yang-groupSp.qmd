@@ -476,8 +476,13 @@ if (!all(ls_species %in% final_groups[, unique(speciesName_sci)]))
 
 tree_dt = merge.data.table(tree_dt, final_groups, by = "speciesName_sci")
 
+# Save groups
+saveRDS(final_groups, "./yang/ls-groups.rds")
+
 # Set key to sort by groups and colour (i.e., France vs Switzerland)
 setkey(tree_dt, group, colour)
+
+unique(tree_dt[, .(.N, group), by = speciesName_sci])[order(speciesName_sci)]
 
 ls_groups = tree_dt[, unique(group)]
 ```
@@ -499,18 +504,6 @@ The overlap is quite good for all the groups.
 ```{r}
 #| fig-cap: Overlap Fr-Ch by group
 #| label: fig-overlap
-#| fig-subcap: 
-#|   - "A1"
-#|   - "A3"
-#|   - "B1"
-#|   - "B2"
-#|   - "C1"
-#|   - "C2"
-#|   - "C3"
-#|   - "D1"
-#|   - "D2"
-#|   - "E1"
-#|   - "E2"
 #| lightbox: 
 #|   group: species
 
@@ -557,6 +550,12 @@ savePath = "./yang/"
 if (!dir.exists(savePath))
 	stop("You should run '11_yang.qmd'")
 
+success_dt = tree_dt[, .(N_indiv = .N), by = group]
+success_dt[, rhat_ok := NA]
+success_dt[, no_div := NA]
+
+setkey(success_dt, group)
+
 ## Run model
 for (gr in ls_groups)
 {
@@ -585,9 +584,72 @@ for (gr in ls_groups)
 	div = plot_gr(fit, gr, simplif = FALSE, n_bins = 4, pal = "Hiroshige", selected_variable = "height",
 		print_plot = TRUE)
 
+	rhat_ok = max(div[["rhats"]]) <= 1.01
+	no_div = !div[["any_div"]]
+	
+	success_dt[.(gr), rhat_ok := ..rhat_ok]
+	success_dt[.(gr), no_div := ..no_div]
+
 	# pars = getParams(model_cmdstan = fit, params_names = c("m", "c", "j", "k", "n", "s"))
 
 	if (div[["any_div"]])
 		warning(paste("Divergences for", gr))
 }
+
+success_dt[, success_full := rhat_ok & no_div]
+```
+
+## Run for groups that had mixing problems
+
+I run the simplified model for the groups that failed, either by divergences or by bad mixing with the full model, \ie, where not `success_full`, haha, I am so funny. HILARIOUS!!!
+
+```{r}
+## Compile model
+model = cmdstan_model("./yang2024_submodel.stan")
+
+ls_pb = success_dt[(!success_full), group]
+
+success_dt[, rhat_ok_sub := NA]
+success_dt[, no_div_sub := NA]
+
+## Run model
+for (gr in ls_pb)
+{
+	print(paste("Running", gr))
+
+	# Subset to targeted group for stanData
+	stanData = list(
+		N = tree_dt[.(gr)][, .N],
+		bole_volume_m3 = tree_dt[.(gr)][, bole_volume_m3],
+		total_volume_m3 = tree_dt[.(gr)][, total_volume_m3]
+	)
+
+	## Run model
+	if (file.exists(paste0(savePath, gr, "_submodel.rds")))
+	{
+		fit = readRDS(paste0(savePath, gr, "_submodel.rds"))
+	} else {
+		fit = model$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4),
+			iter_warmup = 1500, iter_sampling = 1000, max_treedepth = 10)
+
+		## Save results
+		fit$save_output_files(dir = savePath, basename = paste0(gr, "_submodel"), random = FALSE)
+		saveRDS(fit, paste0(savePath, gr, "_submodel.rds"))
+	}
+
+	div = plot_gr(fit, gr, simplif = TRUE, n_bins = 4, pal = "Hiroshige", selected_variable = "height",
+		print_plot = TRUE)
+
+	rhat_ok = max(div[["rhats"]]) <= 1.01
+	no_div = !div[["any_div"]]
+	
+	success_dt[.(gr), rhat_ok_sub := ..rhat_ok]
+	success_dt[.(gr), no_div_sub := ..no_div]
+
+	if (div[["any_div"]])
+		warning(paste("Divergences for", gr))
+}
+
+if (!file.exists("./yang/group-success.rds"))
+	saveRDS(success_dt, "./yang/group-success.rds")
 ```
