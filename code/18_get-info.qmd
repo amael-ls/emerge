@@ -80,6 +80,8 @@ graphics.off()
 options(max.print = 500)
 
 library(data.table)
+library(cmdstanr)
+	register_knitr_engine(override = TRUE)
 library(stringi)
 library(inventR)
 library(gt)
@@ -87,9 +89,6 @@ library(gt)
 
 ```{r}
 #### Loading data
-## Loading training dataset
-training_dt = readRDS(paste0(path_data, "data_Vtot.rds"))
-
 ## French NFI data query
 db = connect_db()
 
@@ -113,6 +112,10 @@ if (os == "Linux" || os == "Darwin")
 path_data = paste0(mnt_point, "data/")
 if (!dir.exists(path_data))
 	stop(paste0("Folder <", path_data, "> does not exist! Did you run 01_prepare_data.qmd?"))
+
+## Loading training dataset
+training_dt_sp_specific = readRDS(paste0(path_data, "data_Vtot.rds"))
+training_dt = readRDS(paste0(path_data, "data_Vtot-group.rds"))
 
 ## Get species name (sci) from NFI codes
 nfi_codes = readRDS(paste0(path_data, "species_dt.rds"))[!is.na(species_code_nfi),
@@ -153,9 +156,186 @@ percent_tot = vol_dt[vars == "V0", .(percent = total/vtot_sum*100), by = species
 setkey(percent_bole, speciesName_sci)
 setkey(percent_tot, speciesName_sci)
 
-ls_trained_sp = training_dt[, unique(speciesName_sci)]
+ls_trained_sp = training_dt_sp_specific[, unique(speciesName_sci)]
 
 percent_bole[ls_trained_sp, sum(percent, na.rm = TRUE)]
 percent_tot[ls_trained_sp, sum(percent, na.rm = TRUE)]
 ```
 
+## Predict on Henri's data
+
+### Assigning corresponding model to each espar
+
+```{r}
+#### Prepare data
+## Loading
+henri_dt = fread("../data/data_IFN_volume_2020_2024.csv")
+
+## Prepare species groups
+# Load data
+sp_sci = readRDS("../../gohon_florence/species.rds")[, .(tarif, speciesName_sci)]
+sp_code = readRDS("../../gohon_florence/espar.rds")[, .(espar, ess, Group_ess)]
+
+# Merging
+sp_code = merge.data.table(sp_code, sp_sci, by.x = "ess", by.y = "tarif", all.x = TRUE)
+setkey(sp_code, espar)
+
+# Change ess to char in Henri's data + leading zeros
+# henri_dt[, ess := sprintf("%02d", ess)]
+
+ls_espar = sort(henri_dt[, unique(espar)])
+
+all(ls_espar %in% sp_code[, espar])
+
+# Subset to listed ess
+sp_code = sp_code[.(ls_espar)]
+
+## Now, assign a model. It will be either the species, the group, or broadleaf/conifer
+sp_specific_models = readRDS("./yang/rsquared_flopp_yang.rds")[, .(species, model = selected)]
+
+aa = merge.data.table(sp_code, sp_specific_models,
+	by.x = "speciesName_sci", by.y = "species", all.x = TRUE)
+
+aa[model == "yang",
+	model := paste0("./yang/", stri_replace(speciesName_sci, regex = " ", replacement = "-"), "_new.rds")]
+
+aa[model == "sub",
+	model := paste0("./yang/", stri_replace(speciesName_sci, regex = " ", replacement = "-"), "_submodel.rds")]
+
+ls_models = readRDS("./yang/group-success.rds")
+
+ls_full_gr = ls_models[(success_full), group]
+aa[is.na(model) & Group_ess %in% ls_full_gr, model := paste0("./yang/", Group_ess, ".rds")]
+
+ls_sub_gr = ls_models[(success_sub), group]
+aa[is.na(model) & Group_ess %in% ls_sub_gr, model := paste0("./yang/", Group_ess, "_submodel.rds")]
+
+## Assign generic models for groups that were not parametrised (A2), and for groups with too little indiv
+ls_pb = c(aa[(is.na(model)), unique(Group_ess)], ls_models[N_indiv < 100, group])
+aa[(Group_ess %in% ls_pb) & ess < 50, model := "./yang/broadleaf_new.rds"]
+aa[(Group_ess %in% ls_pb) & ess > 50, model := "./yang/conifer_new.rds"]
+
+## Merge the model listing with henri's dataset
+henri_dt = merge.data.table(henri_dt, aa[, .(espar, model)], by = "espar")
+
+training_dt[, .N, by = group][order(group)]
+setkey(training_dt, speciesName_sci)
+```
+
+### Predicting total volume on Henri's data
+```{r}
+ls_filenames = henri_dt[, unique(model)]
+ls_species = stri_replace(sp_specific_models[species != "Quercus sp.", species], regex = " ", replacement = "-")
+ls_groups = ls_models[, group]
+
+setkey(henri_dt, model)
+
+henri_dt[, u_v0_modif := u_v0]
+henri_dt[u_v0 < v, u_v0_modif := 1.01*v] # Must do that otherwise genQ will bug...
+
+henri_dt[, vtot_pred := NA_real_]
+
+broadleaves = c("Fagus sylvatica", "Fraxinus excelsior", "Quercus petraea", "Quercus sp.")
+conifers = training_dt_sp_specific[, unique(speciesName_sci)]
+conifers = conifers[!(conifers %in% broadleaves)]
+
+for (fitname in ls_filenames)
+{
+	print(paste("Running", fitname))
+	
+	## Check if it is a fitted species or a fitted group
+	is_species = FALSE
+	is_group = FALSE
+	is_conifer = FALSE
+	is_broadleaf = FALSE
+	if (any(stri_detect(str = fitname, regex = ls_species)))
+	{
+		is_species = TRUE
+		current_sp = ls_species[stri_detect(str = fitname, regex = ls_species)]
+		current_sp = stri_replace(str = current_sp, regex = "-", replacement = " ")
+	} else if (any(stri_detect(str = fitname, regex = ls_groups))) {
+		current_gr = ls_groups[stri_detect(str = fitname, regex = ls_groups)]
+		is_group = TRUE
+	} else {
+		if (stri_detect(str = fitname, regex = "conifer_new"))
+			is_conifer = TRUE
+		if (stri_detect(str = fitname, regex = "broadleaf_new"))
+			is_broadleaf = TRUE
+	}
+	
+	## Check if it is simplified or not
+	is_simplif = FALSE # Full model by default, ending by $group.rds or $species_new.rds
+	if (stri_detect(str = fitname, regex = "_submodel.rds"))
+		is_simplif = TRUE
+	
+	## Compile model
+	genQ = cmdstan_model("./yang2024-genQ.stan")
+	if (is_simplif)
+		genQ = cmdstan_model("./yang2024-genQ_submodel.stan")
+
+	## Create stan data
+	if (is_species)
+	{
+		stanData_gen = list(
+			N = training_dt[current_sp, .N],
+			bole_volume_m3 = training_dt[current_sp, bole_volume_m3],
+			total_volume_m3 = training_dt[current_sp, total_volume_m3],
+			N_new = henri_dt[fitname, .N],
+			bole_volume_m3_new = henri_dt[fitname, v],
+			total_volume_m3_new = henri_dt[fitname, u_v0_modif]
+		)
+	} else if (is_group) {
+		if (training_dt[group == current_gr, .N] == 0)
+			next
+
+		stanData_gen = list(
+			N = training_dt[group == current_gr, .N],
+			bole_volume_m3 = training_dt[group == current_gr, bole_volume_m3],
+			total_volume_m3 = training_dt[group == current_gr, total_volume_m3],
+			N_new = henri_dt[fitname, .N],
+			bole_volume_m3_new = henri_dt[fitname, v],
+			total_volume_m3_new = henri_dt[fitname, u_v0_modif]
+		)
+	} else if (is_conifer) {
+		stanData_gen = list(
+			N = training_dt[.(conifers)][, .N],
+			bole_volume_m3 = training_dt[.(conifers)][, bole_volume_m3],
+			total_volume_m3 = training_dt[.(conifers)][, total_volume_m3],
+			N_new = henri_dt[fitname, .N],
+			bole_volume_m3_new = henri_dt[fitname, v],
+			total_volume_m3_new = henri_dt[fitname, u_v0_modif]
+		)
+	} else if (is_broadleaf) {
+		stanData_gen = list(
+			N = training_dt[.(broadleaves)][, .N],
+			bole_volume_m3 = training_dt[.(broadleaves)][, bole_volume_m3],
+			total_volume_m3 = training_dt[.(broadleaves)][, total_volume_m3],
+			N_new = henri_dt[fitname, .N],
+			bole_volume_m3_new = henri_dt[fitname, v],
+			total_volume_m3_new = henri_dt[fitname, u_v0_modif]
+		)
+	} else {
+		stop("stanData_gen not created: there is no matching case...")
+	}
+	
+	## Generate predictions on Henri's data
+	fit = readRDS(fitname)
+	n_chains = fit$num_chains()
+	n_iter = fit$metadata()$iter_sampling
+
+	sim = genQ$generate_quantities(fit, data = stanData_gen,
+		seed = 1969 - 08 - 18, parallel_chains = min(n_chains, 4))
+
+	predGen = apply(X = sim$draws("v_gen_mean"), MARGIN = 3, FUN = mean)
+	henri_dt[fitname, vtot_pred := predGen]
+	rm(sim, fit, stanData_gen)
+
+	## Remove temporary file as it saturates the memory otherwise...
+	tmp = tempdir()
+	ls_files = list.files(tmp)
+	ls_files = ls_files[stri_detect(ls_files, regex = "^yang2024-genQ.*.csv$")]
+	file.remove(paste0(tmp, "/", ls_files))
+}
+
+saveRDS(henri_dt[, .(npp, a, v, u_v0, vtot_pred)], "./u_v0_tarif_amael.rds")
+```
