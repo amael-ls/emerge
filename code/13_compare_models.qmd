@@ -424,7 +424,7 @@ comparison = function(sp, tree_dt, woodstock_seed = 1969 - 08 - 18, printPlot = 
 	#### Generate quantitities
 	## Compile generator models
 	genQ_old = cmdstan_model("./yang2024-genQ_old.stan")
-	genQ_new = cmdstan_model("./yang2024_genQ.stan")
+	genQ_new = cmdstan_model("./yang2024-genQ.stan")
 	genQ_sub = cmdstan_model("./yang2024-genQ_submodel.stan")
 
 	## Prepare data
@@ -554,7 +554,7 @@ comparison_yang_sub = function(sp, tree_dt, woodstock_seed = 1969 - 08 - 18, pri
 {
 	#### Generate quantitities
 	## Compile generator models
-	genQ_new = cmdstan_model("./yang2024_genQ.stan")
+	genQ_new = cmdstan_model("./yang2024-genQ.stan")
 	genQ_sub = cmdstan_model("./yang2024-genQ_submodel.stan")
 
 	## Prepare data
@@ -849,6 +849,15 @@ if (file.exists("./yang/comparison_new-sub.rds"))
 }
 ```
 
+## Manual modifications of comp
+Since *Picea abies* full model did not work out (bad mixing chains), it does not makes sense to compute and report a $\Delta\text{ELPD}$. Thus, I set it to `NA_real_` manually. Surprisingly, depsite its bad mixing, it is the full model (Yang) that was selected! This is because when you average the chains, you actually predic quite well, and almost match the sub model!
+
+```{r}
+comp["Picea abies", best := "sub"]
+comp["Picea abies", elpd_diff := NA_real_]
+comp["Picea abies", se_diff := NA_real_]
+```
+
 ## Reading @McLatchie2024
 
 I am testing the appendix A of @McLatchie2024, and more specifically the pseudo-BMA+ weights, equation A4. My coding of equation A2 might be surprising, but read well equation A2! It is:
@@ -885,19 +894,39 @@ comp[, eq_A2 := -Inf]
 comp[, eq_A2_bis := -Inf]
 comp[, pseudo_bma := -Inf]
 
-comp[, eq_A2 := integrate(gauss, lower = 0, upper = +Inf, diff_elpd = abs(elpd_diff), se_elpd = se_diff)$value,
-	by = species]
-comp[, eq_A2_bis := pnorm(0, mean = abs(elpd_diff), sd = se_diff, lower.tail = FALSE),
-	by = species]
-comp[, pseudo_bma := integrate(f, lower = -Inf, upper = +Inf, diff_elpd = abs(elpd_diff), se_elpd = se_diff)$value,
+comp[!is.na(elpd_diff),
+	eq_A2 := integrate(gauss, lower = 0, upper = +Inf, diff_elpd = abs(elpd_diff), se_elpd = se_diff)$value,
 	by = species]
 
-fwrite(comp, "../../../writing/article_allometry/data/comparison.csv")
+comp[!is.na(elpd_diff),
+	eq_A2_bis := pnorm(0, mean = abs(elpd_diff), sd = se_diff, lower.tail = FALSE), by = species]
+
+comp[!is.na(elpd_diff),
+	pseudo_bma := integrate(f, lower = -Inf, upper = +Inf, diff_elpd = abs(elpd_diff), se_elpd = se_diff)$value,
+	by = species]
+
+fwrite(comp, "../../../writing/article_allometry/data/comparison.csv", na = "NaN")
 
 ## Merge R2D2 with Flopp results
 flopp_r2 = readRDS("../../gohon_florence/rsquared.rds")[, .(speciesName_sci, R2_flopp, N)]
-R2D2 = merge.data.table(R2D2, flopp_r2, by.x = "species", by.y = "speciesName_sci")
-fwrite(R2D2, "../../../writing/article_allometry/data/rsquared.csv")
+
+# R2D2 = copy(ll)
+
+R2D2 = merge.data.table(R2D2, flopp_r2, by.x = "species", by.y = "speciesName_sci", all.x = TRUE)
+R2D2 = merge.data.table(R2D2, comp[, .(species, best)], by = "species")
+
+## Modify manually the column "selected" for Pinus laricio, strobus, and uncinata, as I pick up
+R2D2[, selected := best]
+R2D2[c("Pinus laricio", "Pinus strobus", "Pinus uncinata"), selected := "yang"]
+
+## Add column R2 selected model and remove best
+R2D2[, R2_selected := ifelse(selected == "yang", R2_yang, R2_sub)]
+R2D2[, best := NULL]
+
+if (!file.exists("./yang/rsquared_flopp_yang.rds"))
+	saveRDS(R2D2, "./yang/rsquared_flopp_yang.rds")
+
+fwrite(R2D2, "../../../writing/article_allometry/data/rsquared.csv", na = "NaN")
 ```
 
 ## Other stuff, to compare Vallet with my model
@@ -905,7 +934,7 @@ fwrite(R2D2, "../../../writing/article_allometry/data/rsquared.csv")
 ```{r}
 #### Generate quantitities
 ## Compile generator model
-genQ = cmdstan_model("./yang2024_genQ.stan")
+genQ = cmdstan_model("./yang2024-genQ.stan")
 
 ## Prepare data
 sp = "Fagus sylvatica"
