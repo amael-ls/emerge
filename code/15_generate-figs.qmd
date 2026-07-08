@@ -191,6 +191,18 @@ yang2024 = function(x, pars)
 	return((pars["m"] - pars["c"]) * exp(pars["j"] - pars["k"]*x) * (pars["k"]*x/pars["j"])^pars["j"] +
 		pars["c"] - (pars["c"] - pars["n"])*exp(-pars["s"]*x));
 }
+
+yang2024_vol = function(x, pars)
+{
+	if (is.data.table(pars))
+	{
+		if (pars[, .N] != 1)
+			stop("pars shoud correspond to one species only")
+		pars = c(c = pars[, c], j = pars[, j], k = pars[, k], m = pars[, m], n = pars[, n], s = pars[, s])
+	}
+
+	return(x/yang2024(x, pars));
+}
 ```
 
 ```{r}
@@ -426,8 +438,17 @@ n_indiv = 500
 
 for (sp in nfi_codes[, species_code_nfi])
 {
+	current_sp = nfi_codes[species_code_nfi == sp, speciesName_sci]
+
+	sp_filename = stri_replace(str = current_sp, replacement = "-", regex = " ")
+	
+	if (current_sp == "Quercus sp.")
+		sp_filename = stri_replace(str = sp_filename, replacement = "", regex = "\\.")
+
+	if (file.exists(paste0("../../../writing/article_allometry/data/pred/", sp_filename, ".csv")))
+		next
+
 	## Simulate total above ground volume on nfi or training range (depends which is largest)
-	current_sp = nfi_codes[species_code_nfi == sp, speciesName_sci]	
 	stanData = list(
 		N = training_dt[current_sp, .N],
 		bole_volume_m3 = training_dt[current_sp, bole_volume_m3],
@@ -438,10 +459,6 @@ for (sp in nfi_codes[, species_code_nfi])
 	)
 
 	stanData$total_volume_m3_new = 1.3*stanData$bole_volume_m3_new # Useless here, but must be provided for genQ to run
-	
-	sp_filename = stri_replace(str = current_sp, replacement = "-", regex = " ")
-	if (current_sp == "Quercus sp.")
-		sp_filename = stri_replace(str = sp_filename, replacement = "", regex = "\\.")
 
 	fwrite(data.table(obs_bole_volume = stanData$bole_volume_m3, obs_total_volume = stanData$total_volume_m3),
 		paste0("../../../writing/article_allometry/data/pred/", sp_filename, "_obs-data.csv"))
@@ -854,4 +871,273 @@ filename = "../../../writing/article_allometry/data/thresholds.csv"
 threshold_dt = merge.data.table(x = threshold_dt, y = params_dt[, .(speciesName_sci, curve)], by = "speciesName_sci")
 if (!file.exists(filename))
 	fwrite(threshold_dt, filename)
+```
+
+## Compare NFI provided total volumes with my predictions
+
+In this section, I request all the individual volumes of living trees recorded from 2005. The aim is to predict on these trees a new total volume and to compare with the current provided value (which is based on @Vallet2006).
+
+```{r}
+## List parametrised species and get their NFI code
+species_trained = training_dt[, unique(speciesName_sci)]
+
+nfi_codes = readRDS(paste0(path_data, "species_dt.rds"))[!is.na(species_code_nfi),
+	.(speciesName_sci, species_code_nfi)]
+
+## Modify fraxinus sp. by excelesior in French NFI
+nfi_codes[species_code_nfi == "17", speciesName_sci := "Fraxinus excelsior"]
+
+## Set key
+setkey(nfi_codes, speciesName_sci)
+
+sp_code_nfi_trained = paste0("'", paste(nfi_codes[species_trained, species_code_nfi], collapse = "','"), "'")
+```
+
+```{r}
+#### Loading NFI data
+## French NFI data query
+db = connect_db()
+
+nfi_data = exec_req(conn = db, req = paste0("
+	SELECT
+		tree.NPP, tree.A, tree.ESS, tree.C13, tree.HTOT, tree.HDEC, tree.DECOUPE, tree.V, tree.V0
+
+	FROM
+		inv_exp_nm.g3arbre AS tree
+
+	WHERE
+		tree.ESS IN (", sp_code_nfi_trained, ")
+
+	ORDER BY
+		NPP, A;"), DT = TRUE)
+
+disconnect_db(db)
+
+# info = nfi_data[, .(n_indiv = .N), by = ess]
+# info[, percent := n_indiv/sum(n_indiv)*100]
+```
+
+```{r}
+### Predict new volumes
+nfi_data = merge.data.table(nfi_data, nfi_codes, by.x = "ess", by.y = "species_code_nfi")
+setkey(nfi_data, speciesName_sci)
+
+nfi_data[, any(is.na(v))]
+nfi_data[, any(is.na(v0))]
+nfi_data[, any(v == 0)]
+nfi_data = nfi_data[v > 0]
+
+nfi_data[, yang := yang2024_vol(v, params_dt[speciesName_sci]), by = speciesName_sci]
+
+nfi_data[, .N, by = speciesName_sci]
+
+for (sp in nfi_data[, unique(speciesName_sci)])
+{
+	plot(nfi_data[sp, c13], nfi_data[sp, v0], pch = 19,
+		xlab = "Circumference", ylab = "Predicted total volume", main = sp)
+	points(nfi_data[sp, c13], nfi_data[sp, yang], pch = 19,
+		col = "#FAB255", cex = 0.65)
+	ind = nfi_data[sp, v0 < v]
+	points(nfi_data[sp][ind, c13], nfi_data[sp][ind, v0], pch = 19, cex = 2,
+		col = "#0F7BA2")
+}
+
+min_circum = nfi_data[, min(c13)]
+
+nfi_qt = nfi_data[, as.list(quantile(v0, probs = c(0, 0.025, 0.5, 0.975, 1))), by = speciesName_sci]
+setnames(nfi_qt, new = c("species", "min", "q025", "med", "q975", "max"))
+nfi_qt[, ind := .N:1]
+nfi_qt[, maxRounded := round(max)]
+
+yang_qt = nfi_data[, as.list(quantile(yang, probs = c(0, 0.025, 0.5, 0.975, 1))), by = speciesName_sci]
+setnames(yang_qt, new = c("species", "min", "q025", "med", "q975", "max"))
+yang_qt[, ind := .N:1]
+yang_qt[, maxRounded := round(max)]
+
+# Subset training_dt to compare with NFI, otherwise very small trees
+train_qt = training_dt[(circumference_m >= min_circum) & (speciesName_sci != "Quercus sp."),
+	as.list(quantile(total_volume_m3, probs = c(0, 0.025, 0.5, 0.975, 1))),
+	by = speciesName_sci]
+setnames(train_qt, new = c("species", "min", "q025", "med", "q975", "max"))
+train_qt[, ind := .N:1]
+train_qt[, maxRounded := round(max)]
+
+filename = "../../../writing/article_allometry/data/span_nfi.csv"
+if (!file.exists(filename))
+	fwrite(nfi_qt, filename)
+
+filename = "../../../writing/article_allometry/data/span_myPred.csv"
+if (!file.exists(filename))
+	fwrite(yang_qt, filename)
+
+filename = "../../../writing/article_allometry/data/span_Dtot.csv"
+if (!file.exists(filename))
+	fwrite(train_qt, filename)
+```
+
+Some particular cases that deserves investigation.
+```{r}
+#### Fagus sylvatica
+sp = "Fagus sylvatica"
+
+weirdos = nfi_data[sp][(c13 > 4) & (yang < 10), .(speciesName_sci, c13, htot, hdec, decoupe, v, v0, yang)]
+weirdos[decoupe == 0, hdec := htot] # Florence hdec
+weirdos = na.omit(weirdos)
+
+sp_code = nfi_codes[sp, species_code_nfi]
+
+## Prepare data
+stanData_gen = list(
+	N = florence_dt[sp_code][(type == "ajust"), .N],
+	
+	circumference_m = florence_dt[sp_code][(type == "ajust"), c13],
+	taper_height_flo = florence_dt[sp_code][(type == "ajust"), hdecro],
+	height = florence_dt[sp_code][(type == "ajust"), htot],
+
+	N_new = weirdos[, .N],
+
+	circumference_m_new = weirdos[, c13],
+	taper_height_flo_new = weirdos[, hdec],
+	height_new = weirdos[, htot],
+	bole_volume_m3_new = weirdos[, v]
+)
+
+temp = pred_fct_flopp(sp_code, stanData_gen)
+
+weirdos[, v_flopp := temp[["pred"]]]
+weirdos[, yang_flopp := yang2024_vol(v_flopp, params_dt[sp])]
+
+fagsyl = weirdos[, .(v, v_flopp, v0, yang_flopp)]
+
+
+#### Fraxinus excelsior
+sp = "Fraxinus excelsior"
+
+weirdos = nfi_data[sp][(c13 > 3) & (yang < 10), .(speciesName_sci, c13, htot, hdec, decoupe, v, v0, yang)]
+weirdos[decoupe == 0, hdec := htot] # Florence hdec
+weirdos = na.omit(weirdos)
+
+sp_code = nfi_codes[sp, species_code_nfi]
+
+## Prepare data
+stanData_gen = list(
+	N = florence_dt[sp_code][(type == "ajust"), .N],
+	
+	circumference_m = florence_dt[sp_code][(type == "ajust"), c13],
+	taper_height_flo = florence_dt[sp_code][(type == "ajust"), hdecro],
+	height = florence_dt[sp_code][(type == "ajust"), htot],
+
+	N_new = weirdos[, .N],
+
+	circumference_m_new = weirdos[, c13],
+	taper_height_flo_new = weirdos[, hdec],
+	height_new = weirdos[, htot],
+	bole_volume_m3_new = weirdos[, v]
+)
+
+temp = pred_fct_flopp(sp_code, stanData_gen)
+
+weirdos[, v_flopp := temp[["pred"]]]
+weirdos[, yang_flopp := yang2024_vol(v_flopp, params_dt[sp])]
+
+fraexc = weirdos[, .(v, v_flopp, v0, yang_flopp)]
+
+
+#### Pinus laricio
+sp = "Pinus laricio"
+
+weirdos = nfi_data[sp][(c13 > 3) & (yang < 10), .(speciesName_sci, c13, htot, hdec, decoupe, v, v0, yang)]
+weirdos[decoupe == 0, hdec := htot] # Florence hdec
+weirdos = na.omit(weirdos)
+
+sp_code = nfi_codes[sp, species_code_nfi]
+
+## Prepare data
+stanData_gen = list(
+	N = florence_dt[sp_code][(type == "ajust"), .N],
+	
+	circumference_m = florence_dt[sp_code][(type == "ajust"), c13],
+	taper_height_flo = florence_dt[sp_code][(type == "ajust"), hdecro],
+	height = florence_dt[sp_code][(type == "ajust"), htot],
+
+	N_new = weirdos[, .N],
+
+	circumference_m_new = weirdos[, c13],
+	taper_height_flo_new = weirdos[, hdec],
+	height_new = weirdos[, htot],
+	bole_volume_m3_new = weirdos[, v]
+)
+
+temp = pred_fct_flopp(sp_code, stanData_gen)
+
+weirdos[, v_flopp := temp[["pred"]]]
+weirdos[, yang_flopp := yang2024_vol(v_flopp, params_dt[sp])]
+
+pinlar = weirdos[, .(v, v_flopp, v0, yang_flopp)]
+
+
+#### Quercus petraea
+sp = "Quercus petraea"
+
+weirdos = nfi_data[sp][(c13 > 3.5) & (yang < 16), .(speciesName_sci, c13, htot, hdec, decoupe, v, v0, yang)]
+weirdos[decoupe == 0, hdec := htot] # Florence hdec
+weirdos = na.omit(weirdos)
+
+sp_code = nfi_codes[sp, species_code_nfi]
+
+## Prepare data
+stanData_gen = list(
+	N = florence_dt[sp_code][(type == "ajust"), .N],
+	
+	circumference_m = florence_dt[sp_code][(type == "ajust"), c13],
+	taper_height_flo = florence_dt[sp_code][(type == "ajust"), hdecro],
+	height = florence_dt[sp_code][(type == "ajust"), htot],
+
+	N_new = weirdos[, .N],
+
+	circumference_m_new = weirdos[, c13],
+	taper_height_flo_new = weirdos[, hdec],
+	height_new = weirdos[, htot],
+	bole_volume_m3_new = weirdos[, v]
+)
+
+temp = pred_fct_flopp(sp_code, stanData_gen)
+
+weirdos[, v_flopp := temp[["pred"]]]
+weirdos[, yang_flopp := yang2024_vol(v_flopp, params_dt[sp])]
+
+quepet = weirdos[, .(v, v_flopp, v0, yang_flopp)]
+
+
+weirdos = rbindlist(list("Fagus sylvatica" = fagsyl, "Fraxinus excelsior" = fraexc,
+	"Pinus laricio" = pinlar, "Quercus petraea" = quepet), idcol = "speciesName_sci")
+
+ls_colours = met.brewer("Egypt")[1:4]
+names(ls_colours) = weirdos[, unique(speciesName_sci)]
+
+weirdos[, colour := ls_colours[speciesName_sci], by = speciesName_sci]
+
+## Plot bole volumes NFI vs Florence
+plot(weirdos[, v_flopp], weirdos[, v], col = weirdos[, colour], pch = 19,
+	axes = FALSE, xlab = "Bole volume Florence", ylab = "Bole volume NFI")
+abline(a = 0, b = 1, lty = "dotted", col = "#515151", lwd = 0.65)
+axis(1)
+axis(2, las = 1)
+
+## Plot total volumes NFI vs me
+plot(weirdos[, yang_flopp], weirdos[, v0], col = weirdos[, colour], pch = 19,
+	axes = FALSE, xlab = "Total volume me", ylab = "Total volume NFI")
+abline(a = 0, b = 1, lty = "dotted", col = "#515151", lwd = 0.65)
+axis(1)
+axis(2, las = 1)
+
+
+lim_y = range(weirdos[, .(v0, yang_flopp)])
+
+plot(weirdos[, v_flopp], weirdos[, v0], col = weirdos[, colour], pch = 19, ylim = lim_y,
+	axes = FALSE, xlab = "Bole volume Florence", ylab = "Total volume")
+points(weirdos[, v_flopp], weirdos[, yang_flopp], col = weirdos[, colour], pch = 4)
+abline(a = 0, b = 1, lty = "dotted", col = "#515151", lwd = 0.65)
+axis(1)
+axis(2, las = 1)
 ```
