@@ -549,6 +549,54 @@ comparison = function(sp, tree_dt, woodstock_seed = 1969 - 08 - 18, printPlot = 
 		warning = warn))
 }
 
+## Function to compute "traditional" RMSE
+RMSE_bayes = function(sp, tree_dt, is_simplif = FALSE, woodstock_seed = 1969 - 08 - 18)
+{
+	#### Generate quantitities
+	## Compile generator models
+	genQ = cmdstan_model("./yang2024-genQ.stan")
+	filename = paste0("./yang/", stri_replace(str = sp, regex = " ", replacement = "-"), "_new.rds")
+	
+	if (is_simplif)
+	{
+		genQ = cmdstan_model("./yang2024-genQ_submodel.stan")
+		filename = paste0("./yang/", stri_replace(str = sp, regex = " ", replacement = "-"), "_submodel.rds")
+	}
+
+	if (sp == "Quercus sp.")
+		filename = stri_replace_first(str = filename, regex = "\\._new", replacement = "_new")
+
+	## Prepare data
+	stanData = list(
+		N = tree_dt[.(sp)][, .N],
+		N_new = tree_dt[.(sp)][, .N],
+		bole_volume_m3 = tree_dt[.(sp)][, bole_volume_m3],
+		bole_volume_m3_new = tree_dt[.(sp)][, bole_volume_m3],
+		total_volume_m3 = tree_dt[.(sp)][, total_volume_m3],
+		total_volume_m3_new = tree_dt[.(sp)][, total_volume_m3]
+	)
+
+	## Compute rmse with respect to the mean
+	fit = readRDS(filename)
+	n_chains = fit$num_chains()
+	sim = genQ$generate_quantities(fitted_params = fit, data = stanData,
+		seed = woodstock_seed, parallel_chains = min(n_chains, 4))
+
+	sim = posterior::as_draws_matrix(sim$draws("v_gen_mean"))
+	rmse = numeric(dim(sim)[1])
+
+	n_indiv = tree_dt[.(sp)][, .N]
+	
+	for (i in seq_along(rmse))
+		rmse[i] = sqrt(1/n_indiv * sum((sim[i,] - tree_dt[.(sp)][, total_volume_m3])^2))
+
+	dd = density(rmse)
+
+	# plot(dd$x, dd$y)
+
+	return(rmse)
+}
+
 ## Function to compare model new version with submodel, based on PSIS-LOO
 comparison_yang_sub = function(sp, tree_dt, woodstock_seed = 1969 - 08 - 18, printPlot = FALSE)
 {
@@ -714,6 +762,7 @@ rebuilt_comp2 = function(save_ls)
 		warning = FALSE, key = "species")
 	weights_dt = data.table(species = ls_species, best = "", W_yang = -Inf, W_sub = -Inf, key = "species")
 	R2D2 = data.table(species = ls_species, R2_yang = -Inf, R2_sub = -Inf, key = "species")
+	rhat_dt = data.table(species = ls_species, Rhat_yang = -Inf, Rhat_sub = -Inf, key = "species")
 
 	for (sp in ls_species)
 	{
@@ -722,9 +771,11 @@ rebuilt_comp2 = function(save_ls)
 		
 		comp[sp, c("best", "warning") := .(save_ls[[sp]]$best, save_ls[[sp]]$warning)]
 		comp[sp, c("elpd_diff", "se_diff") := as.list(save_ls[[sp]]$comploo[2, c("elpd_diff", "se_diff")])]
+
+		rhat_dt[sp, c("Rhat_yang", "Rhat_sub") := .(save_ls[[sp]][["rhat_yang"]], save_ls[[sp]][["rhat_sub"]])]
 	}
 
-	return(list(comp = comp, weights_dt = weights_dt, R2D2 = R2D2))
+	return(list(comp = comp, weights_dt = weights_dt, R2D2 = R2D2, rhat = rhat_dt))
 }
 ```
 
@@ -823,6 +874,12 @@ if (file.exists("./yang/comparison_new-sub.rds"))
 	comp = rebuilt$comp
 	weights_dt = rebuilt$weights_dt
 	R2D2 = rebuilt$R2D2
+	rhat_dt = rebuilt$rhat
+
+	comp = merge.data.table(comp, rhat_dt, by = "species")
+	comp = merge.data.table(comp, tree_dt[, .N, by = speciesName_sci],
+		by.x = "species", by.y = "speciesName_sci")
+
 } else {
 	save_ls = vector(mode = "list", length = length(ls_species))
 	names(save_ls) = ls_species
@@ -849,6 +906,16 @@ if (file.exists("./yang/comparison_new-sub.rds"))
 }
 ```
 
+### Computations probability better
+
+Based on @Sivula2025 (equation 9), it is possible to compute the probablity that the model A is better than the model B, using `pnorm(0, mean = ELPD_diff, sd = SE_diff)`, where `ELPD = B - A < 0`. In our case, it gives:
+
+```{r}
+comp[, p_better := pnorm(0, mean = elpd_diff, sd = se_diff)]
+```
+
+Note that I considered we have enough data to insure that the normal approx is a good fit. Otherwise, I could hae used the heuristic $2\sigma_{\text{ELPD}}$ as $p$ is often overstimated when not enough, according to the blog of [Vehtari](https://users.aalto.fi/~ave/casestudies/LOO_uncertainty/loo_uncertainty.html).
+
 ## Manual modifications of comp
 Since *Picea abies* full model did not work out (bad mixing chains), it does not makes sense to compute and report a $\Delta\text{ELPD}$. Thus, I set it to `NA_real_` manually. Surprisingly, depsite its bad mixing, it is the full model (Yang) that was selected! This is because when you average the chains, you actually predic quite well, and almost match the sub model!
 
@@ -856,6 +923,7 @@ Since *Picea abies* full model did not work out (bad mixing chains), it does not
 comp["Picea abies", best := "sub"]
 comp["Picea abies", elpd_diff := NA_real_]
 comp["Picea abies", se_diff := NA_real_]
+comp["Picea abies", p_better := NA_real_]
 ```
 
 ## Reading @McLatchie2024
@@ -927,6 +995,34 @@ if (!file.exists("./yang/rsquared_flopp_yang.rds"))
 	saveRDS(R2D2, "./yang/rsquared_flopp_yang.rds")
 
 fwrite(R2D2, "../../../writing/article_allometry/data/rsquared.csv", na = "NaN")
+```
+
+## Compute RMSE
+
+To the demand of Cédric and Henri, I compute the RMSE, as it is a well known metric, also not the best adapted to my case I think (see @Hodson2022).
+
+```{r}
+rmse_ls = vector(mode = "list", length = length(tree_dt[, unique(speciesName_sci)]))
+names(rmse_ls) = tree_dt[, unique(speciesName_sci)]
+
+if (!file.exists("./yang/rmse.rds"))
+{
+	for (sp in tree_dt[, unique(speciesName_sci)])
+	{
+		print(sp)
+		is_simplif = FALSE
+		if (sp %in% c("Fraxinus excelsior", "Picea abies"))
+			is_simplif = TRUE
+		
+		rmse_ls[[sp]] = RMSE_bayes(sp, tree_dt, is_simplif)
+	}
+
+	tt = lapply(X = rmse_ls, FUN = quantile, probs = c(0, 0.025, 0.5, 0.975, 1))
+	tt = as.data.table(do.call(rbind, tt), keep.rownames = "speciesName_sci")
+
+	saveRDS(tt, "./yang/rmse.rds")
+	fwrite(tt, "../../../writing/article_allometry/data/rmse.csv")
+}
 ```
 
 ## Other stuff, to compare Vallet with my model
