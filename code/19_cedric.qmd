@@ -1,0 +1,138 @@
+---
+title: "Comparison with Cedric's data"
+date: today
+author: Amaël Le Squin
+date-format: iso
+filters:
+  - fontawesome
+  - siunitx-quarto
+  - imagify
+imagify:
+  header-includes: |
+    \usepackage{pgfplots}
+    \pgfplotsset{compat=1.18}
+    \usepgfplotslibrary{fillbetween}
+    \usetikzlibrary{positioning}
+    \usetikzlibrary{calc}
+  pdf-engine: lualatex
+pdf-engine: lualatex
+keep-tex: true
+execute:
+  error: true
+  echo: false
+  warning: false
+  message: false
+bibliography: /home/ALe-Squin/work/library/bib_file/references.bib
+lightbox:
+  match: auto
+css: style.css
+knitr:
+  opts_chunk: 
+    dev: ragg_png
+    crop: null
+    out.width: "70%"
+    fig.width: 6
+    fig.asp: 0.618
+    fig.align: "center"
+format:
+  html:
+    toc: true
+    include-in-header: mathjax.html
+    code-fold: true
+    df-print: paged
+    number-sections: true
+    theme:
+      light: cerulean
+      dark: darkly
+    margin: 5% 0;
+  pdf:
+    mathspec: true
+    include-in-header:
+      - text: |
+          \usepackage{unicode-math}
+---
+
+<!-- New command -->
+\newcommand{\ie}{*i.e.,*}
+
+<!-- Math commands -->
+\newcommand{\Vbft}{V_{\text{BFT}}}
+\newcommand{\Vtot}{V_{\text{tot}}}
+\newcommand{\hdec}{h_{\text{dec}}}
+
+<!-- Math operators -->
+<!-- \DeclareMathOperator{\ln}{ln} -->
+
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+<!-- ---------------------------   LOADING DATA, R CODE   --------------------------- -->
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+
+```{r}
+#| output: false
+
+#### Clear space and load packages
+rm(list = ls())
+graphics.off()
+
+options(max.print = 500)
+
+library(data.table)
+library(stringi)
+library(inventR)
+library(gt)
+```
+
+```{r}
+#### Loading data
+## Path
+os = Sys.info()[['sysname']]
+mnt_point = "/mnt/local_share/"
+if (os == "Linux" || os == "Darwin")
+{
+	if (!dir.exists(mnt_point))
+		stop(paste0("The mounting point <", mnt_point, "> does not exist"))
+} else if (os == "Windows") {
+	stop("TO DO!!! No idea how that works on Windows!")
+} else {
+	stop(paste("Unknown Operating System:", os))
+}
+
+path_data = paste0(mnt_point, "data/")
+if (!dir.exists(path_data))
+	stop(paste0("Folder <", path_data, "> does not exist! Did you run 01_prepare_data.qmd?"))
+
+## Loading training dataset
+training_dt_sp_specific = readRDS(paste0(path_data, "data_Vtot.rds"))
+training_dt = readRDS(paste0(path_data, "data_Vtot-group.rds"))
+
+## Get species name (sci) from NFI codes
+nfi_codes = readRDS(paste0(path_data, "species_dt.rds"))[!is.na(species_code_nfi),
+	.(speciesName_sci, species_code_nfi)]
+setkey(nfi_codes, speciesName_sci)
+
+## Cedric's data
+cedric = fread("./cedric/Results_parametres_Amael.csv")
+cedric = cedric[, .(plot_id = npp, tree_id = a, tree_name = Tree_Name,
+	species_code = espar, species_fr = nom,
+	dbh = DBH_QSM, c135_mm,
+	bole_volume = Total_Volume_trunk_7cm, bole_volume_nfi = v,
+	total_volume = TotalVolumeTree, total_volume_nfi = v0)]
+
+cedric = cedric[!is.na(bole_volume_nfi)]
+```
+
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+<!-- ---------------------------   MAIN CONTENT, R CODE   --------------------------- -->
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+
+```{r}
+cedric[, .N, by = species_fr]
+cedric = cedric[species_fr %in% c("Chene sessile", "Hetre")]
+
+cedric[, speciesName_sci := ifelse(species_fr == "Hetre", "Fagus sylvatica", "Quercus petraea")]
+setkey(cedric, speciesName_sci, plot_id, tree_id)
+```
+
+## Application des volumes @Vallet2006
+
+Dans cette section, j'applique les équations de Vallet afin de prédire le volume aerien total sur les données Emerge/Suisse.
