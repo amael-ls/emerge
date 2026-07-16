@@ -464,7 +464,7 @@ for (sp in nfi_codes[, species_code_nfi])
 		paste0("../../../writing/article_allometry/data/pred/", sp_filename, "_obs-data.csv"))
 
 	simplif = FALSE
-	if ((current_sp == "Fraxinus excelsior") || (current_sp == "Picea abies"))
+	if ((current_sp == "Fraxinus excelsior") || (current_sp == "Picea abies") || (current_sp == "Pinus laricio"))
 		simplif = TRUE
 	
 	temp = pred_fct_yang(sp = sp_filename, stanData_gen = stanData, simplif = simplif)
@@ -608,7 +608,7 @@ if (!file.exists("./yang/lambert_calculus.rds"))
 		print(paste("Doing species", sp))
 		
 		## Get params
-		if ((sp == "Fraxinus excelsior") || (sp == "Picea abies"))
+		if ((sp == "Fraxinus excelsior") || (sp == "Picea abies") || (sp == "Pinus laricio"))
 			next # Simplified species, done after
 		
 		sp_filename = stri_replace(str = sp, replacement = "-", regex = " ")
@@ -682,14 +682,14 @@ I am not sure about the interpretation of these threshold, but:
 2. Any difference Broadleves/Conifers?
 3. Any stuff on shade tolerance?
 
-### Lambert function for *Fraxinus excelsior* and *Picea abies*
+### Lambert function for *Fraxinus excelsior*, *Picea abies*, and *Pinus laricio*
 
 When I am using the simplified model, and despite it is a submodel of the general case, it seems that I need some cautiousness on the computation with Lambert function, especially with $\varepsilon$... Check p.12--13 Notebook 4.
 
 ```{r}
 if (!loaded)
 {
-	for (sp in c("Fraxinus excelsior", "Picea abies"))
+	for (sp in c("Fraxinus excelsior", "Picea abies", "Pinus laricio"))
 	{
 		print(paste("Doing species", sp))
 
@@ -723,7 +723,8 @@ if (!loaded)
 			c = unname(paramsVec_simplif["alpha"]),
 			j = 1,
 			k = unname(paramsVec_simplif["beta_"]),
-			m = unname(exp(-1)*paramsVec_simplif["gamma"]/paramsVec_simplif["beta_"] + paramsVec_simplif["alpha"]),
+			m = unname(exp(-1)*paramsVec_simplif["gamma"]/paramsVec_simplif["beta_"] +
+				paramsVec_simplif["alpha"]),
 			n = unname(paramsVec_simplif["delta"] + paramsVec_simplif["alpha"]),
 			s = unname(paramsVec_simplif["beta_"])
 		)
@@ -853,6 +854,7 @@ mu_2nd_submodel = function(k, m, c, n)
 
 params_dt["Fraxinus excelsior", curve := mu_2nd_submodel(k, m, c, n)]
 params_dt["Picea abies", curve := mu_2nd_submodel(k, m, c, n)]
+params_dt["pinus laricio", curve := mu_2nd_submodel(k, m, c, n)]
 ```
 
 ### Export the data for pgfplots
@@ -868,7 +870,8 @@ if (!file.exists(filename))
 
 ## Write treshold_dt
 filename = "../../../writing/article_allometry/data/thresholds.csv"
-threshold_dt = merge.data.table(x = threshold_dt, y = params_dt[, .(speciesName_sci, curve)], by = "speciesName_sci")
+threshold_dt = merge.data.table(x = threshold_dt, y = params_dt[, .(speciesName_sci, curve)],
+	by = "speciesName_sci")
 if (!file.exists(filename))
 	fwrite(threshold_dt, filename)
 ```
