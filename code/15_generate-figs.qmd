@@ -87,6 +87,7 @@ library(cmdstanr)
 library(stringi)
 library(inventR)
 library(interp)
+library(terra)
 library(loo)
 
 ## Tool function
@@ -186,10 +187,22 @@ pred_fct_yang = function(sp, stanData_gen, simplif = FALSE, n_points = 5, woodst
 }
 
 ## Function that compute the average above-ground pred volume without params/residual uncertainty
-yang2024 = function(x, pars)
+yang2024 = function(x, pars, expansion_factor = FALSE)
 {
-	return((pars["m"] - pars["c"]) * exp(pars["j"] - pars["k"]*x) * (pars["k"]*x/pars["j"])^pars["j"] +
-		pars["c"] - (pars["c"] - pars["n"])*exp(-pars["s"]*x));
+	ratio = (pars["m"] - pars["c"]) * exp(pars["j"] - pars["k"]*x) * (pars["k"]*x/pars["j"])^pars["j"] +
+		pars["c"] - (pars["c"] - pars["n"])*exp(-pars["s"]*x)
+
+	if (expansion_factor)
+		return (1/ratio)
+	
+	return(ratio);
+}
+
+yang2024_v2 = function(x, pars, expansion_factor = FALSE)
+{
+	paramsVec = c(c = pars[, c], j = pars[, j], k = pars[, k], m = pars[, m],
+		n = pars[, n], s = pars[, s])
+	return(yang2024(x, paramsVec, expansion_factor))
 }
 
 yang2024_vol = function(x, pars)
@@ -1143,4 +1156,252 @@ points(weirdos[, v_flopp], weirdos[, yang_flopp], col = weirdos[, colour], pch =
 abline(a = 0, b = 1, lty = "dotted", col = "#515151", lwd = 0.65)
 axis(1)
 axis(2, las = 1)
+```
+
+## Create map for French predictions campaign 2020--2024
+
+I compute the average volume expansion factor for a plot. For this:
+1. Estimate the species-specific range of bole volume within a given geographic unit (region, sylvo-ecorégion),
+$\Delta_{s, g}$, where $s$ lies for species index, and $g$ for the geopgraphy.
+2. Compute the community-wide mean coeff exp, $\bar{E}_g$, with:
+$$
+	$\bar{E}$ = \sum_{i \in P} W_i E_{i(s), g},
+$$
+with
+$$
+	E_{i(s), g} = \frac{1}{\Delta_{s, g}} \int_{\Delta_{s, g}} \frac{1}{r_s(x)} dx
+$$
+
+### Get relevant NFI data
+
+`SER_86` is the sylvo eco-region column, while `GRECO` is the grouped SER (11 mode instead of 86).
+
+```{r}
+#### French NFI data query
+db = connect_db()
+# db = connect_db(base = "exploitation", serveur = "test-inv-exp") # Connect to test server
+# u_tree.u_v0_alamod
+# LEFT JOIN inv_exp_nm.u_g3arbre u_tree
+# ON tree.NPP = u_tree.NPP AND ON tree.A = u_tree.A
+	
+nfi_data = exec_req(conn = db, req = paste0("
+	SELECT
+		tree.NPP AS plot_id, tree.A AS tree_id, tree.INCREF, tree.ESPAR AS sp_code,
+			tree.ESS AS sp_code_simp, tree.W,
+		tree.V AS bole_volume,
+		forest.ESSPRE AS dom_sp,
+		coords1.XL AS x_EPSG_27572, coords1.YL AS y_EPSG_27572,
+		coords2.SER_86, coords2.GRECO
+
+	FROM
+		inv_exp_nm.g3arbre AS tree
+		
+		LEFT JOIN inv_exp_nm.g3foret AS forest
+		ON tree.NPP = forest.NPP
+		
+		LEFT JOIN inv_exp_nm.e1point AS coords1
+		ON tree.NPP = coords1.NPP
+
+		LEFT JOIN inv_exp_nm.e2point AS coords2
+		ON tree.NPP = coords2.NPP
+
+	WHERE
+		tree.VEGET = '0' AND -- Living standing trees
+		tree.V > 0 AND -- I found some that are 0!
+		tree.INCREF IN ('15', '16', '17', '18', '19') -- Campaign from 2020 to 2024
+
+	ORDER BY
+		plot_id, tree_id;"), DT = TRUE)
+
+disconnect_db(db)
+
+## Get species names from database
+speciesName_nfi = inventR::ListUnitMod("ESPAR1")[, .(sp_code = mode, speciesName_sci = definition)]
+setkey(speciesName_nfi, sp_code)
+
+## Modify few names, removing subsp. and var.
+speciesName_nfi[stri_detect(str = speciesName_sci, regex = "var."),
+	speciesName_sci := stri_sub(str = speciesName_sci,
+		to = stri_locate(str = speciesName_sci, regex = "var.")[, "start"] - 2)]
+
+speciesName_nfi[stri_detect(str = speciesName_sci, regex = "subsp."),
+	speciesName_sci := stri_sub(str = speciesName_sci,
+		to = stri_locate(str = speciesName_sci, regex = "subsp.")[, "start"] - 2)]
+
+## Manually set for 29AF (broadleaf sp.) and 68CE (conifer sp.)
+speciesName_nfi["29AF", speciesName_sci := "Broadleaf"]
+speciesName_nfi["68CE", speciesName_sci := "Conifer"]
+
+## Manually set for 53CA (Pinus nigra var. calabrica) and 53CO (Pinus nigra var. corsicana)
+speciesName_nfi["53CA", speciesName_sci := "Pinus laricio"]
+speciesName_nfi["53CO", speciesName_sci := "Pinus laricio"]
+
+## Manually set for 58 (Pinus mugo subsp. uncinata)
+speciesName_nfi["58", speciesName_sci := "Pinus uncinata"]
+
+## Merge with nfi_data
+nfi_data = merge.data.table(nfi_data, speciesName_nfi, by = "sp_code")
+```
+
+### Compute $\Delta_{s, g}$
+
+I compute by species and by geographic unit.
+
+```{r}
+delta_sylvo = nfi_data[, as.list(quantile(bole_volume, probs = c(0.025, 0.975))), by = .(ser_86, sp_code)]
+setnames(delta_sylvo, old = c("2.5%", "97.5%"), new = c("q025", "q975"))
+delta_sylvo[, delta := q975 - q025]
+setkey(delta_sylvo, sp_code, ser_86)
+
+delta_greco = nfi_data[, as.list(quantile(bole_volume, probs = c(0.025, 0.975))), by = .(greco, sp_code)]
+setnames(delta_greco, old = c("2.5%", "97.5%"), new = c("q025", "q975"))
+delta_greco[, delta := q975 - q025]
+setkey(delta_greco, sp_code, greco)
+```
+
+### Prepare the parameters for all the species/groups
+Watch out, this requires `17_yang-groupSp.qmd`... That means I will need to reorganise files... In the first part of the scrit, I assign a group, and then a model to each tree. The model is either species-specific, group-specific, or generic, depending on the scenario (in this order of priority: paramtrised species, parametrised group, or nothing parametrised).
+
+```{r}
+## Add groups
+ls_groups = readRDS("../../gohon_florence/espar.rds")[, .(ess, group = Group_ess, sp_code = espar, nom_espar)]
+nfi_data = merge.data.table(nfi_data, ls_groups[, .(sp_code, group)], by = "sp_code")
+
+## Check models that run successfully
+success_dt = readRDS("./yang/group-success.rds")
+
+## Now, assign a model. It will be either the species, the group, or broadleaf/conifer
+sp_specific_models = readRDS("./yang/rsquared_flopp_yang.rds")[, .(species, model = selected)]
+
+nfi_data = merge.data.table(nfi_data, sp_specific_models, by.x = "speciesName_sci",
+	by.y = "species", all.x = TRUE)
+
+nfi_data[model == "yang",
+	model := paste0("./yang/", stri_replace(speciesName_sci, regex = " ", replacement = "-"), "_new.rds")]
+
+nfi_data[model == "sub",
+	model := paste0("./yang/", stri_replace(speciesName_sci, regex = " ", replacement = "-"), "_submodel.rds")]
+
+ls_full_gr = success_dt[(success_full), group]
+nfi_data[is.na(model) & group %in% ls_full_gr, model := paste0("./yang/", group, ".rds")]
+
+ls_sub_gr = success_dt[(success_sub), group]
+nfi_data[is.na(model) & group %in% ls_sub_gr, model := paste0("./yang/", group, "_submodel.rds")]
+
+## Assign generic models for groups that were not parametrised (A2), and for groups with too little indiv
+ls_pb = c(nfi_data[(is.na(model)), unique(group)], success_dt[N_indiv < 100, group])
+nfi_data[(group %in% ls_pb) & sp_code_simp < 50, model := "./yang/broadleaf_new.rds"]
+nfi_data[(group %in% ls_pb) & sp_code_simp > 50, model := "./yang/conifer_new.rds"]
+
+## Check that all the species have a group
+nfi_data[, any(is.na(model))]
+```
+
+In this second part, I create the species-specific coefficients data table.
+
+```{r}
+params_dt_full = unique(nfi_data[, .(speciesName_sci, group)])
+pars_names = c("c", "j", "k", "m", "n", "s")
+params_dt_full[, c(pars_names) :=
+	.(NA_real_, NA_real_, NA_real_, NA_real_, NA_real_, NA_real_)]
+
+params_dt_full[params_dt, on = "speciesName_sci", `:=` (c = i.c, j = i.j, k = i.k, m = i.m, n = i.n, s = i.s)]
+
+if (!file.exists("./yang/params_dt_full.rds"))
+{
+	for (gp in params_dt_full[, unique(group)])
+	{
+		print(paste("Group:", gp))
+		ls_species = params_dt_full[group == gp & is.na(c), unique(speciesName_sci)] # Non-parametrised species
+		filename = nfi_data[ls_species, unique(model)]
+		if (length(filename) != 1)
+			stop("There should be a unique model to load!")
+		
+		fit = readRDS(filename)
+		
+		load_sub = TRUE
+		generic = (stri_detect(filename, regex = "broadleaf") || stri_detect(filename, regex = "conifer"))
+		if ((success_dt[gp, success_full]) | (generic))
+		{
+			paramsVec = getParams(fit, params_names = pars_names, type = "mean")
+			load_sub = FALSE
+		}
+		
+		if (load_sub)
+		{
+			paramsVec_simplif = getParams(model_cmdstan = fit,
+				params_names = c("alpha", "beta_", "gamma", "delta"), type = "mean")
+			paramsVec = c(
+				c = unname(paramsVec_simplif["alpha"]),
+				j = 1,
+				k = unname(paramsVec_simplif["beta_"]),
+				m = unname(exp(-1)*paramsVec_simplif["gamma"]/paramsVec_simplif["beta_"] +
+					paramsVec_simplif["alpha"]),
+				n = unname(paramsVec_simplif["delta"] + paramsVec_simplif["alpha"]),
+				s = unname(paramsVec_simplif["beta_"])
+			)
+		}
+
+		params_dt_full[ls_species, c(pars_names) := as.list(paramsVec)]
+	}
+	saveRDS(params_dt_full, "./yang/params_dt_full.rds")
+} else {
+	params_dt_full = readRDS("./yang/params_dt_full.rds")
+}
+```
+
+### Compute the individual expansion factor
+
+```{r}
+## Join the delta stuff to nfi_data for ease
+nfi_data[delta_sylvo, on = .(sp_code, ser_86), `:=`(delta = i.delta, q025 = i.q025, q975 = i.q975)]
+
+nfi_data[delta != 0, E_sylvo := {
+	pr <- params_dt_full[speciesName_sci, ]
+	1/delta * integrate(
+		f = yang2024_v2,
+		lower = unique(q025),
+		upper = unique(q975),
+		pars = unique(pr),
+		expansion_factor = TRUE
+	)$value
+}, by = .(sp_code, ser_86)]
+
+nfi_data[delta == 0, E_sylvo := {pr <- params_dt_full[speciesName_sci, ]
+	yang2024_v2(bole_volume, unique(pr), expansion_factor = TRUE)}, by = .(sp_code, ser_86)]
+
+nfi_data[, range(E_sylvo)]
+
+qq = unique(nfi_data[, .(weighed_exp_factor = sum(w*E_sylvo)/sum(w), ser_86 = ser_86, x_epsg_27572, y_epsg_27572),
+	by = plot_id])
+
+aa = qq[, .(avg_exp_factor = mean(weighed_exp_factor)), by = ser_86]
+
+ser_map = vect(inventR::ser_simp)
+plot(ser_map)
+
+ser_map = terra::merge(ser_map, aa, by.x = "code_ser", by.y = "ser_86", all.x = TRUE)
+
+# plot the mapped values
+plot(ser_map, "avg_exp_factor", axes = FALSE)
+
+exp_fact_vect = vect(x = qq, geom = c("x_epsg_27572", "y_epsg_27572"), crs = "EPSG:27572")
+plot(exp_fact_vect, "weighed_exp_factor", axes = FALSE, cex = 0.5,
+	col = met.brewer("Hokusai3"))
+plot(france, add = TRUE, lwd = 3)
+
+par(mfrow = c(1, 3))
+plot(exp_fact_vect[exp_fact_vect$weighed_exp_factor < 1.3], "weighed_exp_factor", axes = FALSE, cex = 0.65,
+	col = met.brewer("Hokusai3"), main = "1 < x < 1.3", legend = FALSE)
+plot(france, add = TRUE, lwd = 3)
+
+plot(exp_fact_vect[(1.3 <= exp_fact_vect$weighed_exp_factor) & (exp_fact_vect$weighed_exp_factor < 1.6)],
+	"weighed_exp_factor", axes = FALSE, cex = 1, col = met.brewer("Hokusai3"), main = "1.3 < x < 1.6",
+	legend = FALSE)
+plot(france, add = TRUE, lwd = 3)
+
+plot(exp_fact_vect[(1.6 <= exp_fact_vect$weighed_exp_factor)],
+	"weighed_exp_factor", axes = FALSE, cex = 1, col = met.brewer("Hokusai3"), main = "1.6 < x",
+	legend = FALSE)
+plot(france, add = TRUE, lwd = 3)
 ```
