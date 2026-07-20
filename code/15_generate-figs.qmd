@@ -1561,3 +1561,32 @@ cor(ser_map_ocre$avg_exp_factor, ser_map_ocre$prop_HF) # -0.58, negative, makes 
 
 disconnect_db(db)
 ```
+
+### Plot the maps
+
+```{r}
+#### Mapping the expansion factor per SER
+## Plot average expansion factor sylvo eco-region
+pdf("./maps-to-print_ocre.pdf")
+plot(ser_map_ocre, "avg_exp_factor", type = "continuous", axes = FALSE,
+	col = met.brewer("Hokusai3", n = 50, type = "continuous", direction = -1), main = "Avg factor")
+
+## Plot avg proportion of conifers sylvo eco-region. Direction 1 so that darker blue = more conif
+plot(ser_map_ocre, "prop_conif", type = "continuous", axes = FALSE,
+	col = met.brewer("Hokusai3", n = 50, type = "continuous", direction = 1), main = "Prop conif")
+
+## Plot proportion high-forest sylvo eco-region. Direction 1 so that darker blue = more high-forest
+plot(ser_map_ocre, "prop_HF", type = "continuous", axes = FALSE,
+	col = met.brewer("Hokusai3", n = 50, type = "continuous", direction = 1), main = "Prop HF")
+dev.off()
+```
+
+## Simple correlations
+
+```{r}
+cor(ser_map$avg_exp_factor, ser_map$avg_prop_conif) # -0.6, negative, makes sense!
+cor(ser_map$avg_exp_factor, ser_map$prop_HF) # -0.58, negative, makes sense!
+
+cor(ser_map_ocre$avg_exp_factor, ser_map_ocre$prop_conif) # -0.6, negative, makes sense!
+cor(ser_map_ocre$avg_exp_factor, ser_map_ocre$prop_HF) # -0.58, negative, makes sense!
+```
