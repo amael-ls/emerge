@@ -1193,7 +1193,7 @@ nfi_data = exec_req(conn = db, req = paste0("
 			ELSE
 				'conifer'
 			END AS type,
-		forest.ESSPRE AS dom_sp, forest.SVER AS structure,
+		forest.ESSPRE AS dom_sp, forest.SVER AS structure, forest.GEST AS management,
 		coords1.XL AS x_EPSG_27572, coords1.YL AS y_EPSG_27572,
 		coords2.SER_86, coords2.GRECO
 
@@ -1407,21 +1407,72 @@ ser_conif = prop_conif[, .(avg_prop_conif = mean(conif), sd_prop_conif = sd(coni
 ser_map = terra::merge(ser_map, ser_conif, by.x = "code_ser", by.y = "ser_86", all.x = TRUE)
 ```
 
+### Compute SVER per SER
+
+```{r}
+## Structure of plot
+struct = unique(nfi_data[, .(plot_id, structure, ser_86, x_epsg_27572, y_epsg_27572)])
+
+## Make it more explicit
+explicit_struct = inventR::ListUnitMod(var = "SVER")
+
+explicit_struct_en = data.table(
+	mode = c("0", "X", "2", "3", "4", "5", "6"),
+	libelle = c(
+		"deforested",
+		"open",
+		"low_HF",
+		"low_noHF",
+		"irregular",
+		"regular_HF_understory",
+		"regular_HF_no_understory"
+	),
+	definition = c(
+		"Situation where the vertical structure cannot be defined (stand momentarily deforested).",
+		"Open woodland, not momentarily deforested.",
+		"(Closed) regular stand at a low stratum, at a young stage of a high forest regime, or composed mainly of seed-origin stems.",
+		"(Closed) regular stand at a low stratum, whose regime is not high forest and whose stems are mainly of coppice origin (regrowth from stumps/root suckers).",
+		"(Closed) stand with an irregular vertical structure.",
+		"(Closed) regular stand at a high stratum with understory layer(s).",
+		"(Closed) regular stand at a high stratum without understory."
+	)
+)
+
+## Dichotomic structure
+explicit_struct_en[, is_HF := TRUE]
+explicit_struct_en[mode %in% c("0", "X", "3"), is_HF := FALSE]
+
+## SER level
+struct = merge.data.table(struct, explicit_struct_en[, .(mode, is_HF)], by.x = "structure",
+	by.y = "mode", all.x = TRUE)
+
+ser_struct = struct[, .( prop_HF = sum(is_HF, na.rm = TRUE)/.N), by = ser_86]
+
+## Add proportion conifer to SER map
+ser_map = terra::merge(ser_map, ser_struct, by.x = "code_ser", by.y = "ser_86", all.x = TRUE)
+```
+
 ### Plot the maps
 
 ```{r}
 #### Mapping the expansion factor per SER
 ## Plot average expansion factor sylvo eco-region
+pdf("./maps-to-print.pdf")
 plot(ser_map, "avg_exp_factor", type = "continuous", axes = FALSE,
-	col = met.brewer("Hokusai3", n = 50, type = "continuous", direction = -1))
+	col = met.brewer("Hokusai3", n = 50, type = "continuous", direction = -1), main = "Avg factor")
 
 ## Plot std. dev. expansion factor sylvo eco-region
 plot(ser_map, "sd_exp_factor", type = "continuous", axes = FALSE,
-	col = met.brewer("Hokusai3", n = 50, type = "continuous", direction = -1))
+	col = met.brewer("Hokusai3", n = 50, type = "continuous", direction = -1), main = "Std. dev")
 
-## Plot std. dev. expansion factor sylvo eco-region
+## Plot avg proportion of conifers sylvo eco-region. Direction 1 so that darker blue = more conif
 plot(ser_map, "avg_prop_conif", type = "continuous", axes = FALSE,
-	col = met.brewer("Hokusai3", n = 50, type = "continuous", direction = 1))
+	col = met.brewer("Hokusai3", n = 50, type = "continuous", direction = 1), main = "Prop conif")
+
+## Plot proportion high-forest sylvo eco-region. Direction 1 so that darker blue = more high-forest
+plot(ser_map, "prop_HF", type = "continuous", axes = FALSE,
+	col = met.brewer("Hokusai3", n = 50, type = "continuous", direction = 1), main = "Prop HF")
+dev.off()
 
 ## Plot NFI plots
 exp_fact_vect = vect(x = plot_expF, geom = c("x_epsg_27572", "y_epsg_27572"), crs = "EPSG:27572")
@@ -1443,4 +1494,70 @@ plot(exp_fact_vect[(1.6 <= exp_fact_vect$weighed_exp_factor)],
 	"weighed_exp_factor", axes = FALSE, cex = 1, col = met.brewer("Hokusai3"), main = "1.6 < x",
 	legend = FALSE)
 plot(france, add = TRUE, lwd = 3)
+```
+
+## Same calculus, but using ocre
+
+One of the problem, doing it by individual, then averaging by plot, to finally average within `ser_86` is that each plot get the same weight, which is not necessarily the case, especially in terms of resources (an almost empty plot should weight less than a full plot!). This is where the function `ocre_nm` is useful.
+
+```{r}
+#### Same stuff as in previous section, but using ocre
+## Reset map
+ser_map_ocre = vect(inventR::ser_simp)
+
+## Connect to db
+db = connect_db(base = "exploitation", serveur = "test-inv-exp")
+
+## Average expansion factors per ser
+ser_expF_ocre = ocre_nm(vars = c("U_V0_ALAMOD", "V"), vent_p = "ser_86", ans = 2020:2024,
+	test = TRUE, us_nm = "1")[visite == 1, .(ser_86 = ser_86.ser_86, vars, tot)]
+
+ser_expF_ocre = data.table::dcast(data = ser_expF_ocre, formula = ser_86 ~ vars, value.var = "tot")
+ser_expF_ocre[, avg_exp_factor := U_V0_ALAMOD/V]
+
+ser_map_ocre = terra::merge(ser_map_ocre, ser_expF_ocre[, .(ser_86, avg_exp_factor)],
+	by.x = "code_ser", by.y = "ser_86", all.x = TRUE)
+
+## Average proportion of conifers per ser (in terms of bole volume)
+ser_conif_ocre = ocre_nm(vars = c("V"), vent_p = "ser_86", vent_a = "ess:essd1", ans = 2020:2024,
+	test = TRUE, us_nm = "1")[visite == 1, .(ser_86 = ser_86.ser_86, type = ess.essd1, vars, tot)]
+
+ser_conif_ocre = data.table::dcast(data = ser_conif_ocre, formula = ser_86 ~ vars + type, value.var = "tot")
+setnames(ser_conif_ocre, old = c("V_F", "V_R"), new = c("broadleaf_vol", "conifer_vol"))
+
+ser_conif_ocre[, prop_conif := conifer_vol/(broadleaf_vol + conifer_vol)]
+
+ser_conif_ocre[is.na(conifer_vol) & !is.na(broadleaf_vol), prop_conif := 0]
+ser_conif_ocre[is.na(broadleaf_vol) & !is.na(conifer_vol), prop_conif := 1]
+
+if (ser_conif_ocre[, any(is.na(prop_conif))])
+	stop("How come there are still NAs???")
+
+ser_map_ocre = terra::merge(ser_map_ocre, ser_conif_ocre[, .(ser_86, prop_conif)],
+	by.x = "code_ser", by.y = "ser_86", all.x = TRUE)
+
+cor(ser_map_ocre$avg_exp_factor, ser_map_ocre$prop_conif) # -0.6, negative, makes sense!
+
+## Proportion of high forest, still in terms of bole volume
+struct_ocre = ocre_nm(vars = c("V"), vent_p = c("ser_86", "sver"), ans = 2020:2024,
+	test = TRUE, us_nm = "1")[visite == 1, .(ser_86 = ser_86.ser_86, structure = sver.sver, vars, tot)]
+
+struct_ocre[structure == "(null)", structure := "X"]
+
+struct_ocre = merge.data.table(struct_ocre, explicit_struct_en[, .(mode, is_HF)], by.x = "structure",
+	by.y = "mode", all.x = TRUE)
+
+struct_ocre = data.table::dcast(data = struct_ocre, formula = ser_86 ~ is_HF, value.var = "tot",
+	fun.aggregate = sum, na.rm = TRUE)
+
+setnames(struct_ocre, old = c("FALSE", "TRUE"), new = c("vol_nonHF", "vol_HF"))
+
+struct_ocre[, prop_HF := vol_HF/(vol_nonHF + vol_HF)]
+
+ser_map_ocre = terra::merge(ser_map_ocre, struct_ocre[, .(ser_86, prop_HF)],
+	by.x = "code_ser", by.y = "ser_86", all.x = TRUE)
+
+cor(ser_map_ocre$avg_exp_factor, ser_map_ocre$prop_HF) # -0.58, negative, makes sense!
+
+disconnect_db(db)
 ```
