@@ -1187,9 +1187,13 @@ db = connect_db()
 nfi_data = exec_req(conn = db, req = paste0("
 	SELECT
 		tree.NPP AS plot_id, tree.A AS tree_id, tree.INCREF, tree.ESPAR AS sp_code,
-			tree.ESS AS sp_code_simp, tree.W,
-		tree.V AS bole_volume,
-		forest.ESSPRE AS dom_sp,
+			tree.ESS AS sp_code_simp, tree.W, tree.V AS bole_volume,
+			CASE WHEN tree.ESS < '50' THEN
+				'broadleaf'
+			ELSE
+				'conifer'
+			END AS type,
+		forest.ESSPRE AS dom_sp, forest.SVER AS structure,
 		coords1.XL AS x_EPSG_27572, coords1.YL AS y_EPSG_27572,
 		coords2.SER_86, coords2.GRECO
 
@@ -1353,6 +1357,7 @@ if (!file.exists("./yang/params_dt_full.rds"))
 ### Compute the individual expansion factor
 
 ```{r}
+#### Compute individual expansion factors
 ## Join the delta stuff to nfi_data for ease
 nfi_data[delta_sylvo, on = .(sp_code, ser_86), `:=`(delta = i.delta, q025 = i.q025, q975 = i.q975)]
 
@@ -1372,22 +1377,30 @@ nfi_data[delta == 0, E_sylvo := {pr <- params_dt_full[speciesName_sci, ]
 
 nfi_data[, range(E_sylvo)]
 
-qq = unique(nfi_data[, .(weighed_exp_factor = sum(w*E_sylvo)/sum(w), ser_86 = ser_86, x_epsg_27572, y_epsg_27572),
-	by = plot_id])
+#### Aggregate at the plot and SER level
+## Plot level
+plot_expF = unique(nfi_data[, .(weighed_exp_factor = sum(w*E_sylvo)/sum(w), ser_86 = ser_86,
+	x_epsg_27572, y_epsg_27572), by = plot_id])
 
-aa = qq[, .(avg_exp_factor = mean(weighed_exp_factor)), by = ser_86]
+## SER level
+ser_expF = plot_expF[, .(avg_exp_factor = mean(weighed_exp_factor)), by = ser_86]
 
+## Prepare geographical objects
 ser_map = vect(inventR::ser_simp)
-plot(ser_map)
+france = vect(inventR::france)
+ser_map = terra::merge(ser_map, ser_expF, by.x = "code_ser", by.y = "ser_86", all.x = TRUE)
+```
 
-ser_map = terra::merge(ser_map, aa, by.x = "code_ser", by.y = "ser_86", all.x = TRUE)
+```{r}
+#### Mapping the expansion factor per SER
+## Plot sylvo eco-region
+plot(ser_map, "avg_exp_factor", type = "continuous", axes = FALSE,
+	col = met.brewer("Hokusai3", n = 50, type = "continuous", direction = -1))
 
-# plot the mapped values
-plot(ser_map, "avg_exp_factor", axes = FALSE)
-
-exp_fact_vect = vect(x = qq, geom = c("x_epsg_27572", "y_epsg_27572"), crs = "EPSG:27572")
+## Plot NFI plots
+exp_fact_vect = vect(x = plot_expF, geom = c("x_epsg_27572", "y_epsg_27572"), crs = "EPSG:27572")
 plot(exp_fact_vect, "weighed_exp_factor", axes = FALSE, cex = 0.5,
-	col = met.brewer("Hokusai3"))
+	col = met.brewer("Hokusai3", type = "continuous"))
 plot(france, add = TRUE, lwd = 3)
 
 par(mfrow = c(1, 3))

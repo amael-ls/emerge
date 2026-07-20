@@ -584,17 +584,17 @@ RMSE_bayes = function(sp, tree_dt, is_simplif = FALSE, woodstock_seed = 1969 - 0
 
 	sim = posterior::as_draws_matrix(sim$draws("v_gen_mean"))
 	rmse = numeric(dim(sim)[1])
+	mape = numeric(dim(sim)[1])
 
 	n_indiv = tree_dt[.(sp)][, .N]
 	
 	for (i in seq_along(rmse))
+	{
 		rmse[i] = sqrt(1/n_indiv * sum((sim[i,] - tree_dt[.(sp)][, total_volume_m3])^2))
+		mape[i] = 100/n_indiv * sum(abs((sim[i,] - tree_dt[.(sp)][, total_volume_m3])/tree_dt[.(sp)][, total_volume_m3]))
+	}
 
-	dd = density(rmse)
-
-	# plot(dd$x, dd$y)
-
-	return(rmse)
+	return(list(rmse = rmse, mape = mape))
 }
 
 ## Function to compare model new version with submodel, based on PSIS-LOO
@@ -926,6 +926,40 @@ comp["Picea abies", se_diff := NA_real_]
 comp["Picea abies", p_better := NA_real_]
 ```
 
+## Compute RMSE
+
+To the demand of Cédric and Henri, I compute the RMSE, as it is a well known metric, also not the best adapted to my case I think (see @Hodson2022).
+
+```{r}
+rmse_ls = vector(mode = "list", length = length(tree_dt[, unique(speciesName_sci)]))
+names(rmse_ls) = tree_dt[, unique(speciesName_sci)]
+
+if (!file.exists("./yang/rmse.rds"))
+{
+	for (sp in tree_dt[, unique(speciesName_sci)])
+	{
+		print(sp)
+		is_simplif = FALSE
+		if (sp %in% c("Fraxinus excelsior", "Picea abies", "Pinus laricio"))
+			is_simplif = TRUE
+		
+		rmse_ls[[sp]] = RMSE_bayes(sp, tree_dt, is_simplif)
+	}
+
+	tt = apply(X = rmse_ls, MARGIN = 1, FUN = )
+	tt = rbindlist(rmse_ls, idcol = "species")
+
+	tt = as.data.table(do.call(rbind, tt), keep.rownames = "species")
+	tt[, .(as.list(quantile(rmse, probs = c(0, 0.025, 0.5, 0.975, 1))),
+		as.list(quantile(mape, probs = c(0, 0.025, 0.5, 0.975, 1)))), by = species]
+	saveRDS(rmse_ls, "./yang/rmse_ls.rds")
+	saveRDS(tt, "./yang/rmse.rds")
+	fwrite(tt, "../../../writing/article_allometry/data/rmse.csv")
+} else {
+	tt = readRDS("./yang/rmse.rds")
+}
+```
+
 ## Reading @McLatchie2024
 
 I am testing the appendix A of @McLatchie2024, and more specifically the pseudo-BMA+ weights, equation A4. My coding of equation A2 might be surprising, but read well equation A2! It is:
@@ -983,46 +1017,28 @@ flopp_r2 = readRDS("../../gohon_florence/rsquared.rds")[, .(speciesName_sci, R2_
 R2D2 = merge.data.table(R2D2, flopp_r2, by.x = "species", by.y = "speciesName_sci", all.x = TRUE)
 R2D2 = merge.data.table(R2D2, comp[, .(species, best)], by = "species")
 
-## Modify manually the column "selected" for Pinus laricio, strobus, and uncinata, as I pick up
+## Modify manually the column "selected" for Pinus strobus and uncinata, as non-significant diff.
 R2D2[, selected := best]
-R2D2[c("Pinus laricio", "Pinus strobus", "Pinus uncinata"), selected := "yang"]
+R2D2[c("Pinus strobus", "Pinus uncinata"), selected := "yang"]
 
 ## Add column R2 selected model and remove best
 R2D2[, R2_selected := ifelse(selected == "yang", R2_yang, R2_sub)]
 R2D2[, best := NULL]
 
+## Add column RMSE
+R2D2 = merge.data.table(R2D2, tt[, .(species, rmse_med = `50%`)], by = "species")
+
+mean_totvol = tree_dt[, .(meanV = mean(total_volume_m3), q25 = quantile(total_volume_m3, 0.25),
+	q50 = quantile(total_volume_m3, 0.50), q75 = quantile(total_volume_m3, 0.75),
+	m = min(total_volume_m3), M = max(total_volume_m3)), by = speciesName_sci]
+
+R2D2 = merge.data.table(R2D2, mean_totvol, by.x = "species", by.y = "speciesName_sci")
+R2D2[, rmse_percent := rmse_med/meanV*100]
+
 if (!file.exists("./yang/rsquared_flopp_yang.rds"))
 	saveRDS(R2D2, "./yang/rsquared_flopp_yang.rds")
 
 fwrite(R2D2, "../../../writing/article_allometry/data/rsquared.csv", na = "NaN")
-```
-
-## Compute RMSE
-
-To the demand of Cédric and Henri, I compute the RMSE, as it is a well known metric, also not the best adapted to my case I think (see @Hodson2022).
-
-```{r}
-rmse_ls = vector(mode = "list", length = length(tree_dt[, unique(speciesName_sci)]))
-names(rmse_ls) = tree_dt[, unique(speciesName_sci)]
-
-if (!file.exists("./yang/rmse.rds"))
-{
-	for (sp in tree_dt[, unique(speciesName_sci)])
-	{
-		print(sp)
-		is_simplif = FALSE
-		if (sp %in% c("Fraxinus excelsior", "Picea abies"))
-			is_simplif = TRUE
-		
-		rmse_ls[[sp]] = RMSE_bayes(sp, tree_dt, is_simplif)
-	}
-
-	tt = lapply(X = rmse_ls, FUN = quantile, probs = c(0, 0.025, 0.5, 0.975, 1))
-	tt = as.data.table(do.call(rbind, tt), keep.rownames = "speciesName_sci")
-
-	saveRDS(tt, "./yang/rmse.rds")
-	fwrite(tt, "../../../writing/article_allometry/data/rmse.csv")
-}
 ```
 
 ## Other stuff, to compare Vallet with my model
