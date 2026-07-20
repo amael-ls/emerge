@@ -1383,7 +1383,8 @@ plot_expF = unique(nfi_data[, .(weighed_exp_factor = sum(w*E_sylvo)/sum(w), ser_
 	x_epsg_27572, y_epsg_27572), by = plot_id])
 
 ## SER level
-ser_expF = plot_expF[, .(avg_exp_factor = mean(weighed_exp_factor)), by = ser_86]
+ser_expF = plot_expF[, .(avg_exp_factor = mean(weighed_exp_factor), sd_exp_factor = sd(weighed_exp_factor)),
+	by = ser_86]
 
 ## Prepare geographical objects
 ser_map = vect(inventR::ser_simp)
@@ -1391,11 +1392,36 @@ france = vect(inventR::france)
 ser_map = terra::merge(ser_map, ser_expF, by.x = "code_ser", by.y = "ser_86", all.x = TRUE)
 ```
 
+### Compute proportion of conifers/broadleaves per SER
+
+```{r}
+## Proportion conifer per plot
+prop_conif = unique(nfi_data[, .(conif = sum(w*(type == "conifer"))/sum(w), ser_86 = ser_86,
+	x_epsg_27572, y_epsg_27572), by = plot_id])
+prop_conif[, range(conif)]
+
+## SER level
+ser_conif = prop_conif[, .(avg_prop_conif = mean(conif), sd_prop_conif = sd(conif)), by = ser_86]
+
+## Add proportion conifer to SER map
+ser_map = terra::merge(ser_map, ser_conif, by.x = "code_ser", by.y = "ser_86", all.x = TRUE)
+```
+
+### Plot the maps
+
 ```{r}
 #### Mapping the expansion factor per SER
-## Plot sylvo eco-region
+## Plot average expansion factor sylvo eco-region
 plot(ser_map, "avg_exp_factor", type = "continuous", axes = FALSE,
 	col = met.brewer("Hokusai3", n = 50, type = "continuous", direction = -1))
+
+## Plot std. dev. expansion factor sylvo eco-region
+plot(ser_map, "sd_exp_factor", type = "continuous", axes = FALSE,
+	col = met.brewer("Hokusai3", n = 50, type = "continuous", direction = -1))
+
+## Plot std. dev. expansion factor sylvo eco-region
+plot(ser_map, "avg_prop_conif", type = "continuous", axes = FALSE,
+	col = met.brewer("Hokusai3", n = 50, type = "continuous", direction = 1))
 
 ## Plot NFI plots
 exp_fact_vect = vect(x = plot_expF, geom = c("x_epsg_27572", "y_epsg_27572"), crs = "EPSG:27572")
