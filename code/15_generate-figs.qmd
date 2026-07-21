@@ -1178,27 +1178,46 @@ $$
 
 ```{r}
 #### French NFI data query
-db = connect_db()
-# db = connect_db(base = "exploitation", serveur = "test-inv-exp") # Connect to test server
-# u_tree.u_v0_alamod
-# LEFT JOIN inv_exp_nm.u_g3arbre u_tree
-# ON tree.NPP = u_tree.NPP AND ON tree.A = u_tree.A
+db = connect_db(base = "exploitation", serveur = "test-inv-exp") # Connect to test server
 	
 nfi_data = exec_req(conn = db, req = paste0("
 	SELECT
 		tree.NPP AS plot_id, tree.A AS tree_id, tree.INCREF, tree.ESPAR AS sp_code,
-			tree.ESS AS sp_code_simp, tree.W, tree.V AS bole_volume,
-			CASE WHEN tree.ESS < '50' THEN
+		CASE
+			WHEN tree.clad::numeric < 12.5 THEN
+				'TPB'
+			WHEN 12.5 <= tree.clad::numeric AND tree.clad::numeric < 22.5 THEN
+				'PB'
+			WHEN 22.5 <= tree.clad::numeric AND tree.clad::numeric < 37.5 THEN
+				'MB'
+			WHEN 37.5 <= tree.clad::numeric AND tree.clad::numeric < 52.5 THEN
+				'GB'
+			ELSE
+				'TGB'
+		END AS class,
+		tree.ESS AS sp_code_simp, tree.W, tree.V AS bole_volume,
+		CASE
+			WHEN tree.orig = '0' THEN
+				'seed'
+			WHEN tree.orig = '1' THEN
+				'sprout'
+		END AS origin,
+		CASE
+			WHEN tree.ESS < '50' THEN
 				'broadleaf'
 			ELSE
 				'conifer'
-			END AS type,
+		END AS type,
+		u_tree.u_v0_alamod AS total_volume,
 		forest.ESSPRE AS dom_sp, forest.SVER AS structure, forest.GEST AS management,
 		coords1.XL AS x_EPSG_27572, coords1.YL AS y_EPSG_27572,
 		coords2.SER_86, coords2.GRECO
 
 	FROM
 		inv_exp_nm.g3arbre AS tree
+
+		LEFT JOIN inv_exp_nm.u_g3arbre AS u_tree
+		ON tree.NPP = u_tree.NPP AND tree.A = u_tree.A
 		
 		LEFT JOIN inv_exp_nm.g3foret AS forest
 		ON tree.NPP = forest.NPP
@@ -1590,3 +1609,28 @@ cor(ser_map$avg_exp_factor, ser_map$prop_HF) # -0.58, negative, makes sense!
 cor(ser_map_ocre$avg_exp_factor, ser_map_ocre$prop_conif) # -0.6, negative, makes sense!
 cor(ser_map_ocre$avg_exp_factor, ser_map_ocre$prop_HF) # -0.58, negative, makes sense!
 ```
+
+## Coming back on high-forest
+
+I am not a big fan of what I did for the hight forest (HF), especially because I aggregated stuff that I definitively not HF. What I can do, is to compute at the individual level the expansion factor and see if there is any correlation with its origin (`orig`) and with the vertical structure of the stand, `sver`. The second problem I forsee is the correlation that I computed. I suspect that it comes from south-east only, as most of France is rated as HF with my method...
+
+So here, the question is to see if there is any difference between the seed group and the sprout group per class diameter.
+
+```{r}
+library(ggplot2)
+nfi_data[, exp_factor := total_volume/bole_volume]
+
+nfi_data[exp_factor < 2] |> ggplot(aes(x = interaction(origin, class), y = exp_factor,
+		fill = interaction(origin, class))) +
+	geom_violin() +
+	viridis::scale_fill_viridis(discrete = TRUE, alpha = 0.6, option = "A") +
+	hrbrthemes::theme_ipsum() +
+	theme(
+		legend.position = "none",
+		plot.title = element_text(size = 11)
+	) +
+	ggtitle("Violin chart") +
+	xlab("")
+```
+
+Ain't no difference to me... At the same time, differences can only originate from the differrence in bole volume, since the model converts bole volume into total volume without any other explanatory variable. So there is nothing else to look for!
