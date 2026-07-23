@@ -310,6 +310,25 @@ swiss_sp[speciesName_sci == "Other broadleaves, incl. Sorbus spp and Tilia spp",
 codesessences = merge.data.table(x = codesessences, y = swiss_sp, all.x = TRUE, by = "speciesName_sci")
 ```
 
+### Forest structure
+
+In the old data (INRA), the forest structure is unknown. however, in the data collected in 2009--2010, the forest structure is recorded. I clean it and translate it here.
+
+```{r}
+setDT(codesstructures)
+
+codesstructures = unique(codesstructures[, .(structure_uniformise, nomstructure_uniformise)])
+setnames(codesstructures, new = c("str_code", "str_name"))
+codesstructures[str_name == "inconnu", str_name := "unknown"]
+codesstructures[str_name == "un étage", str_name := "single-layered"]
+codesstructures[str_name == "jardinée", str_name := "uneven-aged"]
+codesstructures[str_name == "deux étages", str_name := "two-layered"]
+codesstructures[str_name == "taillis", str_name := "coppice"]
+codesstructures[str_name == "TSF", str_name := "coppice-with-standards"]
+
+codesstructures[, str_name := as.character(str_name)]
+```
+
 ### Clean the datasets and compute new variables
 
 Keep only the columns of interest, change column names, transform everything to `data.table` for INRA data and for helper data tables (`codesforets`, which contains coordinates, and `codesessences`, which contains species codes):
@@ -344,8 +363,12 @@ inra_arbres[, year := format(as.Date(date, "%Y-%m-%d"), "%Y")]
 ## Keep only column of interest and rename them
 inra_arbres = unique(inra_arbres[, .(nom_fichier, id_codesessences, circumference_m, h_tot,
 	total_volume_m3, v_tronc_verif, crown_volume_m3, genre, id_codesforets, year, presence_NA)])
+
+# Add coordinates
 inra_arbres = merge.data.table(inra_arbres, codesforets[, .(id, longitude, latitude)],
 	by.x = "id_codesforets", by.y = "id", all.x = TRUE)
+
+# Add species name
 inra_arbres = merge.data.table(inra_arbres, codesessences[, .(essence, speciesName_sci, fct_type)],
 	by.x = "id_codesessences", by.y = "essence")
 
@@ -1049,11 +1072,11 @@ Don't bother with that, and read @Santenoise2012. Note that the method described
 
 ### Join my reconstructions together
 
-Here, I join both profile and branches tables. As said in the previous section, I do no check the volume for the twigs and I those provided by Emerge.
+Here, I join both profile and branches tables. As said in the previous section, I do no check the volume for the twigs and I use those provided by Emerge.
 
 ```{r}
 ## Join both profile and branches table
-build_check_data = function(branches, profiles, trees, species, plots)
+build_check_data = function(branches, profiles, trees, structure, species, plots)
 {
 	if (!all(c("tree_id", "branch_volume") %in% colnames(branches)))
 		stop("The branches data table must have tree_id and branch_volume columns")
@@ -1061,7 +1084,8 @@ build_check_data = function(branches, profiles, trees, species, plots)
 	if (!all(c("tree_id", "bole_volume_conic_m3", "height") %in% colnames(profiles)))
 		stop("The profiles data table must have tree_id, bole_volume_conic_m3, and height columns")
 
-	ls_names = c("tree", "id_codesforets", "id_codesessences", "c130", "v_menu_verif", "hauteurdecoupe7_m")
+	ls_names = c("tree", "id_codesforets", "id_codesessences", "id_codesstructures", "c130",
+		"v_menu_verif", "hauteurdecoupe7_m")
 	if (!all(ls_names %in% colnames(trees)))
 		stop(paste("The trees data table must have", paste0(ls_names, collapse = " "), "columns"))
 	
@@ -1071,9 +1095,12 @@ build_check_data = function(branches, profiles, trees, species, plots)
 	emerge = merge.data.table(x = unique(branches[, .(tree_id, branch_volume)]),
 		y = unique(profiles[, .(tree_id, height, bole_volume_conic_m3)]), all.y = TRUE)
 
-	emerge = merge.data.table(emerge, trees[, .(tree, id_codesforets, id_codesessences,
+	emerge = merge.data.table(emerge, trees[, .(tree, id_codesforets, id_codesessences, id_codesstructures,
 		taper_height = hauteurdecoupe7_m, circumference_m = c130/100, twig_volume = v_menu_verif)],
 		by.x = "tree_id", by.y = "tree")
+
+	emerge = merge.data.table(emerge, structure, by.x = "id_codesstructures", by.y = "str_code", all.x = TRUE)
+	emerge[, id_codesstructures := NULL]
 
 	emerge = merge.data.table(emerge, species[, .(essence, nfi, speciesName_sci, fct_type)],
 		by.x = "id_codesessences", by.y = "essence", all.x = TRUE)
@@ -1101,11 +1128,11 @@ build_check_data = function(branches, profiles, trees, species, plots)
 }
 
 emerge_2009 = build_check_data(emerge_bure09_branches, emerge_bure09_profils, emerge_bure09_arbres,
-	codesessences, codesforets)
+	codesstructures, codesessences, codesforets)
 
 setnames(emerge_2010_arbres, old = "longueur_d7_m", new = "hauteurdecoupe7_m")
 emerge_2010 = build_check_data(emerge_2010_branches, emerge_2010_profils, emerge_2010_arbres,
-	codesessences, codesforets)
+	codesstructures, codesessences, codesforets)
 
 emerge = rbindlist(list(emerge_2009 = emerge_2009, emerge_2010 = emerge_2010), idcol = "dataset")
 setkey(emerge, speciesName_sci)

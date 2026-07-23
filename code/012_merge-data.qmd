@@ -115,6 +115,7 @@ setkey(swiss, speciesName_sci)
 
 ## Modern Emerge data
 emerge = readRDS(paste0(mnt_point, "data/emerge_2009-2010.rds"))
+emerge[, str_name := NULL] # Remove the structure, that I added on 23rd July 2026
 emerge[, year := as.integer(stringi::stri_replace_all(str = dataset, replacement = "", regex = "emerge_"))]
 emerge = emerge[, .(speciesName_sci, tree_id, fct_type, year, circumference_m, height, taper_height,
 	bole_volume_m3 = bole_volume_conic_m3, total_volume_m3)]
@@ -246,6 +247,8 @@ I add few columns.
 ```{r}
 chs_data[, genus := stri_sub(str = speciesName_sci,
 	to = stri_locate_first(str = speciesName_sci, regex = " ")[, "start"] - 1)]
+
+tree_dt[, r := bole_volume_m3/total_volume_m3]
 ```
 
 ### Maps of plots location
@@ -276,9 +279,9 @@ spain = project(vect(paste0(mnt_point, "data/shapefiles/spain/gadm41_ESP_0.shp")
 
 fr_ch = project(rbind(france, switzerland), coords_inra)
 
-## Plot
-pdf("../../../writing/article_allometry/pictures/map2.pdf")
-plot(fr_ch, lwd = 2, axes = FALSE)
+## Plot (complete map)
+pdf("../../../writing/article_allometry/pictures/map.pdf")
+plot(fr_ch, lwd = 2, axes = FALSE, mar = c(0,0,0,0))
 points(coords_nfi, col = ls_colours["nfi"], pch = 20, cex = 0.35)
 points(coords_inra, col = ls_colours["inra"], pch = 20, cex = 1.15)
 points(project(coords_swiss, coords_inra), col = ls_colours["swiss"], pch = 20, cex = 0.55)
@@ -289,6 +292,23 @@ plot(belgium, lwd = 2, add = TRUE)
 plot(italy, lwd = 2, add = TRUE)
 plot(spain, lwd = 2, add = TRUE)
 # legend(x = "bottomleft", legend = c("Emerge", "NFI", "EFM"), fill = ls_colours[c("inra", "nfi", "swiss")], bty = "n", inset = c(0, 0.1))
+dev.off()
+
+## Plot (complete map)
+zone = ext(790000, 1223754, 2083276, 2545838) # xmin, xmax, ymin, ymax
+fr_ch_cropped = intersect(x = as.lines(fr_ch), y = zone) # as.lines is to avoid artificial lines to close polygons
+current_ext = ext(fr_ch_cropped)
+height = 7
+width = (current_ext[2] - current_ext[1])/(current_ext[4] - current_ext[3])*height
+pdf("../../../writing/article_allometry/pictures/map-cropped.pdf", height = height, width = width)
+plot(fr_ch_cropped, lwd = 2, axes = FALSE, mar = c(0,0,0,0), buffer = FALSE)
+points(coords_nfi, col = ls_colours["nfi"], pch = 20, cex = 0.35)
+points(coords_inra, col = ls_colours["inra"], pch = 20, cex = 1.25)
+points(project(coords_swiss, coords_inra), col = ls_colours["swiss"], pch = 20, cex = 0.65)
+plot(fr_ch_cropped, lwd = 2, add = TRUE, bg = "transparent")
+plot(luxembourg, lwd = 2, add = TRUE)
+plot(germany, lwd = 2, add = TRUE)
+plot(belgium, lwd = 2, add = TRUE)
 dev.off()
 ```
 
@@ -304,23 +324,29 @@ The data are composed by the following species:
 #| fig-width: 9
 
 ## Create nb indiv data
-species_nb = unique(chs_data[speciesName_sci != "fruits"][origin %in% c("swiss", "emerge", "inra"),
-	.(N = .N, colour), by = .(genus, origin)])
+chs_data[origin == "emerge", c("origin", "colour") := .("inra", ls_colours["inra"])] # Merge Emerge modern with inra
+species_nb = unique(chs_data[speciesName_sci != "fruits"][origin %in% c("swiss", "inra"),
+	.(N = .N, colour), by = .(speciesName_sci, origin)])
 
-species_nb[, tot := sum(N), by = genus]
+species_nb[, tot := sum(N), by = speciesName_sci]
 setorder(species_nb, tot)
+
+sp_comp = unique(tree_dt[(direct_fit), .(speciesName_sci, tot = n_indiv)])
+sp_comp[, percent := round(100*tot/sum(tot), 3)]
+sp_comp[, sum(percent)]
+setorder(sp_comp, percent)
 
 par(mar = c(5, 12, 2, 2))
 
 ## Use barplot fct (for preview)
-ll = dcast.data.table(species_nb, colour ~ genus, value.var = "N", fill = 0)
+ll = dcast.data.table(species_nb, colour ~ speciesName_sci, value.var = "N", fill = 0)
 # cols = colnames(ll[, .SD, .SDcols = !patterns("^colour")])
 # ll[, (cols) := lapply(X = .SD, FUN = function(x) fcase(x == 0, 0, x > 0, log1p(x))), .SDcols = cols]
 ll = as.matrix(ll, rownames = "colour")
 
-ord = species_nb[, sum(N), by = genus][order(V1)]
+ord = species_nb[, sum(N), by = speciesName_sci][order(V1)]
 
-ll = ll[, ord[, genus]]
+ll = ll[, ord[, speciesName_sci]]
 
 # Get the stacked barplot
 barplot(ll,
@@ -334,7 +360,20 @@ barplot(ll,
 	horiz = TRUE, # Horizontal bars
 	xlab = "Number of individuals")
 
-fwrite(species_nb[, .(genus, origin, N)], "../../../writing/article_allometry/data/n_indiv.csv")
+# Subset for Tikz plot, merge Emerge and Inra
+species_nb = species_nb[tot > 150, .(speciesName_sci, origin, N)]
+species_nb = dcast.data.table(data = species_nb, formula = speciesName_sci ~ origin, value.var = "N",
+	fill = 0)
+species_nb[, tot := inra + swiss]
+species_nb[, percent_inra := 100*inra/tot]
+species_nb[, percent_swiss := 100*swiss/tot]
+
+species_nb[speciesName_sci %in% c("Abies alba", "Fagus sylvatica", "Picea abies"), 100*sum(swiss)/sum(tot)]
+
+setorder(species_nb, tot)
+
+if (!file.exists("../../../writing/article_allometry/data/n_indiv.csv"))
+	fwrite(species_nb, "../../../writing/article_allometry/data/n_indiv.csv")
 ```
 
 ### Distribution of the data in terms of circumference, height, slenderness
@@ -373,6 +412,10 @@ axis(1)
 axis(2, las = 1)
 legend(x = "topright", legend = c("Emerge", "NFI", "EFM"), fill = ls_colours[c("inra", "nfi", "swiss")], bty = "n")
 
+if (!file.exists("../../../writing/article_allometry/data/densities_circumference.csv"))
+	fwrite(data.table(xfr = dd_fr$x, yfr = dd_fr$y, xin = dd_in$x, yin = dd_in$y,
+		xch = dd_ch$x, ych = dd_ch$y), "../../../writing/article_allometry/data/densities_circumference.csv")
+
 # --- Heights
 dd_fr = density(chs_data[origin == "nfi", height]) # French NFI
 dd_ch = density(chs_data[origin == "swiss", height]) # EFM data
@@ -392,13 +435,18 @@ axis(1)
 axis(2, las = 1)
 legend(x = "topright", legend = c("Emerge", "NFI", "EFM"), fill = ls_colours[c("inra", "nfi", "swiss")], bty = "n")
 
+if (!file.exists("../../../writing/article_allometry/data/densities_height.csv"))
+	fwrite(data.table(xfr = dd_fr$x, yfr = dd_fr$y, xin = dd_in$x, yin = dd_in$y,
+		xch = dd_ch$x, ych = dd_ch$y), "../../../writing/article_allometry/data/densities_height.csv")
+
 # --- Slenderness
 dd_fr = density(chs_data[origin == "nfi", height/circumference_m]) # French NFI
 dd_ch = density(chs_data[origin == "swiss", height/circumference_m]) # EFM data
 dd_in = density(chs_data[origin %in% c("emerge", "inra"), height/circumference_m], na.rm = TRUE) # Inra/Emerge data
 
-fwrite(data.table(xfr = dd_fr$x, yfr = dd_fr$y, xin = dd_in$x, yin = dd_in$y,
-	xch = dd_ch$x, ych = dd_ch$y), "../../../writing/article_allometry/data/densities_slenderness.csv")
+if (!file.exists("../../../writing/article_allometry/data/densities_slenderness.csv"))
+	fwrite(data.table(xfr = dd_fr$x, yfr = dd_fr$y, xin = dd_in$x, yin = dd_in$y,
+		xch = dd_ch$x, ych = dd_ch$y), "../../../writing/article_allometry/data/densities_slenderness.csv")
 
 plot(dd_fr, col = ls_colours["nfi"], axes = FALSE, lwd = 3, xlab = "Slenderness (height/circumference)", main = "",
 	ylim = c(0, max(dd_fr$y, dd_in$y, dd_ch$y)))
@@ -413,4 +461,98 @@ polygon(dd_ch, col = paste0(ls_colours["swiss"], "AA"))
 axis(1)
 axis(2, las = 1)
 legend(x = "topright", legend = c("Emerge", "NFI", "EFM"), fill = ls_colours[c("inra", "nfi", "swiss")], bty = "n")
+```
+
+### Overlap of the data
+
+So far, for the overlap, I just plot both datasets on top of each other (see `11_yang.qmd`). However, that is not the best and contour plots like the one below (generated by AI) would be quite good as it shows both the distribution in bole volumes and ratios.
+
+![AI generated contour plot for *Pseudotsuga menziesii*](AI_generated-contourPlot.png)
+
+I now prepare the contour plots that will be handled by [contour lua](https://tikz.dev/pgfplots/reference-3dplots#sec-4.6.8) which requires `luatex` (not a problem as I already use it). It only requires a matrix input correctly formatted (a csv file with line jump at each change of y coordinate, as described [here](https://tikz.dev/pgfplots/reference-3dplots#sec-4.6.2)).
+
+Option 1, code made by myself:
+```{r}
+kde_to_contour_csv = function(dt, sp, origin, n = 100)
+{
+	if (!all(c("bole_volume_m3", "r") %in% names(dt)))
+		stop("Missing columns")
+	
+	# Create list (x, y, z), where z is a matrix evaluated at the cartesian cross product (x, y)
+	k = MASS::kde2d(dt[, bole_volume_m3], dt[, r], n = n,
+		lims = c(dt[, 0.9*min(bole_volume_m3)], dt[, 1.1*max(bole_volume_m3)], dt[, 0.9*min(r)], dt[, 1.1*max(r)]))
+	# lims works her because all the quantities are positive, otherwise, I sjould check the sign!
+
+	# Reshape kernel k into a (x, y, z) table
+	coords = expand.grid(x = k$x, y = k$y)
+	coords$z = as.vector(k$z)
+
+	n = length(k$x)
+	filename = paste0("../../../writing/article_allometry/data/",
+		stri_replace(str = sp, regex = " ", replacement = "-"), origin, ".csv")
+	for (i in seq_along(k$x))
+	{
+		ind = ((i - 1)*n + 1):(i*n)
+		fwrite(x = coords[ind, ], file = filename, append = i > 1, col.names = i == 1)
+		# i.e., append only if i > 1 (so at i = 1, file is erased) and header only for i = 1
+		if (i < n)
+			cat("\n", file = filename, append = TRUE)
+	}
+
+	return(k)
+}
+
+selected_sp = c("Abies alba", "Picea abies", "Pinus sylvestris", "Pseudotsuga menziesii",
+	"Fagus sylvatica", "Quercus petraea")
+for (sp in selected_sp)
+{
+	dt = tree_dt[speciesName_sci == sp][origin != "swiss"]
+	if (dt[, .N] > 0)
+		qq = kde_to_contour_csv(dt, sp = sp, origin = "_fr", n = 100)
+
+	dt = tree_dt[speciesName_sci == sp][origin == "swiss"]
+	if (dt[, .N] > 0)
+		qq = kde_to_contour_csv(dt, sp = sp, origin = "_ch", n = 100)
+}
+
+
+## Tested everything, especially the order of writting in kde2d and reading in lualatex
+# sp = "test"
+# dt = data.table(bole_volume_m3 = 1:5, r = c(5, 5.2, 5, 6, 6.35))
+# # fwrite(coords, "contour.csv")
+
+# k = MASS::kde2d(1:5, c(5, 5.2, 5, 6, 6.35), n = 100)
+# n = length(k$x)
+# delta_x = (5 - 1)/(n - 1)
+# delta_y = (6.35 - 5)/(n - 1)
+# all.equal(k$x, seq(1, 5, by = delta_x))
+# all.equal(k$y, seq(5, 6.35, by = delta_y))
+
+# k$z
+
+# coords = expand.grid(x = k$x, y = k$y)
+# coords$z = as.vector(k$z)
+# # Chaque ligne est pour un x constant, et chaque colonne est pour un y constant.
+# # Donc, dans coords, je devrais retrouver chaque ligne toutes les 5 valeurs:
+# setDT(coords)
+# all.equal(k$z[1, ], coords[seq(1, .N, by = n), z])
+# all.equal(k$z[2, ], coords[seq(2, .N, by = n), z])
+# all.equal(k$z[3, ], coords[seq(3, .N, by = n), z])
+# all.equal(k$z[4, ], coords[seq(4, .N, by = n), z])
+
+# all.equal(k$z[n - 1, ], coords[seq(n - 1, .N, by = n), z])
+# all.equal(k$z[n, ], coords[seq(n, .N, by = n), z])
+
+# qq = kde_to_contour_csv(dt, sp = "test", n = 100)
+
+# all.equal(qq, k)
+
+# filled.contour(k,
+# 	plot.axes = {
+# 		axis(1)
+# 		axis(2, las = 1)
+# 		contour(k, add = TRUE, lwd = 2, axes = NULL)
+# 	}, xlab = "Circumference", ylab = "Height", frame.plot = FALSE,
+# 	color.palette = colorRampPalette(met.brewer("Hiroshige", direction = -1))
+# )
 ```
