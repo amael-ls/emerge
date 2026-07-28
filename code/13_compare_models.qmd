@@ -519,23 +519,26 @@ comparison = function(sp, tree_dt, woodstock_seed = 1969 - 08 - 18, printPlot = 
 
 	## Compare both models based on psisloo and weights
 	comp = loo::loo_compare(list(old = loo_old, new = loo_new, sub = loo_sub))
-	best = rownames(comp)[1]
+	best = comp[1, "model"]
 
 	weights = head(loo::loo_model_weights(x = list(old = loo_old, new = loo_new, sub = loo_sub),
 		method = "stacking")) # I use head to return a named vector
 
 	## R squared
-	var_fit_old = apply(X = posterior::as_draws_matrix(sim_old$draws("v_gen_mean")),
+	var_fit_old = apply(X = posterior::as_draws_matrix(sim_old$draws("r_gen_mean")),
 		MARGIN = 1, FUN = var)
-	var_res_old = sim_old$draws("sigma_var")
+	var_res_old = apply(X = posterior::as_draws_matrix(sim_old$draws("sigma_var")),
+		MARGIN = 1, FUN = mean)
 
-	var_fit_new = apply(X = posterior::as_draws_matrix(sim_new$draws("v_gen_mean")),
+	var_fit_new = apply(X = posterior::as_draws_matrix(sim_new$draws("r_gen_mean")),
 		MARGIN = 1, FUN = var)
-	var_res_new = sim_new$draws("sigma_var")
+	var_res_new = apply(X = posterior::as_draws_matrix(sim_new$draws("sigma_var")),
+		MARGIN = 1, FUN = mean)
 	
-	var_fit_sub = apply(X = posterior::as_draws_matrix(sim_sub$draws("v_gen_mean")),
+	var_fit_sub = apply(X = posterior::as_draws_matrix(sim_sub$draws("r_gen_mean")),
 		MARGIN = 1, FUN = var)
-	var_res_sub = sim_sub$draws("sigma_var")
+	var_res_sub = apply(X = posterior::as_draws_matrix(sim_sub$draws("sigma_var")),
+		MARGIN = 1, FUN = mean)
 
 	rsq_old = var_fit_old / (var_fit_old + var_res_old)
 	rsq_new = var_fit_new / (var_fit_new + var_res_new)
@@ -673,19 +676,21 @@ comparison_yang_sub = function(sp, tree_dt, woodstock_seed = 1969 - 08 - 18, pri
 
 	## Compare both models based on psisloo and weights
 	comp = loo::loo_compare(list(yang = loo_new, sub = loo_sub))
-	best = rownames(comp)[1]
+	best = comp[1, "model"]
 
 	weights = head(loo::loo_model_weights(x = list(yang = loo_new, sub = loo_sub),
 		method = "stacking")) # I use head to return a named vector
 
 	## R squared
-	var_fit_new = apply(X = posterior::as_draws_matrix(sim_new$draws("v_gen_mean")),
+	var_fit_new = apply(X = posterior::as_draws_matrix(sim_new$draws("r_gen_mean")),
 		MARGIN = 1, FUN = var)
-	var_res_new = sim_new$draws("sigma_var")
+	var_res_new = apply(X = posterior::as_draws_matrix(sim_new$draws("sigma_var")),
+		MARGIN = 1, FUN = mean)
 	
-	var_fit_sub = apply(X = posterior::as_draws_matrix(sim_sub$draws("v_gen_mean")),
+	var_fit_sub = apply(X = posterior::as_draws_matrix(sim_sub$draws("r_gen_mean")),
 		MARGIN = 1, FUN = var)
-	var_res_sub = sim_sub$draws("sigma_var")
+	var_res_sub = apply(X = posterior::as_draws_matrix(sim_sub$draws("sigma_var")),
+		MARGIN = 1, FUN = mean)
 
 	rsq_new = var_fit_new / (var_fit_new + var_res_new)
 	rsq_sub = var_fit_sub / (var_fit_sub + var_res_sub)
@@ -695,6 +700,7 @@ comparison_yang_sub = function(sp, tree_dt, woodstock_seed = 1969 - 08 - 18, pri
 		best = best, comploo = comp, weights = weights,
 		warning_loo_yang = warning_loo_new, warning_loo_sub = warning_loo_sub, warning = warn,
 		avg_yang = mean(rsq_new), avg_sub = mean(rsq_sub),
+		rsq_distrib = list(yang = rsq_new, sub = rsq_sub),
 		rhat_yang = rhat_yang_m, rhat_sub = rhat_sub_m))
 }
 
@@ -889,7 +895,7 @@ if (file.exists("./yang/comparison_new-sub.rds"))
 		temp = comparison_yang_sub(sp = sp, tree_dt = tree_dt)
 		save_ls[[sp]] = temp
 		comp[.(sp), c("best", "elpd_diff", "se_diff", "warning") :=
-			.(temp$best, temp$comploo[2, 1], temp$comploo[2, 2], temp$warning)]
+			.(temp$comploo[1, "model"], temp$comploo[2, "elpd_diff"], temp$comploo[2, "se_diff"], temp$warning)]
 
 		weights_dt[.(sp), c("best", "W_yang", "W_sub") :=
 			.(temp$best, temp$weights["yang"], temp$weights["sub"])]
