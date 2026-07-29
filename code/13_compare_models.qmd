@@ -418,6 +418,15 @@ ratio_vallet_fit = function(fit, sim, nfi_data, n_draws = NULL, simplif = FALSE)
 	axis(2, las = 1)
 }
 
+## Function to compute the ratio according to Yang's formula
+r_func = function(x, pars)
+{
+	return ((pars["m"] - pars["c"]) * exp(pars["j"] - pars["k"]*x) * (pars["k"]*x/pars["j"])^pars["j"] +
+		pars["c"] - (pars["c"] - pars["n"])*exp(-pars["s"]*x));
+}
+
+
+
 ## Function to compare models, based on PSIS-LOO
 comparison = function(sp, tree_dt, woodstock_seed = 1969 - 08 - 18, printPlot = FALSE)
 {
@@ -543,6 +552,59 @@ comparison = function(sp, tree_dt, woodstock_seed = 1969 - 08 - 18, printPlot = 
 	rsq_old = var_fit_old / (var_fit_old + var_res_old)
 	rsq_new = var_fit_new / (var_fit_new + var_res_new)
 	rsq_sub = var_fit_sub / (var_fit_sub + var_res_sub)
+
+	# Same R squared, but on volume. This requires transformations (see notebook 4, entry 29.07.2026)
+	a_mat <- posterior::as_draws_matrix(sim_new$draws("shape1_new"))
+
+	if (min(a_mat) <= 2)
+		warning("The analytical calculus does not work!")
+
+	b_mat <- posterior::as_draws_matrix(sim_new$draws("shape2_new"))
+
+	var_1_over_r <- b_mat * (a_mat + b_mat - 1) / ((a_mat - 1)^2 * (a_mat - 2))
+
+	n_draws <- nrow(a_mat)
+	v_bole  <- stanData[["bole_volume_m3_new"]]
+
+	V_mat <- matrix(v_bole, nrow = n_draws, ncol = length(v_bole), byrow = TRUE)
+
+	sigma_v_mat_exact <- V_mat^2 * var_1_over_r
+	# sigma_v_mat <- sweep(var_1_over_r, MARGIN = 2, STATS = stanData[["bole_volume_m3_new"]]^2, FUN = "*")
+
+	#! VERIF TO DELETE AFTER --------------------
+	a <- a_mat[1, 1]
+	b <- b_mat[1, 1]
+	toto <- 1 / rbeta(1e6, a, b)
+
+	var(toto)                    # Monte Carlo Var(1/r)
+	var_1_over_r[1, 1]           # closed-form Var(1/r) — should be close
+
+	Vbole <- stanData$bole_volume_m3_new[1]   # note: _new, matching sim_new/a_mat's N_new indexing
+	Vbole^2 * var(toto)          # Monte Carlo Var(V_tot)
+	sigma_v_mat_exact[1, 1]     
+	#! STOP VERIF -------------------- YES IT WORK PUYA!!!
+
+	var_fit_new <- apply(posterior::as_draws_matrix(sim_new$draws("v_gen_mean")), 1, var)
+	var_res_new <- apply(sigma_v_mat_exact, 1, mean)
+
+	rsq_v <- var_fit_new / (var_fit_new + var_res_new)
+
+	median(rsq_v)
+	quantile(rsq_v, c(0.025, 0.975))
+
+	# R2 based on LOO, see https://avehtari.github.io/bayes_R2/bayes_R2.html
+	loo_result = loo::loo(x = sim_new$draws("log_lik"), r_eff = r_eff_new, cores = 8, save_psis = TRUE)
+
+	# LOO weighted predictive expectation for each observation, using existing posterior draws + PSIS weights
+	mu_loo = loo::E_loo(posterior::as_draws_matrix(sim_new$draws("r_gen_mean")),
+		psis_object = loo_result$psis_object, type = "mean",
+		log_ratios = -posterior::as_draws_matrix(sim_new$draws("log_lik")))$value
+
+	# Residuals LOO: Observation - weighted predictive expectation (computed above)
+	e_loo = tree_dt[.(sp), r] - mu_loo
+
+	# Compute R2_loo, 1 - var(residuals loo)/var(observation). Note that the /(N - 1) simplifies
+	r2_loo = 1 - sum(e_loo^2) / sum((tree_dt[.(sp), r] - mean(tree_dt[.(sp), r]))^2)
 
 	## Return results
 	return (list(
@@ -681,7 +743,7 @@ comparison_yang_sub = function(sp, tree_dt, woodstock_seed = 1969 - 08 - 18, pri
 	weights = head(loo::loo_model_weights(x = list(yang = loo_new, sub = loo_sub),
 		method = "stacking")) # I use head to return a named vector
 
-	## R squared
+	## R squared, Gelman 2019 version
 	var_fit_new = apply(X = posterior::as_draws_matrix(sim_new$draws("r_gen_mean")),
 		MARGIN = 1, FUN = var)
 	var_res_new = apply(X = posterior::as_draws_matrix(sim_new$draws("sigma_var")),
@@ -695,12 +757,34 @@ comparison_yang_sub = function(sp, tree_dt, woodstock_seed = 1969 - 08 - 18, pri
 	rsq_new = var_fit_new / (var_fit_new + var_res_new)
 	rsq_sub = var_fit_sub / (var_fit_sub + var_res_sub)
 
+	# R2 based on LOO, see https://avehtari.github.io/bayes_R2/bayes_R2.html
+	loo_result = loo::loo(x = sim_new$draws("log_lik"), r_eff = r_eff_new, cores = 8, save_psis = TRUE)
+	loo_result_sub = loo::loo(x = sim_sub$draws("log_lik"), r_eff = r_eff_sub, cores = 8, save_psis = TRUE)
+
+	# LOO weighted predictive expectation for each observation, using existing posterior draws + PSIS weights
+	mu_loo = loo::E_loo(posterior::as_draws_matrix(sim_new$draws("r_gen_mean")),
+		psis_object = loo_result$psis_object, type = "mean",
+		log_ratios = -posterior::as_draws_matrix(sim_new$draws("log_lik")))$value
+	
+	mu_loo_sub = loo::E_loo(posterior::as_draws_matrix(sim_sub$draws("r_gen_mean")),
+		psis_object = loo_result$psis_object, type = "mean",
+		log_ratios = -posterior::as_draws_matrix(sim_sub$draws("log_lik")))$value
+
+	# Residuals LOO: Observation - weighted predictive expectation (computed above)
+	e_loo = tree_dt[.(sp), r] - mu_loo
+	e_loo_sub = tree_dt[.(sp), r] - mu_loo_sub
+
+	# Compute R2_loo, 1 - var(residuals loo)/var(observation). Note that the /(N - 1) simplifies
+	r2_loo = 1 - sum(e_loo^2) / sum((tree_dt[.(sp), r] - mean(tree_dt[.(sp), r]))^2)
+	r2_loo_sub = 1 - sum(e_loo_sub^2) / sum((tree_dt[.(sp), r] - mean(tree_dt[.(sp), r]))^2)
+
 	## Return results
 	return (list(
 		best = best, comploo = comp, weights = weights,
 		warning_loo_yang = warning_loo_new, warning_loo_sub = warning_loo_sub, warning = warn,
 		avg_yang = mean(rsq_new), avg_sub = mean(rsq_sub),
 		rsq_distrib = list(yang = rsq_new, sub = rsq_sub),
+		rsq_loo = list(yang = r2_loo, sub = r2_loo_sub),
 		rhat_yang = rhat_yang_m, rhat_sub = rhat_sub_m))
 }
 
@@ -871,7 +955,8 @@ weights_dt = data.table(species = ls_species, best = "", W_yang = -Inf, W_sub = 
 
 rhat_dt = data.table(species = ls_species, Rhat_yang = -Inf, Rhat_sub = -Inf, key = "species")
 
-R2D2 = data.table(species = ls_species, R2_yang = -Inf, R2_sub = -Inf, key = "species")
+R2D2 = data.table(species = ls_species, R2_yang = -Inf, R2_sub = -Inf,
+	R2_loo_yang = -Inf, R2_loo_sub = -Inf, key = "species")
 
 if (file.exists("./yang/comparison_new-sub.rds"))
 {
@@ -901,6 +986,7 @@ if (file.exists("./yang/comparison_new-sub.rds"))
 			.(temp$best, temp$weights["yang"], temp$weights["sub"])]
 
 		R2D2[.(sp), c("R2_yang", "R2_sub") := .(temp[["avg_yang"]], temp[["avg_sub"]])]
+		R2D2[.(sp), c("R2_loo_yang", "R2_loo_sub") := .(temp[["rsq_loo"]][["yang"]], temp[["rsq_loo"]][["sub"]])]
 
 		rhat_dt[sp, c("Rhat_yang", "Rhat_sub") := .(temp[["rhat_yang"]], temp[["rhat_sub"]])]
 	}
@@ -952,17 +1038,20 @@ if (!file.exists("./yang/rmse.rds"))
 		rmse_ls[[sp]] = RMSE_bayes(sp, tree_dt, is_simplif)
 	}
 
-	tt = apply(X = rmse_ls, MARGIN = 1, FUN = )
-	tt = rbindlist(rmse_ls, idcol = "species")
+	rmse_mape_dt = rbindlist(rmse_ls, idcol = "species")
 
-	tt = as.data.table(do.call(rbind, tt), keep.rownames = "species")
-	tt[, .(as.list(quantile(rmse, probs = c(0, 0.025, 0.5, 0.975, 1))),
-		as.list(quantile(mape, probs = c(0, 0.025, 0.5, 0.975, 1)))), by = species]
-	saveRDS(rmse_ls, "./yang/rmse_ls.rds")
-	saveRDS(tt, "./yang/rmse.rds")
-	fwrite(tt, "../../../writing/article_allometry/data/rmse.csv")
+	rmse_mape_summary = rmse_mape_dt[, .(
+		rmse_min = min(rmse), rmse_q025 = quantile(rmse, 0.025), rmse_q50 = median(rmse),
+		rmse_q975 = quantile(rmse, 0.975), rmse_max = max(rmse),
+		
+		mape_min = min(mape), mape_q025 = quantile(mape, 0.025), mape_q50 = median(mape),
+		mape_q975 = quantile(mape, 0.975), mape_max = max(mape)),
+	by = species]
+	saveRDS(rmse_mape_dt, "./yang/rmse_ls.rds")
+	saveRDS(rmse_mape_summary, "./yang/rmse.rds")
+	fwrite(rmse_mape_summary, "../../../writing/article_allometry/data/rmse.csv")
 } else {
-	tt = readRDS("./yang/rmse.rds")
+	rmse_mape_summary = readRDS("./yang/rmse.rds")
 }
 ```
 
@@ -1018,8 +1107,6 @@ fwrite(comp, "../../../writing/article_allometry/data/comparison.csv", na = "NaN
 ## Merge R2D2 with Flopp results
 flopp_r2 = readRDS("../../gohon_florence/rsquared.rds")[, .(speciesName_sci, R2_flopp, N)]
 
-# R2D2 = copy(ll)
-
 R2D2 = merge.data.table(R2D2, flopp_r2, by.x = "species", by.y = "speciesName_sci", all.x = TRUE)
 R2D2 = merge.data.table(R2D2, comp[, .(species, best)], by = "species")
 
@@ -1032,7 +1119,7 @@ R2D2[, R2_selected := ifelse(selected == "yang", R2_yang, R2_sub)]
 R2D2[, best := NULL]
 
 ## Add column RMSE
-R2D2 = merge.data.table(R2D2, tt[, .(species, rmse_med = `50%`)], by = "species")
+R2D2 = merge.data.table(R2D2, rmse_mape_summary[, .(species, rmse_med = rmse_q50)], by = "species")
 
 mean_totvol = tree_dt[, .(meanV = mean(total_volume_m3), q25 = quantile(total_volume_m3, 0.25),
 	q50 = quantile(total_volume_m3, 0.50), q75 = quantile(total_volume_m3, 0.75),
