@@ -533,7 +533,8 @@ comparison = function(sp, tree_dt, woodstock_seed = 1969 - 08 - 18, printPlot = 
 	weights = head(loo::loo_model_weights(x = list(old = loo_old, new = loo_new, sub = loo_sub),
 		method = "stacking")) # I use head to return a named vector
 
-	## R squared
+	## R squared based on Gelman 2019...
+	# ... for the ratio
 	var_fit_old = apply(X = posterior::as_draws_matrix(sim_old$draws("r_gen_mean")),
 		MARGIN = 1, FUN = var)
 	var_res_old = apply(X = posterior::as_draws_matrix(sim_old$draws("sigma_var")),
@@ -553,64 +554,34 @@ comparison = function(sp, tree_dt, woodstock_seed = 1969 - 08 - 18, printPlot = 
 	rsq_new = var_fit_new / (var_fit_new + var_res_new)
 	rsq_sub = var_fit_sub / (var_fit_sub + var_res_sub)
 
-	# Same R squared, but on volume. This requires transformations (see notebook 4, entry 29.07.2026)
-	a_mat <- posterior::as_draws_matrix(sim_new$draws("shape1_new"))
+	# ... for the volume. This requires rescaling (see notebook 4, entry 29.07.2026)
+	a_mat = posterior::as_draws_matrix(sim_new$draws("shape1_new")) # N_draws x N_obs
+	b_mat = posterior::as_draws_matrix(sim_new$draws("shape2_new")) # N_draws x N_obs
 
+	warning_rsq_vtot = FALSE
 	if (min(a_mat) <= 2)
+	{
+		warning_rsq_vtot = TRUE
 		warning("The analytical calculus does not work!")
+	}
 
-	b_mat <- posterior::as_draws_matrix(sim_new$draws("shape2_new"))
+	# Variance of 1/r, dim: N_draws x N_obs, each column being the draws for one individual
+	var_1_over_r = b_mat * (a_mat + b_mat - 1) / ((a_mat - 1)^2 * (a_mat - 2))
 
-	var_1_over_r <- b_mat * (a_mat + b_mat - 1) / ((a_mat - 1)^2 * (a_mat - 2))
+	# Now multiply by Vbole^2: 1st column with Vbole_1^2, ..., ith column with Vbole_1^2
+	sigma_vtot_mat = sweep(var_1_over_r, MARGIN = 2, STATS = stanData[["bole_volume_m3_new"]]^2, FUN = "*")
 
-	n_draws <- nrow(a_mat)
-	v_bole  <- stanData[["bole_volume_m3_new"]]
+	var_fit_vtot_new = apply(posterior::as_draws_matrix(sim_new$draws("v_gen_mean")), 1, var)
+	var_res_vtot_new = apply(sigma_vtot_mat, 1, mean)
 
-	V_mat <- matrix(v_bole, nrow = n_draws, ncol = length(v_bole), byrow = TRUE)
-
-	sigma_v_mat_exact <- V_mat^2 * var_1_over_r
-	# sigma_v_mat <- sweep(var_1_over_r, MARGIN = 2, STATS = stanData[["bole_volume_m3_new"]]^2, FUN = "*")
-
-	#! VERIF TO DELETE AFTER --------------------
-	a <- a_mat[1, 1]
-	b <- b_mat[1, 1]
-	toto <- 1 / rbeta(1e6, a, b)
-
-	var(toto)                    # Monte Carlo Var(1/r)
-	var_1_over_r[1, 1]           # closed-form Var(1/r) — should be close
-
-	Vbole <- stanData$bole_volume_m3_new[1]   # note: _new, matching sim_new/a_mat's N_new indexing
-	Vbole^2 * var(toto)          # Monte Carlo Var(V_tot)
-	sigma_v_mat_exact[1, 1]     
-	#! STOP VERIF -------------------- YES IT WORK PUYA!!!
-
-	var_fit_new <- apply(posterior::as_draws_matrix(sim_new$draws("v_gen_mean")), 1, var)
-	var_res_new <- apply(sigma_v_mat_exact, 1, mean)
-
-	rsq_v <- var_fit_new / (var_fit_new + var_res_new)
-
-	median(rsq_v)
-	quantile(rsq_v, c(0.025, 0.975))
-
-	# R2 based on LOO, see https://avehtari.github.io/bayes_R2/bayes_R2.html
-	loo_result = loo::loo(x = sim_new$draws("log_lik"), r_eff = r_eff_new, cores = 8, save_psis = TRUE)
-
-	# LOO weighted predictive expectation for each observation, using existing posterior draws + PSIS weights
-	mu_loo = loo::E_loo(posterior::as_draws_matrix(sim_new$draws("r_gen_mean")),
-		psis_object = loo_result$psis_object, type = "mean",
-		log_ratios = -posterior::as_draws_matrix(sim_new$draws("log_lik")))$value
-
-	# Residuals LOO: Observation - weighted predictive expectation (computed above)
-	e_loo = tree_dt[.(sp), r] - mu_loo
-
-	# Compute R2_loo, 1 - var(residuals loo)/var(observation). Note that the /(N - 1) simplifies
-	r2_loo = 1 - sum(e_loo^2) / sum((tree_dt[.(sp), r] - mean(tree_dt[.(sp), r]))^2)
+	rsq_v_new = var_fit_vtot_new / (var_fit_vtot_new + var_res_vtot_new)
 
 	## Return results
 	return (list(
 		best = best, comploo = comp, weights = weights,
 		warning_loo_old = warning_loo_old, warning_loo_new = warning_loo_new, warning_loo_sub = warning_loo_sub,
 		avg_old = mean(rsq_old), avg_new = mean(rsq_new), avg_sub = mean(rsq_sub),
+		distrib_rsq_vtot = rsq_v_new,
 		warning = warn))
 }
 
@@ -691,6 +662,7 @@ comparison_yang_sub = function(sp, tree_dt, woodstock_seed = 1969 - 08 - 18, pri
 	sub = readRDS(paste0(sub_file, ".rds"))
 
 	n_chains = new$num_chains()
+	n_draws = n_chains*new$metadata()$iter_sampling
 
 	## Compute max rhat for Yang and submodel
 	rhat_yang = posterior::summarise_draws(new$draws(), posterior::rhat)
@@ -720,11 +692,11 @@ comparison_yang_sub = function(sp, tree_dt, woodstock_seed = 1969 - 08 - 18, pri
 	## Compute PSIS-LOO...
 	# ... for new
 	r_eff_new = loo::relative_eff(exp(sim_new$draws("log_lik")), cores = 8)
-	loo_new = loo::loo(x = sim_new$draws("log_lik"), r_eff = r_eff_new, cores = 8)
+	loo_new = loo::loo(x = sim_new$draws("log_lik"), r_eff = r_eff_new, cores = 8, save_psis = TRUE)
 	
 	# ... for submodel
 	r_eff_sub = loo::relative_eff(exp(sim_sub$draws("log_lik")), cores = 8)
-	loo_sub = loo::loo(x = sim_sub$draws("log_lik"), r_eff = r_eff_sub, cores = 8)
+	loo_sub = loo::loo(x = sim_sub$draws("log_lik"), r_eff = r_eff_sub, cores = 8, save_psis = TRUE)
 
 	warning_loo_new = FALSE
 	if (any(loo_new$diagnostics$pareto_k >= 0.7))
@@ -743,7 +715,8 @@ comparison_yang_sub = function(sp, tree_dt, woodstock_seed = 1969 - 08 - 18, pri
 	weights = head(loo::loo_model_weights(x = list(yang = loo_new, sub = loo_sub),
 		method = "stacking")) # I use head to return a named vector
 
-	## R squared, Gelman 2019 version
+	## R squared based on Gelman 2019...
+	# ... for the ratio
 	var_fit_new = apply(X = posterior::as_draws_matrix(sim_new$draws("r_gen_mean")),
 		MARGIN = 1, FUN = var)
 	var_res_new = apply(X = posterior::as_draws_matrix(sim_new$draws("sigma_var")),
@@ -757,26 +730,78 @@ comparison_yang_sub = function(sp, tree_dt, woodstock_seed = 1969 - 08 - 18, pri
 	rsq_new = var_fit_new / (var_fit_new + var_res_new)
 	rsq_sub = var_fit_sub / (var_fit_sub + var_res_sub)
 
-	# R2 based on LOO, see https://avehtari.github.io/bayes_R2/bayes_R2.html
-	loo_result = loo::loo(x = sim_new$draws("log_lik"), r_eff = r_eff_new, cores = 8, save_psis = TRUE)
-	loo_result_sub = loo::loo(x = sim_sub$draws("log_lik"), r_eff = r_eff_sub, cores = 8, save_psis = TRUE)
-
-	# LOO weighted predictive expectation for each observation, using existing posterior draws + PSIS weights
-	mu_loo = loo::E_loo(posterior::as_draws_matrix(sim_new$draws("r_gen_mean")),
-		psis_object = loo_result$psis_object, type = "mean",
-		log_ratios = -posterior::as_draws_matrix(sim_new$draws("log_lik")))$value
+	# ... for the volume. This requires rescaling (see notebook 4, entry 29.07.2026)
+	rsq_vtot_fct = function(sim, Vbole = stanData[["bole_volume_m3_new"]])
+	{
+		# Get parameters of r ~ BetaDistribution(a, b)
+		a_mat = posterior::as_draws_matrix(sim$draws("shape1_new")) # N_draws x N_obs
+		b_mat = posterior::as_draws_matrix(sim$draws("shape2_new")) # N_draws x N_obs
 	
-	mu_loo_sub = loo::E_loo(posterior::as_draws_matrix(sim_sub$draws("r_gen_mean")),
-		psis_object = loo_result$psis_object, type = "mean",
-		log_ratios = -posterior::as_draws_matrix(sim_sub$draws("log_lik")))$value
+		warning_a_mat = FALSE
+		if (min(a_mat) <= 2)
+		{
+			warning_a_mat = TRUE
+			warning("The analytical calculus does not work!")
+		}
+	
+		# Variance of 1/r, dim: N_draws x N_obs, each column being the draws for one individual
+		var_1_over_r = b_mat * (a_mat + b_mat - 1) / ((a_mat - 1)^2 * (a_mat - 2))
 
-	# Residuals LOO: Observation - weighted predictive expectation (computed above)
-	e_loo = tree_dt[.(sp), r] - mu_loo
-	e_loo_sub = tree_dt[.(sp), r] - mu_loo_sub
+		# Now multiply by Vbole^2: 1st column with Vbole_1^2, ..., ith column with Vbole_1^2
+		sigma_vtot_mat = sweep(var_1_over_r, MARGIN = 2, STATS = Vbole^2, FUN = "*")
 
-	# Compute R2_loo, 1 - var(residuals loo)/var(observation). Note that the /(N - 1) simplifies
-	r2_loo = 1 - sum(e_loo^2) / sum((tree_dt[.(sp), r] - mean(tree_dt[.(sp), r]))^2)
-	r2_loo_sub = 1 - sum(e_loo_sub^2) / sum((tree_dt[.(sp), r] - mean(tree_dt[.(sp), r]))^2)
+		var_fit_vtot = apply(posterior::as_draws_matrix(sim$draws("v_gen_mean")), 1, var)
+		var_res_vtot = apply(sigma_vtot_mat, 1, mean)
+
+		rsq_vtot = var_fit_vtot / (var_fit_vtot + var_res_vtot)
+
+		return(list(rsq_vtot = rsq_vtot, warning = warning_a_mat))
+	}
+
+	rsq_vtot_new = rsq_vtot_fct(sim_new)
+	rsq_vtot_sub = rsq_vtot_fct(sim_sub)
+
+	## R2 based on LOO, adapted from https://avehtari.github.io/bayes_R2/bayes_R2.html
+	loo_R2 = function(sim, psis_object, n_draws, y = tree_dt[.(sp), r], n = tree_dt[.(sp), .N])
+	{
+		# LOO weighted predictive expectation for each observation, using posterior draws + PSIS weights
+		mu_loo = loo::E_loo(posterior::as_draws_matrix(sim$draws("r_gen_mean")),
+			psis_object = psis_object, type = "mean",
+			log_ratios = -posterior::as_draws_matrix(sim$draws("log_lik")))$value
+		# Residuals LOO: Observation - weighted predictive expectation (computed above)
+		e_loo = y - mu_loo
+
+		rd = bayesboot::rudirichlet(n = n_draws, d = n)
+		# Explanation:
+		# Rubin's Bayesian bootstrap. The Dirichlet draws represent the posterior
+		# uncertainty over what the "true" weight of each observed data point should be in
+		# computing a population statistics (like a mean, variance). Each row of rd can be
+		# thought of as a "resampling" of the dataset. rowSums(rd) should give a vector of ones.
+		# In other words, when I sum the weight of one individual (column), then it is one,
+		# as in the whole (unknown) population. However, in each draw (row of the matrix),
+		# the weight of individuals does not sum to 1, as some individuals have a heavier
+		# weight in the sample, i.e., they represent more individuals of the whole population.
+
+		vary = n/(n - 1) * ( # small-sample bias correction
+			rowSums(sweep(rd, 2, tree_dt[.(sp), r]^2, FUN = "*")) - # weighted mean of y^2 by 
+			rowSums(sweep(rd, 2, tree_dt[.(sp), r], FUN = "*"))^2 # weighted mean of y
+		) # Gives the weighted variance, where rd assign each observation a continuous random weight.
+
+		vareloo <- n/(n - 1) * ( # small-sample bias correction
+			rowSums(sweep(rd, 2, e_loo^2, FUN = "*")) - # weighted mean of (LOO residuals)^2 by 
+			rowSums(sweep(rd, 2, e_loo, FUN = "*"))^2 # weighted mean of LOO residuals
+		)
+
+		looR2 <- 1-vareloo/vary
+
+		looR2[looR2 < -1] <- -1
+		looR2[looR2 > 1] <- 1
+
+		return(looR2)
+	}
+
+	r2_loo_new = loo_R2(sim = sim_new, psis_object = loo_new$psis_object, n_draws = n_draws)
+	r2_loo_sub = loo_R2(sim = sim_sub, psis_object = loo_sub$psis_object, n_draws = n_draws)
 
 	## Return results
 	return (list(
@@ -784,7 +809,8 @@ comparison_yang_sub = function(sp, tree_dt, woodstock_seed = 1969 - 08 - 18, pri
 		warning_loo_yang = warning_loo_new, warning_loo_sub = warning_loo_sub, warning = warn,
 		avg_yang = mean(rsq_new), avg_sub = mean(rsq_sub),
 		rsq_distrib = list(yang = rsq_new, sub = rsq_sub),
-		rsq_loo = list(yang = r2_loo, sub = r2_loo_sub),
+		rsq_vtot_distrib = list(yang = rsq_vtot_new, sub = rsq_vtot_sub),
+		rsq_loo_distrib = list(yang = r2_loo_new, sub = r2_loo_sub),
 		rhat_yang = rhat_yang_m, rhat_sub = rhat_sub_m))
 }
 
@@ -956,7 +982,7 @@ weights_dt = data.table(species = ls_species, best = "", W_yang = -Inf, W_sub = 
 rhat_dt = data.table(species = ls_species, Rhat_yang = -Inf, Rhat_sub = -Inf, key = "species")
 
 R2D2 = data.table(species = ls_species, R2_yang = -Inf, R2_sub = -Inf,
-	R2_loo_yang = -Inf, R2_loo_sub = -Inf, key = "species")
+	R2_Vtot_yang = -Inf, R2_Vtot_sub = -Inf, R2_loo_yang = -Inf, R2_loo_sub = -Inf, key = "species")
 
 if (file.exists("./yang/comparison_new-sub.rds"))
 {
