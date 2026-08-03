@@ -569,7 +569,8 @@ comparison = function(sp, tree_dt, woodstock_seed = 1969 - 08 - 18, printPlot = 
 	var_1_over_r = b_mat * (a_mat + b_mat - 1) / ((a_mat - 1)^2 * (a_mat - 2))
 
 	# Now multiply by Vbole^2: 1st column with Vbole_1^2, ..., ith column with Vbole_1^2
-	sigma_vtot_mat = sweep(var_1_over_r, MARGIN = 2, STATS = stanData[["bole_volume_m3_new"]]^2, FUN = "*")
+	sigma_vtot_mat = sweep(var_1_over_r, MARGIN = 2, STATS = stanData[["bole_volume_m3_new"]]^2, FUN = "*",
+		check.margin = TRUE)
 
 	var_fit_vtot_new = apply(posterior::as_draws_matrix(sim_new$draws("v_gen_mean")), 1, var)
 	var_res_vtot_new = apply(sigma_vtot_mat, 1, mean)
@@ -718,7 +719,7 @@ comparison_yang_sub = function(sp, tree_dt, woodstock_seed = 1969 - 08 - 18, pri
 	## R squared based on Gelman 2019...
 	# ... for the ratio
 	var_fit_new = apply(X = posterior::as_draws_matrix(sim_new$draws("r_gen_mean")),
-		MARGIN = 1, FUN = var)
+		MARGIN = 1, FUN = var) # The var contains the correction 1/(n - 1) already!
 	var_res_new = apply(X = posterior::as_draws_matrix(sim_new$draws("sigma_var")),
 		MARGIN = 1, FUN = mean)
 	
@@ -748,7 +749,7 @@ comparison_yang_sub = function(sp, tree_dt, woodstock_seed = 1969 - 08 - 18, pri
 		var_1_over_r = b_mat * (a_mat + b_mat - 1) / ((a_mat - 1)^2 * (a_mat - 2))
 
 		# Now multiply by Vbole^2: 1st column with Vbole_1^2, ..., ith column with Vbole_1^2
-		sigma_vtot_mat = sweep(var_1_over_r, MARGIN = 2, STATS = Vbole^2, FUN = "*")
+		sigma_vtot_mat = sweep(var_1_over_r, MARGIN = 2, STATS = Vbole^2, FUN = "*", check.margin = TRUE)
 
 		var_fit_vtot = apply(posterior::as_draws_matrix(sim$draws("v_gen_mean")), 1, var)
 		var_res_vtot = apply(sigma_vtot_mat, 1, mean)
@@ -762,10 +763,29 @@ comparison_yang_sub = function(sp, tree_dt, woodstock_seed = 1969 - 08 - 18, pri
 	rsq_vtot_sub = rsq_vtot_fct(sim_sub)
 
 	## R2 based on LOO, adapted from https://avehtari.github.io/bayes_R2/bayes_R2.html
-	loo_R2 = function(sim, psis_object, n_draws, y = tree_dt[.(sp), r], n = tree_dt[.(sp), .N])
+	loo_R2 = function(sim, psis_object, n_draws, ratio = NULL, vtot = NULL, n = tree_dt[.(sp), .N])
 	{
 		# LOO weighted predictive expectation for each observation, using posterior draws + PSIS weights
-		mu_loo = loo::E_loo(posterior::as_draws_matrix(sim$draws("r_gen_mean")),
+		if ((is.null(ratio)) && !(is.null(vtot)))
+		{
+			corresponding_variable = "v_gen_mean"
+			y = vtot
+			if (any(vtot < 0))
+				stop("Presence of negative total volumes!")
+		}			
+		
+		if (!(is.null(ratio)) && (is.null(vtot)))
+		{
+			corresponding_variable = "r_gen_mean"
+			y = ratio
+			if (any(ratio < 0) || any(ratio > 1))
+				stop("Ratio not between 0 and 1!")
+		}
+		
+		if ((!(is.null(ratio)) && !(is.null(vtot))))
+			stop("Either ratio or vtot should be left NULL")
+		
+		mu_loo = loo::E_loo(posterior::as_draws_matrix(sim$draws(corresponding_variable)),
 			psis_object = psis_object, type = "mean",
 			log_ratios = -posterior::as_draws_matrix(sim$draws("log_lik")))$value
 		# Residuals LOO: Observation - weighted predictive expectation (computed above)
@@ -783,34 +803,41 @@ comparison_yang_sub = function(sp, tree_dt, woodstock_seed = 1969 - 08 - 18, pri
 		# weight in the sample, i.e., they represent more individuals of the whole population.
 
 		vary = n/(n - 1) * ( # small-sample bias correction
-			rowSums(sweep(rd, 2, tree_dt[.(sp), r]^2, FUN = "*")) - # weighted mean of y^2 by 
-			rowSums(sweep(rd, 2, tree_dt[.(sp), r], FUN = "*"))^2 # weighted mean of y
+			rowSums(sweep(rd, 2, y^2, FUN = "*", check.margin = TRUE)) - # weighted mean of y^2 
+			rowSums(sweep(rd, 2, y, FUN = "*", check.margin = TRUE))^2 # weighted mean of y
 		) # Gives the weighted variance, where rd assign each observation a continuous random weight.
 
-		vareloo <- n/(n - 1) * ( # small-sample bias correction
-			rowSums(sweep(rd, 2, e_loo^2, FUN = "*")) - # weighted mean of (LOO residuals)^2 by 
-			rowSums(sweep(rd, 2, e_loo, FUN = "*"))^2 # weighted mean of LOO residuals
+		vareloo = n/(n - 1) * ( # small-sample bias correction
+			rowSums(sweep(rd, 2, e_loo^2, FUN = "*", check.margin = TRUE)) - # weighted mean by individual
+			rowSums(sweep(rd, 2, e_loo, FUN = "*", check.margin = TRUE))^2 # weighted mean of LOO residuals
 		)
 
-		looR2 <- 1-vareloo/vary
+		looR2 = 1 - vareloo/vary
 
-		looR2[looR2 < -1] <- -1
-		looR2[looR2 > 1] <- 1
+		looR2[looR2 < -1] = -1
+		looR2[looR2 > 1] = 1
 
 		return(looR2)
 	}
 
-	r2_loo_new = loo_R2(sim = sim_new, psis_object = loo_new$psis_object, n_draws = n_draws)
-	r2_loo_sub = loo_R2(sim = sim_sub, psis_object = loo_sub$psis_object, n_draws = n_draws)
+	r2_loo_new_r = loo_R2(sim = sim_new, psis_object = loo_new$psis_object, n_draws = n_draws,
+		ratio = stanData[["bole_volume_m3_new"]]/stanData[["total_volume_m3_new"]])
+	r2_loo_sub_r = loo_R2(sim = sim_sub, psis_object = loo_sub$psis_object, n_draws = n_draws,
+		ratio = stanData[["bole_volume_m3_new"]]/stanData[["total_volume_m3_new"]])
+	
+	r2_loo_new_vtot = loo_R2(sim = sim_new, psis_object = loo_new$psis_object, n_draws = n_draws,
+		vtot = stanData[["total_volume_m3_new"]])
+	r2_loo_sub_vtot = loo_R2(sim = sim_sub, psis_object = loo_sub$psis_object, n_draws = n_draws,
+		vtot = stanData[["total_volume_m3_new"]])
 
 	## Return results
 	return (list(
 		best = best, comploo = comp, weights = weights,
 		warning_loo_yang = warning_loo_new, warning_loo_sub = warning_loo_sub, warning = warn,
-		avg_yang = mean(rsq_new), avg_sub = mean(rsq_sub),
 		rsq_distrib = list(yang = rsq_new, sub = rsq_sub),
 		rsq_vtot_distrib = list(yang = rsq_vtot_new, sub = rsq_vtot_sub),
-		rsq_loo_distrib = list(yang = r2_loo_new, sub = r2_loo_sub),
+		rsq_loo_distrib_r = list(yang = r2_loo_new_r, sub = r2_loo_sub_r),
+		rsq_loo_distrib_v = list(yang = r2_loo_new_vtot, sub = r2_loo_sub_vtot),
 		rhat_yang = rhat_yang_m, rhat_sub = rhat_sub_m))
 }
 
@@ -981,8 +1008,10 @@ weights_dt = data.table(species = ls_species, best = "", W_yang = -Inf, W_sub = 
 
 rhat_dt = data.table(species = ls_species, Rhat_yang = -Inf, Rhat_sub = -Inf, key = "species")
 
-R2D2 = data.table(species = ls_species, R2_yang = -Inf, R2_sub = -Inf,
-	R2_Vtot_yang = -Inf, R2_Vtot_sub = -Inf, R2_loo_yang = -Inf, R2_loo_sub = -Inf, key = "species")
+R2D2 = data.table(species = ls_species,
+	R2_yang = -Inf, R2_sub = -Inf, R2_Vtot_yang = -Inf, R2_Vtot_sub = -Inf,
+	R2_loo_yang = -Inf, R2_loo_sub = -Inf, R2_loo_Vtot_yang = -Inf, R2_loo_Vtot_sub = -Inf,
+	key = "species")
 
 if (file.exists("./yang/comparison_new-sub.rds"))
 {
@@ -1011,8 +1040,25 @@ if (file.exists("./yang/comparison_new-sub.rds"))
 		weights_dt[.(sp), c("best", "W_yang", "W_sub") :=
 			.(temp$best, temp$weights["yang"], temp$weights["sub"])]
 
-		R2D2[.(sp), c("R2_yang", "R2_sub") := .(temp[["avg_yang"]], temp[["avg_sub"]])]
-		R2D2[.(sp), c("R2_loo_yang", "R2_loo_sub") := .(temp[["rsq_loo"]][["yang"]], temp[["rsq_loo"]][["sub"]])]
+		R2D2[.(sp), c("R2_yang", "R2_sub") := .(
+			median(temp[["rsq_distrib"]][["yang"]]),
+			median(temp[["rsq_distrib"]][["sub"]])
+		)]
+
+		R2D2[.(sp), c("R2_Vtot_yang", "R2_Vtot_sub") := .(
+			median(temp[["rsq_vtot_distrib"]][["yang"]][["rsq_vtot"]]),
+			median(temp[["rsq_vtot_distrib"]][["sub"]][["rsq_vtot"]])
+		)]
+		
+		R2D2[.(sp), c("R2_loo_yang", "R2_loo_sub") := .(
+			median(temp[["rsq_loo_distrib_r"]][["yang"]]),
+			median(temp[["rsq_loo_distrib_r"]][["sub"]])
+		)]
+
+		R2D2[.(sp), c("R2_loo_Vtot_yang", "R2_loo_Vtot_sub") := .(
+			median(temp[["rsq_loo_distrib_v"]][["yang"]]),
+			median(temp[["rsq_loo_distrib_v"]][["sub"]])
+		)]
 
 		rhat_dt[sp, c("Rhat_yang", "Rhat_sub") := .(temp[["rhat_yang"]], temp[["rhat_sub"]])]
 	}
@@ -1141,7 +1187,12 @@ R2D2[, selected := best]
 R2D2[c("Pinus strobus", "Pinus uncinata"), selected := "yang"]
 
 ## Add column R2 selected model and remove best
+R2D2[, R2_loo_selected := ifelse(selected == "yang", R2_loo_yang, R2_loo_sub)]
+R2D2[, R2_loo_selected_Vtot := ifelse(selected == "yang", R2_loo_Vtot_yang, R2_loo_Vtot_sub)]
+
 R2D2[, R2_selected := ifelse(selected == "yang", R2_yang, R2_sub)]
+R2D2[, R2_selected_Vtot := ifelse(selected == "yang", R2_Vtot_yang, R2_Vtot_sub)]
+
 R2D2[, best := NULL]
 
 ## Add column RMSE
