@@ -134,6 +134,9 @@ plot_sp = function(fit, sp, count, stanData, fun, args, forest = forest_dt[.(sp)
 	axis(1)
 	axis(2, las = 1)
 
+	# fwrite(forest[, .(bole_volume_m3, total_ratio)],
+	# 	"../../../subventions/2025-ademe_graine/niko_doc/data/ratio.csv") # pgfplots Niko
+
 	# Plot prediction
 	if (pred)
 	{
@@ -199,7 +202,7 @@ if (os == "Linux" || os == "Darwin")
 	stop(paste("Unknown Operating System:", os))
 }
 
-path_data = paste0(mnt_point, "/data/")
+path_data = paste0(mnt_point, "data/")
 if (!dir.exists(path_data))
 	stop(paste0("Folder <", path_data, "> does not exist! Did you run 01_prepare_data.qmd?"))
 
@@ -269,7 +272,7 @@ where $x$ is the bole volume, $\Vbft$, and $k$, $\lambda$ parameters to be estim
 
 ```{r}
 ## Subset data
-forest_dt = forest_dt[origin_data == "inra"]
+forest_dt = forest_dt[(origin_data == "inra") & !(presence_NA)]
 forest_dt[, nb_indiv := .N, by = speciesName_sci]
 forest_dt = forest_dt[nb_indiv > 50]
 
@@ -593,6 +596,68 @@ for (sp in ls_species)
 ```
 
 ### Residuals flexible model
+
+```{r}
+#### Export residuals for pgfplots
+## Internal function from DHARMa package
+rankTransform = function(x)
+{
+	pred = rank(x, ties.method = "average")
+	pred = pred / max(pred)
+	return(pred)
+}
+
+## Get residuals for Fagus sylvatica
+n_sampling = fit$metadata()$iter_sampling
+
+simResp = fit$draws("r_gen")
+dim(simResp)
+n_chains = dim(simResp)[2] # Number of successful chains
+
+# Reshape simResp as a matrix nobs x n_repetition
+simResp_matrix = matrix(data = 0, nrow = forest_dt[, .N], ncol = n_sampling*n_chains)
+for (obs in seq_len(forest_dt[, .N]))
+	for (chain in 1:n_chains)
+		simResp_matrix[obs, ] = simResp[, chain, obs] # One line of n_sampling*n_chains simulations per observation
+
+i = 4 # Fagus sylvatica
+
+start = stanData[["start"]][i]
+end = stanData[["end"]][i]
+sim_dharma = createDHARMa(simulatedResponse = simResp_matrix[start:end, ],
+	observedResponse = forest_dt[start:end, total_ratio],
+	fittedPredictedResponse = apply(simResp[, , start:end], MARGIN = 3, median),
+	integerResponse = FALSE)
+
+## Export
+dharmaQuant = DHARMa::testQuantiles(simulationOutput = sim_dharma,
+	predictor = forest_dt[start:end, rankTransform(bole_volume_m3)], plot = FALSE)
+
+# Add the rank transformed predictor and the prediction + height class for colour
+pgfplots = data.table(bole_volume_rt = forest_dt[start:end, rankTransform(bole_volume_m3)],
+	residuals = sim_dharma$scaledResiduals)
+setorder(pgfplots, bole_volume_rt)
+
+# Add the quantile regression lines
+pgfplots[, q25 := dharmaQuant$predictions[, 2]]
+pgfplots[, q50 := dharmaQuant$predictions[, 4]]
+pgfplots[, q75 := dharmaQuant$predictions[, 6]]
+
+# Add the errors on the quantiles
+pgfplots[, err25 := dharmaQuant$predictions[, 3]]
+pgfplots[, err50 := dharmaQuant$predictions[, 5]]
+pgfplots[, err75 := dharmaQuant$predictions[, 7]]
+
+fwrite(pgfplots, "./pgfplots/residuals_ratio.csv")
+
+#### Export the ratio data and bole volume + add manually the fitted curve
+fwrite(forest_dt[start:end, .(bole_volume_m3, ratio = total_ratio)], "./pgfplots/ratio.csv")
+
+apply(X = fit$draws("beta_[4]"), FUN = mean, MARGIN = 3)
+apply(X = fit$draws("b[4]"), FUN = mean, MARGIN = 3)
+apply(X = fit$draws("gamma[4]"), FUN = mean, MARGIN = 3)
+
+```
 
 ```{r}
 #| label: fig-residuals_flexible
@@ -1054,6 +1119,12 @@ sp_dt[, gamma := params[paste0("gamma[", sp_index, "]")]]
 
 sp_dt[, collapse_at := -b/gamma]
 sp_dt[, value_neglected := exp(beta_*b/gamma)]
+
+fwrite(forest_dt["Fagus sylvatica", .(total_volume_m3, my_predVolume, emerge_predVolume, vallet_predVolume)],
+	"fagSyl-vol.csv")
+
+fwrite(forest_dt["Abies alba", .(total_volume_m3, my_predVolume, emerge_predVolume, vallet_predVolume)],
+	"abiAlb-vol.csv")
 ```
 
 ```{r}
@@ -1360,7 +1431,7 @@ n_chains = 4
 vallet_dt = data.table(speciesName_sci = c("Abies alba", "Fagus sylvatica", "Picea abies", "Pinus pinaster", "Pinus sylvestris", "Pseudotsuga menziesii", "Quercus petraea"),
 	alpha = c(0.550, 0.395, 0.631, 0.235, 0.297, 0.534, 0.471),
 	sd_alpha = c(0.015, 0.01, 0.007, 0.041, 0.025, 0.01, 0.014),
-	beta = c(7.49e-4, 2.66e-4, -9.46e-4, 9.7e-4, 3.18e-4, -5.3e-4, -3.45e-4),
+	beta = c(-7.49e-4, 2.66e-4, -9.46e-4, 9.7e-4, 3.18e-4, -5.3e-4, -3.45e-4),
 	sd_beta = c(3.9e-5, 4.9e-5, 7.2e-5, 4.06e-4, 1.4e-4, 9.7e-5, 1.3e-5),
 	gamma = c(0.277, 0.421, NA, 0.396, 0.384, NA, 0.377),
 	sd_gamma = c(0.034, 0.025, NA, 0.057, 0.058, NA, 0.031),
@@ -1459,7 +1530,7 @@ Species-specific parameters with std. dev between parentheses [@Vallet2006].
 
 vallet_dt = data.table(speciesName_sci = c("Abies alba", "Fagus sylvatica", "Picea abies", "Pinus pinaster", "Pinus sylvestris", "Pseudotsuga menziesii", "Quercus petraea"),
 	alpha = c(0.550, 0.395, 0.631, 0.235, 0.297, 0.534, 0.471),
-	beta = c(7.49e-4, 2.66e-4, -9.46e-4, 9.7e-4, 3.18e-4, -5.3e-4, -3.45e-4),
+	beta = c(-7.49e-4, 2.66e-4, -9.46e-4, 9.7e-4, 3.18e-4, -5.3e-4, -3.45e-4),
 	gamma = c(0.277, 0.421, NA, 0.396, 0.384, NA, 0.377),
 	delta = c(NA, 45.4, NA, 198.8, 204.0, 56.6, NA),
 	sd_alpha = c(0.015, 0.01, 0.007, 0.041, 0.025, 0.01, 0.014),
