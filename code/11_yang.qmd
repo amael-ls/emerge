@@ -812,7 +812,9 @@ params = getParams(fit, "alpha", type = "all") # Asymptotic ratio
 params = as.data.table(params)[, .(iter = as.integer(iteration), chain = as.integer(chain), value)]
 setkey(params, chain, iter)
 
-fwrite(params, "../../../writing/article_allometry/data/traces_Picea-abies_amael.csv")
+output_file = "../../../writing/article_allometry/data/traces_Picea-abies_amael.csv"
+if (!file.exists(output_file))
+	fwrite(params, output_file)
 
 lala = plot_sp(fit, sp, forest = tree_dt[.(sp)], pred = TRUE, simplif = TRUE, print_plot = FALSE)
 
@@ -823,7 +825,10 @@ params = c(alpha = unname(lala$params["c"]), beta = unname(lala$params["k"]),
 	delta = unname(lala$params["n"] - lala$params["c"]))
 
 dt_to_export = data.table(bole_volume_m3 = lala$obs_bole, ratio = lala$obs_bole/lala$obs_tot)
-fwrite(dt_to_export, "../../../writing/article_allometry/data/picea-abies_data.csv")
+
+output_file = "../../../writing/article_allometry/data/picea-abies_data.csv"
+if (!file.exists(output_file))
+	fwrite(dt_to_export, output_file)
 lala$params
 
 #### Picea abies Non-Simplified ------------------------------------------
@@ -855,8 +860,13 @@ params = getParams(fit, "c", type = "all")
 params = as.data.table(params)[, .(iter = as.integer(iteration), chain = as.integer(chain), value)]
 setkey(params, chain, iter)
 
-fwrite(params, "../../../writing/article_allometry/data/traces_Picea-abies_yang2024.csv")
-fwrite(dt_coeff, "../../../writing/article_allometry/data/params_Picea-abies_yang2024.csv")
+output_file = "../../../writing/article_allometry/data/traces_Picea-abies_yang2024.csv"
+if (!file.exists(output_file))
+	fwrite(params, output_file)
+
+output_file = "../../../writing/article_allometry/data/params_Picea-abies_yang2024.csv"
+if (!file.exists(output_file))
+	fwrite(dt_coeff, output_file)
 ```
 
 ## Run the model for broadleaf/conifer
@@ -928,4 +938,20 @@ if (!file.exists(paste0(savePath, filename, ".rds")))
 	fit$save_output_files(dir = savePath, basename = filename, random = FALSE)
 	saveRDS(fit, paste0(savePath, filename, ".rds"))
 }
+```
+
+## Few checks from the paper @Yang2024
+
+They clame the P (check their paper) should be around j/k, i.e., it is the point at which the ratio is round its maximum. Let me check it is the case with their empirically fixed values:
+
+```{r}
+j = function(P)
+	return (1 - 0.5*exp(-0.001*P))
+
+dt = data.table(P = c(300, 70, 3000, 800, 150, 550, 1800, 1000, 2400),
+	k = c(0.002518, 0.009151, 0.000260, 0.001163, 0.004557, 0.001552, 0.000517, 0.000653, 0.000425))
+dt[, j := round(j(P), 3)]
+dt[, est_P := round(j(P)/k)]
+dt[, s := round(10/P, 3)] # 10/P or 100/P? In main text, 10/P, in Fig, 100/P
+dt[, s2 := round(10*k/j(P), 3)] # 10/P or 100/P? In main text, 10/P, in Fig, 100/P
 ```
