@@ -77,9 +77,8 @@ graphics.off()
 options(max.print = 500)
 
 library(data.table)
+library(MetBrewer)
 library(stringi)
-library(inventR)
-library(gt)
 ```
 
 ```{r}
@@ -111,28 +110,169 @@ nfi_codes = readRDS(paste0(path_data, "species_dt.rds"))[!is.na(species_code_nfi
 setkey(nfi_codes, speciesName_sci)
 
 ## Cedric's data
-cedric = fread("./cedric/Results_parametres_Amael.csv")
-cedric = cedric[, .(plot_id = npp, tree_id = a, tree_name = Tree_Name,
+cedric = fread("./cedric/QSM_Volume_Ratios_394_Trees.csv")
+cedric = cedric[, .(plot_id = NPP, tree_id = A, tree_name = Tree_Name,
 	species_code = espar, species_fr = nom,
-	dbh = DBH_QSM, c135_mm,
+	dbh = DBH_QSM, c135_mm, height = TreeHeight,
 	bole_volume = Total_Volume_trunk_7cm, bole_volume_nfi = v,
 	total_volume = TotalVolumeTree, total_volume_nfi = v0)]
 
 cedric = cedric[!is.na(bole_volume_nfi)]
 ```
 
+```{r}
+#### Function from Vallet
+## Table 4 from Vallet2006
+vallet_dt = data.table(speciesName_sci = c("Abies alba", "Fagus sylvatica", "Picea abies", "Pinus pinaster", "Pinus sylvestris", "Pseudotsuga menziesii", "Quercus petraea"),
+	alpha = c(0.550, 0.395, 0.631, 0.235, 0.297, 0.534, 0.471),
+	sd_alpha = c(0.015, 0.01, 0.007, 0.041, 0.025, 0.01, 0.014),
+	beta = c(-7.49e-4, 2.66e-4, -9.46e-4, 9.7e-4, 3.18e-4, -5.3e-4, -3.45e-4),
+	sd_beta = c(3.9e-5, 4.9e-5, 7.2e-5, 4.06e-4, 1.4e-4, 9.7e-5, 1.3e-5),
+	gamma = c(0.277, 0.421, NA, 0.396, 0.384, NA, 0.377),
+	sd_gamma = c(0.034, 0.025, NA, 0.057, 0.058, NA, 0.031),
+	delta = c(NA, 45.4, NA, 198.8, 204.0, 56.6, NA),
+	sd_delta = c(NA, 4, NA, 40, 26.6, 13.8, NA),
+	var_res = c(0.0031, 0.0036, 0.0023, 0.0079, 0.0028, 0.0041 , 0.004), key = "speciesName_sci")
+
+## Function to predict volumes
+form_vallet = function(circumference_cm, height, pars, volume = TRUE)
+{
+	# print(pars)
+	res = pars[, alpha] + pars[, beta]*circumference_cm
+	if (!is.na(pars[, gamma]))
+		res = res + pars[, gamma]*sqrt(circumference_cm)/height
+	
+	if (!is.na(pars[, delta]))
+		res = res*(1 + pars[, delta]/circumference_cm^2)
+
+	if (volume)
+		res = res/(40000*pi) * circumference_cm^2*height
+	
+	return (res)
+}
+```
+
+
+```{r}
+#### Function from my work based in Yang 2024
+## Table 4 from Vallet2006
+params_dt = readRDS("./yang/avg_params.rds")
+
+## Function to predict volumes
+amael2026 = function(x, pars) # x = bole_volume_m3
+{
+	r_func = function(x, pars)
+	{
+		return ((pars[, m] - pars[, c]) * exp(pars[, j] - pars[, k]*x) * (pars[, k]*x/pars[, j])^pars[, j] +
+			pars[, c] - (pars[, c] - pars[, n])*exp(-pars[, s]*x));
+	}
+	
+	r = r_func(x, pars)
+
+	return ( 1/pars[, c] * x^( 1 - (log(r) - log(pars[, c])) / log(x) ) )
+}
+```
+
 <!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
 <!-- ---------------------------   MAIN CONTENT, R CODE   --------------------------- -->
 <!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
 
+## Données de Cédric
+
+QSM = Quantitative Structure Model, a 3D geometric model of a tree reconstructed from terrestrial laser scanning (TLS) point clouds.
+
+J'ai remarqué qu'en fait, chaque arbre est dupliqué de 14 à 16 fois pour *Fagus sylvatica* et *Quercus petraea*. Est-ce dû à différentes tentatives de segmentation de l'arbre? Dans tous les cas, je calcule la moyenne des grandeurs estimées pour chaque arbre (`dbh`, volumes, etc).
+
+```{r}
+#### Average within individuals
+## Keep records of the range for each tree
+range_dt = cedric[, as.list(quantile(total_volume/1000, probs = c(0, 0.05, 0.5, 0.95, 1))), by = tree_name]
+
+## Average within each individual
+cedric[, dbh := mean(dbh), by = tree_name]
+cedric[, height := mean(height), by = tree_name]
+cedric[, bole_volume := mean(bole_volume)/1000, by = tree_name]
+cedric[, total_volume := mean(total_volume)/1000, by = tree_name] # /1000 conversion to cubic metres
+
+cedric = unique(cedric)
+
+cedric[, dbh*pi - c135_mm/1000] # Compare estimated QSM dbh with measured by NFI (I guess)
+
+cedric = merge.data.table(cedric, range_dt, by = "tree_name")
+```
+
 ```{r}
 cedric[, .N, by = species_fr]
+cedric[, .N, by = tree_name]
 cedric = cedric[species_fr %in% c("Chene sessile", "Hetre")]
 
 cedric[, speciesName_sci := ifelse(species_fr == "Hetre", "Fagus sylvatica", "Quercus petraea")]
 setkey(cedric, speciesName_sci, plot_id, tree_id)
 ```
 
+```{r}
+plot(cedric[, bole_volume], cedric[, bole_volume_nfi], pch = 19, cex = 0.65,
+	axes = FALSE, xlab = "QSM bole volume", ylab = "NFI bole volume")
+abline(a = 0, b = 1, lty = "dashed", lwd = 0.8, col = "#515151")
+axis(1)
+axis(2, las = 1)
+```
+
+```{r}
+cedric[, amael := amael2026(bole_volume, params_dt[speciesName_sci]), by = speciesName_sci]
+cedric[, vallet := form_vallet(circumference_cm = c135_mm/10, height = height,
+	pars = vallet_dt[speciesName_sci, .(alpha, beta, gamma, delta)]), by = speciesName_sci]
+```
+
+```{r}
+plot(cedric[, total_volume], cedric[, vallet], pch = 19, cex = 1, col = "#FAB255",
+	axes = FALSE, xlab = "QSM total volume", ylab = "Predicted volume",
+	ylim = c(0, cedric[, max(vallet, amael)]))
+points(cedric[, total_volume], cedric[, amael], pch = 19, cex = 1, col = "#0F7BA2")
+abline(a = 0, b = 1, lty = "dashed", lwd = 0.8, col = "#515151")
+legend("topleft", legend = c("Vallet", "Amael"), fill = c("#FAB255", "#0F7BA2"), bty = "n")
+axis(1)
+axis(2, las = 1)
+```
+
 ## Application des volumes @Vallet2006
 
 Dans cette section, j'applique les équations de Vallet afin de prédire le volume aerien total sur les données Emerge/Suisse.
+
+```{r}
+#### Comput Vallet volumes
+## Predict
+training_dt = training_dt[speciesName_sci %in% vallet_dt[, speciesName_sci]]
+training_dt = training_dt[!is.na(circumference_m) &  !is.na(height)]
+training_dt[, vallet_pred := form_vallet(circumference_cm = 100*circumference_m, height = height,
+	pars = vallet_dt[speciesName_sci, .(alpha, beta, gamma, delta)]), by = speciesName_sci]
+
+training_dt[, r_ipcc_vallet := vallet_pred/bole_volume_m3]
+training_dt[, r_ipcc := total_volume_m3/bole_volume_m3]
+```
+
+```{r}
+dd_ipcc = density(training_dt[, r_ipcc])
+dd_vallet = density(training_dt[, r_ipcc_vallet])
+
+ls_colours = met.brewer("Egypt")[1:2]
+names(ls_colours) = c("ipcc", "vallet")
+
+plot(dd_ipcc, col = ls_colours["ipcc"], axes = FALSE, lwd = 3, xlab = "Ratio IPCC", main = "",
+	xlim = c(0, 5), ylim = c(0, max(dd_ipcc$y, dd_vallet$y)))
+polygon(dd_ipcc, col = paste0(ls_colours["ipcc"], 44))
+
+lines(dd_vallet, col = ls_colours["vallet"])
+polygon(dd_vallet, col = paste0(ls_colours["vallet"], 44))
+
+legend("topright", legend = c("Measured", "Vallet 2006"), fill = ls_colours, bty = "n")
+
+axis(1)
+axis(2, las = 1)
+
+training_dt[, range(r_ipcc)]
+training_dt[, range(r_ipcc_vallet)]
+
+training_dt[, as.list(quantile(r_ipcc, probs = c(0, 0.005, 0.5, 0.995, 1))), by = fct_type]
+training_dt[, as.list(quantile(r_ipcc_vallet, probs = c(0, 0.005, 0.5, 0.995, 1))), by = fct_type]
+```
