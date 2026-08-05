@@ -1,0 +1,208 @@
+---
+title: "Comparison with Vallet and output preparation for pgfplots"
+date: today
+author: Amaël Le Squin
+date-format: iso
+filters:
+  - fontawesome
+  - siunitx-quarto
+  - imagify
+imagify:
+  header-includes: |
+    \usepackage{pgfplots}
+    \pgfplotsset{compat=1.18}
+    \usepgfplotslibrary{fillbetween}
+    \usetikzlibrary{positioning}
+    \usetikzlibrary{calc}
+  pdf-engine: lualatex
+pdf-engine: lualatex
+keep-tex: true
+execute:
+  error: true
+  echo: false
+  warning: false
+  message: false
+bibliography: /home/ALe-Squin/work/library/bib_file/references.bib
+lightbox:
+  match: auto
+css: style.css
+knitr:
+  opts_chunk: 
+    dev: ragg_png
+    crop: null
+    out.width: "70%"
+    fig.width: 6
+    fig.asp: 0.618
+    fig.align: "center"
+format:
+  html:
+    toc: true
+    include-in-header: mathjax.html
+    code-fold: true
+    df-print: paged
+    number-sections: true
+    theme:
+      light: cerulean
+      dark: darkly
+    margin: 5% 0;
+  pdf:
+    mathspec: true
+    include-in-header:
+      - text: |
+          \usepackage{unicode-math}
+---
+
+<!-- New command -->
+\newcommand{\ie}{*i.e.,*}
+
+<!-- Math commands -->
+\newcommand{\Vbft}{V_{\text{BFT}}}
+\newcommand{\Fbft}{F_{\text{BFT}}}
+\newcommand{\Vtot}{V_{\text{tot}}}
+\newcommand{\Vzh}{V_{\text{Zhou}}}
+\newcommand{\hdec}{h_{\text{dec}}}
+\newcommand{\fmax}{f_{\text{max}}}
+
+<!-- Math operators -->
+<!-- \DeclareMathOperator{\ln}{ln} -->
+
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+<!-- ---------------------------   LOADING DATA, R CODE   --------------------------- -->
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+
+```{r}
+#| output: false
+
+#### Clear space and load packages
+rm(list = ls())
+graphics.off()
+
+options(max.print = 500)
+
+library(data.table)
+library(MetBrewer)
+library(cmdstanr)
+	register_knitr_engine(override = TRUE)
+library(stringi)
+library(loo)
+library(gt)
+```
+
+```{r}
+#### Load data
+## Path
+os = Sys.info()[['sysname']]
+mnt_point = "/mnt/local_share/"
+if (os == "Linux" || os == "Darwin")
+{
+	if (!dir.exists(mnt_point))
+		stop(paste0("The mounting point <", mnt_point, "> does not exist"))
+} else if (os == "Windows") {
+	stop("TO DO!!! No idea how that works on Windows!")
+} else {
+	stop(paste("Unknown Operating System:", os))
+}
+
+path_data = paste0(mnt_point, "data/")
+if (!dir.exists(path_data))
+	stop(paste0("Folder <", path_data, "> does not exist! Did you run 01_prepare_data.qmd?"))
+
+## Loading training dataset
+training_dt = readRDS(paste0(path_data, "data_Vtot-group.rds"))[origin %in% c("inra", "emerge")][
+	!is.na(circumference_m) & !is.na(height)]
+```
+
+## Introduction
+
+@Longuetaud2013 does not give any average VEF values! I propose to compute the average $m$ of her species-specific functions with:
+$$
+	m = \frac{1}{S} \int\int_S f(x) \, dx,
+$$
+where $S = [d_{025}, d_{975}] \times [h_{025}, h_{975}] $ is the surface delimited by the species-specific dbh and height ranges (from her table 1).
+
+## Compute average
+
+```{r}
+#### Prepare data
+## Compute genus-specific quantiles
+training_dt[, genus := tolower(
+	stri_sub(speciesName_sci, to = stri_locate_first(speciesName_sci, regex = " ")[, "start"] - 1))]
+training_dt[, dbh_cm := 100*circumference_m/pi]
+genus = training_dt[, as.list(lapply(.SD, quantile, probs = c(0.025, 0.975))), by = "genus",
+	.SDcols = c("dbh_cm", "height")]
+genus[, vars := rep(c("q025", "q975"), .N/2)]
+
+genus = dcast.data.table(data = genus, formula = genus ~ vars, value.var = c("dbh_cm", "height"))
+
+## Parameters and range, verified
+longuetaud_pars = data.table(
+	genus = c("betula", "carpinus", "fagus", "fraxinus", "quercus",
+		"abies", "larix", "picea", "pinus", "pseudotsuga"),
+	b1 = rep(6.83, 10),
+	b2 = c(1.016, 1.133, 0.842, 1.112, 1.320,
+		1.496, 0.966, 0.953, 0.566, 0.744),
+	b3 = rep(1.009, 10),
+	b4 = c(0.448, 0.822, 0.627, 0.470, 0.245,
+		0.566, 0.454, 0.473, 0.336, 0.783),
+	min_d = c(12, 8, 7, 8, 7,
+		7, 9, 8, 7, 7),
+	max_d = c(31, 38, 79, 43, 102,
+		90, 42, 67, 71, 34),
+	min_h = c(14.7, 11.3, 5.5, 11.5, 6,
+		6.9, 9, 7.7, 5.1, 7),
+	max_h = c(28.5, 30, 42.5, 26.7, 40,
+		37.8, 25.6, 41.3, 33.4, 29.5),
+	is_broadleaf = rep(c(TRUE, FALSE), each = 5),
+	key = "genus"
+)
+
+longuetaud_pars = merge.data.table(longuetaud_pars, genus, by = "genus")
+```
+
+```{r}
+vef_fct = function(dbh, height, pars)
+{
+	if (!is.data.table(pars))
+		stop("Please provide a data table!")
+	
+	b1 = pars[, b1]
+	b2 = pars[, b2]
+	b3 = pars[, b3]
+	b4 = pars[, b4]
+	
+	int_broadleaf = ifelse(pars[, is_broadleaf], 1, 0)
+
+	vef = 1 + exp(b2 * (b1 - dbh)) + exp(b3*int_broadleaf + b4)*dbh/height^2
+	
+	return(vef)
+}
+
+vef_mean = function(pars)
+{
+	f = function(dbh, height)
+		vef_fct(dbh, height, pars)
+
+	res = pracma::integral2(
+		fun = f,
+		xmin = pars$dbh_cm_q025,
+		xmax = pars$dbh_cm_q975,
+		ymin = pars$height_q025,
+		ymax = pars$height_q975
+	)
+
+	areaDomain = (pars$dbh_cm_q975 - pars$dbh_cm_q025) * (pars$height_q975 - pars$height_q025)
+
+	return(res$Q/areaDomain)
+}
+
+curve(vef_fct(x, height = 20, pars = longuetaud_pars["abies"]), from = 7, to = 50)
+
+longuetaud_pars[, mean_vef := vef_mean(.SD), by = genus]
+
+if (!file.exists("./longuetaud_VEF.rds"))
+	saveRDS(longuetaud_pars, "./longuetaud_VEF.rds")
+
+filename = "../../../writing/article_allometry/data/longuetaud_VEF.csv"
+if (!file.exists(filename))
+	fwrite(longuetaud_pars, filename)
+```
