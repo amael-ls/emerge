@@ -66,10 +66,10 @@ generated quantities {
 	vector[N_new] v_gen_mean;
 	vector [N_new] log_lik; // Log likelihood of newly observed volumes given fitted params on (other) data
 	vector [N_new] sigma_var; // Variance
+	vector [N_new] shape1_new = phi*r_yang_6(bole_volume_m3_new, [c, j, k, m, n, s]);
+	vector [N_new] shape2_new = phi*(1 - r_yang_6(bole_volume_m3_new, [c, j, k, m, n, s]));
 
 	{
-		vector [N_new] shape1_new = phi*r_yang_6(bole_volume_m3_new, [c, j, k, m, n, s]);
-		vector [N_new] shape2_new = phi*(1 - r_yang_6(bole_volume_m3_new, [c, j, k, m, n, s]));
 		r_gen = beta_rng(shape1_new, shape2_new);
 
 		for (i in 1:N_new)
