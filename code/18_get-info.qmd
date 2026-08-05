@@ -122,13 +122,154 @@ nfi_codes = readRDS(paste0(path_data, "species_dt.rds"))[!is.na(species_code_nfi
 	.(speciesName_sci, species_code_nfi)]
 setkey(nfi_codes, speciesName_sci)
 
-# lala = copy(vol_dt)
-# vol_dt = copy(lala)
+training_dt[, .(.N, unique(group)), by = speciesName_sci][order(speciesName_sci)]
+
+params_dt = readRDS("./yang/params_dt_full.rds")
 ```
 
+
+```{r}
+#### Tool functions
+## Function that compute the average above-ground pred volume without params/residual uncertainty
+yang2024 = function(x, pars, expansion_factor = FALSE)
+{
+	ratio = (pars["m"] - pars["c"]) * exp(pars["j"] - pars["k"]*x) * (pars["k"]*x/pars["j"])^pars["j"] +
+		pars["c"] - (pars["c"] - pars["n"])*exp(-pars["s"]*x)
+
+	if (expansion_factor)
+		return (1/ratio)
+	
+	return(ratio);
+}
+
+yang2024_v2 = function(x, pars, expansion_factor = FALSE)
+{
+	paramsVec = c(c = pars[, c], j = pars[, j], k = pars[, k], m = pars[, m],
+		n = pars[, n], s = pars[, s])
+	return(yang2024(x, paramsVec, expansion_factor))
+}
+
+yang2024_vol = function(x, pars)
+{
+	if (is.data.table(pars))
+	{
+		if (pars[, .N] != 1)
+			stop("pars shoud correspond to one species only")
+		pars = c(c = pars[, c], j = pars[, j], k = pars[, k], m = pars[, m], n = pars[, n], s = pars[, s])
+	}
+
+	return(x/yang2024(x, pars));
+}
+```
 <!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
 <!-- ---------------------------   MAIN CONTENT, R CODE   --------------------------- -->
 <!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+
+## Variance of the ratio beyound 80th bole volume quantile
+
+*Pinus pinaster* has the lowest $R^2$ for above-ground volume (AGV). I suspect that it might be due to the spread of the ratio for "large" bole volumes. Here, I define large as all the volumes beyond the 80th percentile. I check this in what follows, using species-specific perentiles of course.
+
+```{r}
+training_dt_sp_specific[, p80 := quantile(bole_volume_m3, probs = 0.8), by = speciesName_sci]
+temp_dt = training_dt_sp_specific[bole_volume_m3 >= p80, .(sd_r = round(sd(r), 3), p80 = unique(p80), .N),
+	by = speciesName_sci]
+
+temp_dt[order(-sd_r)]
+```
+
+## Correlation threshold and discrepancies R-squared
+
+```{r}
+threshold_dt = readRDS("./yang/lambert_calculus.rds")
+rsquared = readRDS("./yang/rsquared_flopp_yang.rds")
+
+rsquared[, discrepancy := R2_loo_selected_Vtot/R2_loo_selected]
+
+dt = merge.data.table(x = threshold_dt[, .(speciesName_sci, curve, percent_c, x1, x3)],
+	y = rsquared[, .(species, discrepancy)], by.x = "speciesName_sci", by.y = "species")
+
+dt[, cor(x1, discrepancy)]
+dt[, cor(x3, discrepancy)]
+dt[, chosen_x := x1]
+dt[percent_c < 4, chosen_x := x3]
+
+dt[, cor(chosen_x, discrepancy)]
+
+plot(discrepancy ~ x1, data = dt, pch = 19)
+plot(discrepancy ~ x3, data = dt, pch = 19)
+plot(discrepancy ~ chosen_x, data = dt, pch = 19)
+
+# Try correlation with inverse quantile, i.e., the fraction of measures below x*
+training_dt_sp_specific[, inv_qt_x1 := ecdf(bole_volume_m3)(dt[speciesName_sci, x1]), by = speciesName_sci]
+training_dt_sp_specific[, inv_qt_x3 := ecdf(bole_volume_m3)(dt[speciesName_sci, x3]), by = speciesName_sci]
+
+dt = merge.data.table(dt, unique(training_dt_sp_specific[, .(speciesName_sci, inv_qt_x1, inv_qt_x3)]),
+	by = "speciesName_sci")
+
+dt[, cor(inv_qt_x1, discrepancy)]
+dt[, cor(inv_qt_x3, discrepancy)]
+
+training_dt_sp_specific[, as.list(round(range(r), 2)), by = speciesName_sci]
+dt[, .(speciesName_sci, round(discrepancy, 2))]
+dt[discrepancy > 2, .(speciesName_sci, round(discrepancy, 2))]
+```
+
+## TBR stuff
+
+I read https://doi.org/10.3390/f10020144 which is on Timber-to-Branch ratio:
+$$
+	TBR = \frac{V_{bole}}{V_{crown}}
+$$
+
+It is easy to show that my ratio compares to TBR as:
+$$
+	r = \frac{TBR}{TBR + 1}
+$$
+
+```{r}
+TBR_article = c(1.5, 2.5, 3.7, 5, 9.5)
+round(TBR_article/(TBR_article + 1), 2)
+```
+
+## Average ratio values
+
+I compute the average ratio values in the NFI data set with my formula and Vallet's model. I also do it within the training data (i.e., observations).
+
+```{r}
+#### French NFI data query using ocre
+db = connect_db(base = "exploitation", serveur = "test-inv-exp") # Connect to test server
+
+## Average expansion factors per functional type (broadleaf/conifer)
+ratio_stats = ocre_nm(vars = c("U_V0_ALAMOD", "U_V0", "V"), vent_a = "ess:essd1", ans = 2020:2024,
+	test = TRUE, us_nm = "1")[visite == 1, .(fct_type = ess.essd1, vars, tot)]
+
+ratio_stats = dcast(data = ratio_stats, formula = fct_type ~ vars, value.var = "tot")
+ratio_stats[, .(VEF_vallet = U_V0/V, VEF = U_V0_ALAMOD/V), by = fct_type]
+
+## Average expansion factors per species
+ratio_stats_sp = ocre_nm(vars = c("U_V0_ALAMOD", "U_V0", "V"), vent_a = "ess:ess", ans = 2020:2024,
+	test = TRUE, us_nm = "1")[visite == 1, .(ess = ess.ess, vars, tot)]
+
+ratio_stats_sp = dcast(data = ratio_stats_sp, formula = ess ~ vars, value.var = "tot")
+ratio_stats_sp[ess %in% c("03", "09", "17", "51", "52", "53", "54", "56", "58", "61", "62", "63", "64")][,
+	.(VEF_vallet = U_V0/V, VEF = U_V0_ALAMOD/V), by = ess]
+
+disconnect_db(db)
+
+## Setting Quercus sp. to an unparametrise Quercus of group E2
+params_dt[stri_detect(speciesName_sci, regex = "Quercus")]
+params_dt[speciesName_sci == "Quercus robur", speciesName_sci := "Quercus sp."] 
+setkey(params_dt, speciesName_sci)
+
+## Predict volume
+training_dt_sp_specific[, pred := yang2024_vol(bole_volume_m3, params_dt[speciesName_sci]), by = speciesName_sci]
+
+## Check avg ratio
+training_dt_sp_specific[, .(VEF_obs = round(mean(1/r), 2), VEF_pred = round(mean(pred/bole_volume_m3), 2)),
+	by = speciesName_sci]
+```
+
+## Other stuff
 
 ```{r}
 #### Cleaning the data
@@ -160,6 +301,8 @@ ls_trained_sp = training_dt_sp_specific[, unique(speciesName_sci)]
 
 percent_bole[ls_trained_sp, sum(percent, na.rm = TRUE)]
 percent_tot[ls_trained_sp, sum(percent, na.rm = TRUE)]
+percent_tot[c("Abies alba", "Fagus sylvatica", "Fraxinus excelsior", "Picea abies",
+	"Pinus nigra", "Quercus petraea"), sum(percent, na.rm = TRUE)]
 ```
 
 ## Predict on Henri's data
@@ -337,5 +480,6 @@ for (fitname in ls_filenames)
 	file.remove(paste0(tmp, "/", ls_files))
 }
 
-saveRDS(henri_dt[, .(npp, a, v, u_v0, vtot_pred)], "./u_v0_tarif_amael.rds")
+if (!file.exists("./u_v0_tarif_amael.rds"))
+	saveRDS(henri_dt[, .(npp, a, v, u_v0, vtot_pred)], "./u_v0_tarif_amael.rds")
 ```
