@@ -51,3 +51,424 @@ format:
       - text: |
           \usepackage{unicode-math}
 ---
+
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+<!-- ---------------------------   LOADING DATA, R CODE   --------------------------- -->
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+
+```{r}
+#| output: false
+
+#### Clear space and load packages
+rm(list = ls())
+graphics.off()
+
+options(max.print = 500)
+
+library(data.table)
+library(cmdstanr)
+	register_knitr_engine(override = TRUE)
+library(stringi)
+library(inventR)
+library(gt)
+
+#### Tool functions
+## Function that compute the average above-ground pred volume without params/residual uncertainty
+yang2024 = function(x, pars, expansion_factor = FALSE)
+{
+	ratio = (pars["m"] - pars["c"]) * exp(pars["j"] - pars["k"]*x) * (pars["k"]*x/pars["j"])^pars["j"] +
+		pars["c"] - (pars["c"] - pars["n"])*exp(-pars["s"]*x)
+
+	if (expansion_factor)
+		return (1/ratio)
+	
+	return(ratio);
+}
+
+yang2024_v2 = function(x, pars, expansion_factor = FALSE)
+{
+	paramsVec = c(c = pars[, c], j = pars[, j], k = pars[, k], m = pars[, m],
+		n = pars[, n], s = pars[, s])
+	return(yang2024(x, paramsVec, expansion_factor))
+}
+
+yang2024_vol = function(x, pars)
+{
+	if (is.data.table(pars))
+	{
+		if (pars[, .N] != 1)
+			stop("pars shoud correspond to one species only")
+		pars = c(c = pars[, c], j = pars[, j], k = pars[, k], m = pars[, m], n = pars[, n], s = pars[, s])
+	}
+
+	return(x/yang2024(x, pars));
+}
+```
+
+```{r}
+#### Loading data
+## Path
+os = Sys.info()[['sysname']]
+mnt_point = "/mnt/local_share/"
+if (os == "Linux" || os == "Darwin")
+{
+	if (!dir.exists(mnt_point))
+		stop(paste0("The mounting point <", mnt_point, "> does not exist"))
+} else if (os == "Windows") {
+	stop("TO DO!!! No idea how that works on Windows!")
+} else {
+	stop(paste("Unknown Operating System:", os))
+}
+
+path_data = paste0(mnt_point, "data/")
+if (!dir.exists(path_data))
+	stop(paste0("Folder <", path_data, "> does not exist! Did you run 01_prepare_data.qmd?"))
+
+## Loading training dataset
+training_dt_sp_specific = readRDS(paste0(path_data, "data_Vtot.rds"))
+training_dt = readRDS(paste0(path_data, "data_Vtot-group.rds"))
+
+## Loading emerge dataset
+emerge = readRDS(paste0(mnt_point, "data/emerge_2009-2010.rds"))
+
+## Load parameters
+params_dt = readRDS("./yang/params_dt_full.rds")
+```
+
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+<!-- ---------------------------   MAIN CONTENT, R CODE   --------------------------- -->
+<!-- -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= -->
+
+Run predictions for each individual
+```{r}
+# emerge[, pred := yang2024_vol(bole_volume_conic_m3, params_dt[speciesName_sci]), by = speciesName_sci]
+# emerge[is.na(pred), .N, by = speciesName_sci]
+
+# ## Manually match species with parameters
+# # Only one set of parameters for Alnus, so replacing Alnus alnobetula by Alnus sp.
+# unique(params_dt[stri_detect(str = speciesName_sci, regex = "Alnus"), .(c, j, k, m, n, s)])[, .N]
+# params_dt["Alnus alnobetula", speciesName_sci := "Alnus sp."]
+
+# # Only one set of parameters for Betula, so replacing Betula pendula by Betula sp.
+# unique(params_dt[stri_detect(str = speciesName_sci, regex = "Betula"), .(c, j, k, m, n, s)])[, .N]
+# params_dt[speciesName_sci == "Betula pendula", speciesName_sci := "Betula sp."]
+
+# # Only one set of parameters for Eucalyptus, so replacing Eucalyptus by Eucalyptus sp.
+# unique(params_dt[stri_detect(str = speciesName_sci, regex = "Eucal"), .(c, j, k, m, n, s)])[, .N]
+# params_dt[speciesName_sci == "Eucalyptus", speciesName_sci := "Eucalyptus sp."]
+
+# # Two sets of parameters for Fraxinus, using Fraxinus excelsior as it was parametrised
+# unique(params_dt[stri_detect(str = speciesName_sci, regex = "Fraxinus"), .(c, j, k, m, n, s)])[, .N]
+# params_dt[stri_detect(str = speciesName_sci, regex = "Fraxinus")]
+# params_dt[speciesName_sci == "Fraxinus excelsior", speciesName_sci := "Fraxinus sp."]
+
+# # Three set of parameters for Quercus, using Quercus robur a bit randomly...
+# unique(params_dt[stri_detect(str = speciesName_sci, regex = "Quercus"), .(c, j, k, m, n, s)])[, .N]
+# params_dt[stri_detect(str = speciesName_sci, regex = "Quercus")]
+# params_dt[speciesName_sci == "Quercus robur", speciesName_sci := "Quercus sp."]
+
+# # Only one set of parameters for Tilia, so replacing Tilia cordata by Tilia sp.
+# unique(params_dt[stri_detect(str = speciesName_sci, regex = "Tilia"), .(c, j, k, m, n, s)])[, .N]
+# params_dt[speciesName_sci == "Tilia cordata", speciesName_sci := "Tilia sp."]
+
+# setkey(params_dt, speciesName_sci)
+
+# emerge[is.na(pred), pred := yang2024_vol(bole_volume_conic_m3, params_dt[speciesName_sci]), by = speciesName_sci]
+# emerge[is.na(pred), .N]
+
+# emerge[, .N, by = str_name]
+# ls_colours = data.table(str_name = c("coppice-with-standards", "single-layered", "coppice"),
+# 	colour = c("#FAB255", "#0F7BA2", "#DD5129"))
+
+# emerge = merge.data.table(emerge, ls_colours, by = "str_name")
+```
+
+```{r}
+# plot(emerge[, pred], emerge[, total_volume_m3], col = emerge[, colour], pch = 19,
+# 	axes = FALSE, xlab = "Predictions", ylab = "Observations")
+# abline(a = 0, b = 1, lwd = 0.85, lty = "dashed", col = "#595859")
+# legend("topleft", legend = ls_colours[, str_name], fill = ls_colours[, colour], bty = "n")
+# axis(1)
+# axis(2, las = 1)
+
+# plot(seq_len(emerge[, .N]), emerge[, total_volume_m3 - pred], col = emerge[, colour], pch = 19,
+# 	axes = FALSE, xlab = "Index", ylab = "Residuals")
+# abline(h = 0, lwd = 0.85, lty = "dashed", col = "#595859")
+# legend("topleft", legend = ls_colours[, str_name], fill = ls_colours[, colour], bty = "n")
+# axis(1)
+# axis(2, las = 1)
+
+# plot(emerge[, total_volume_m3], emerge[, total_volume_m3 - pred], col = emerge[, colour], pch = 19,
+# 	axes = FALSE, xlab = "Observations", ylab = "Residuals")
+# abline(h = 0, lwd = 0.85, lty = "dashed", col = "#595859")
+# legend("topleft", legend = ls_colours[, str_name], fill = ls_colours[, colour], bty = "n")
+# axis(1)
+# axis(2, las = 1)
+```
+
+```{r}
+# emerge[, as.list(quantile(total_volume_m3 - pred, probs = c(0, 0.025, 0.5, 0.987, 1))), by = str_name]
+# emerge[, .N, by = str_name]
+# plot(density(emerge[str_name == ls_colours[1, str_name], total_volume_m3 - pred]), main = ls_colours[1, str_name],
+# 	col = ls_colours[1, colour], lwd = 2, axes = FALSE, xlab = "Residuals", ylab = "Density")
+# axis(1)
+# axis(2, las = 1)
+
+# plot(density(emerge[str_name == ls_colours[2, str_name], total_volume_m3 - pred]), main = ls_colours[2, str_name],
+# 	col = ls_colours[2, colour], lwd = 2, axes = FALSE, xlab = "Residuals", ylab = "Density")
+# axis(1)
+# axis(2, las = 1)
+
+# plot(density(emerge[str_name == ls_colours[3, str_name], total_volume_m3 - pred]), main = ls_colours[3, str_name],
+# 	col = ls_colours[3, colour], lwd = 2, axes = FALSE, xlab = "Residuals", ylab = "Density")
+# axis(1)
+# axis(2, las = 1)
+
+# ## Boxplot of opposite res, this way, below zero means underestimated, and above zero means overestimated
+# qq = emerge[, .(str_name, opposite_res = pred - total_volume_m3, colour)]
+# qq[, n_structure := .N, by = str_name]
+# qq[, .N, by = str_name]
+# qq[, str_name_struct := paste0(str_name, " (", n_structure, ")")]
+# boxplot(opposite_res ~ str_name_struct, data = qq, col = unique(qq$colour[order(qq$str_name)]),
+# 	xlab = "Structure type",
+# 	ylab = "Residuals")
+# abline(h = 0, lwd = 0.85, lty = "dashed", col = "#595859")
+
+# ## Export for pgfplots. The meta class must be a numerical type, that pgfplots maps between 0 and 1000
+# # https://tikz.dev/pgfplots/reference-meta#pgfp./pgfplots/point:meta
+# # Here, I use n_structure, as there are different for each structure name
+# if (length(qq[, unique(n_structure)]) != length(qq[, unique(str_name)]))
+# 	stop("n_structure is not in bijection with str_name! You cannot use n_structure as a meta for pgfplots")
+
+# fwrite(qq[, .(opposite_res, n_structure)], "../../../writing/article_allometry/data/pred_boxplot.csv")
+# fwrite(qq[, .(opposite_res, str_name)], "../../../writing/article_allometry/data/pred_boxplot.csv")
+
+# qq[str_name == "coppice", .(opposite_res)]
+```
+
+## Posterior bias
+
+I do the same as before, using species-specific models whenever possible.
+
+```{r}
+emerge = readRDS(paste0(mnt_point, "data/emerge_2009-2010.rds"))
+emerge = merge.data.table(emerge, params_dt[, .(speciesName_sci, group)], by = "speciesName_sci",
+	all.x = TRUE)
+
+# Should be Fraxinus excelsior only, put Fraxinus sp. (as I modified manually before)
+ls_pb = emerge[is.na(group), unique(speciesName_sci)]
+ls_pb = stri_replace(str = ls_pb, regex = " sp\\.", replacement = "")
+ls_pb = paste(ls_pb, collapse = "|")
+
+ls_pb = params_dt[stri_detect(speciesName_sci, regex = ls_pb), .(speciesName_sci, group)]
+ls_pb[, genus := stri_sub(speciesName_sci, to = stri_locate(speciesName_sci, regex = " ")[, "start"] - 1)]
+ls_pb = ls_pb["Eucalyptus", genus := "Eucalyptus"]
+ls_pb[, n_sp_gr := .N, by = .(genus, group)]
+ls_pb = unique(ls_pb[, .(genus, group, n_sp_gr)])
+
+emerge[speciesName_sci == "Alnus sp.", group := "D2"]
+emerge[speciesName_sci == "Betula sp.", group := "D2"]
+emerge[speciesName_sci == "Eucalyptus sp.", group := "D1"]
+emerge[speciesName_sci == "Fraxinus sp.", group := "C3"]
+emerge[speciesName_sci == "Quercus sp.", group := "E2"] # Majority of Quercus are in E2, few in E1
+emerge[speciesName_sci == "Tilia sp.", group := "D2"]
+```
+
+
+```{r}
+ls_species = emerge[, unique(speciesName_sci)]
+ls_groups = emerge[, sort(unique(group))]
+success_dt = readRDS("./yang/group-success.rds")
+success_dt[ls_groups]
+
+woodstock_seed = 1969 - 08 - 18
+n_chains = 4
+
+setkey(training_dt, speciesName_sci)
+
+v_gen_list = vector(mode = "list", length = length(ls_species))
+names(v_gen_list) = ls_species
+
+v_res_list = vector(mode = "list", length = length(ls_species))
+names(v_res_list) = ls_species
+
+dt_sim = emerge[, .(speciesName_sci, dataset, tree_id, str_name)]
+
+for (sp in ls_species)
+{
+	if (sp %in% c("Fagus sylvatica", "Fraxinus excelsior", "Quercus petraea", "Quercus sp."))
+	{
+		filename = paste0("./yang/", stri_replace(str = sp, regex = " ", replacement = "-"), "_new.rds")
+		filename = stri_replace(str = filename, regex = "\\._new.rds", replacement = "_new.rds")
+		fit = readRDS(filename)
+		stanData = list(
+			N = training_dt_sp_specific[sp, .N],
+			bole_volume_m3 = training_dt_sp_specific[sp, bole_volume_m3],
+			total_volume_m3 = training_dt_sp_specific[sp, total_volume_m3],
+			N_new = emerge[sp, .N],
+			bole_volume_m3_new = emerge[sp, bole_volume_conic_m3],
+			total_volume_m3_new = emerge[sp, total_volume_m3]
+		)
+		genQ = cmdstan_model("./yang2024-genQ.stan")
+	} else {
+		gr = emerge[sp, unique(group)]
+		if (gr %in% c("C1", "D1"))
+		{
+			filename = paste0("./yang/broadleaf_new.rds")
+			fit = readRDS(filename)
+			stanData = list(
+				N = training_dt[sp, .N],
+				bole_volume_m3 = training_dt[sp, bole_volume_m3],
+				total_volume_m3 = training_dt[sp, total_volume_m3],
+				N_new = emerge[sp, .N],
+				bole_volume_m3_new = emerge[sp, bole_volume_conic_m3],
+				total_volume_m3_new = emerge[sp, total_volume_m3]
+			)
+			genQ = cmdstan_model("./yang2024-genQ.stan")
+		} else if (gr %in% c("B2", "D3")) {
+			filename = paste0("./yang/", gr, "_submodel.rds")
+			fit = readRDS(filename)
+			stanData = list(
+				N = training_dt[sp, .N],
+				bole_volume_m3 = training_dt[sp, bole_volume_m3],
+				total_volume_m3 = training_dt[sp, total_volume_m3],
+				N_new = emerge[sp, .N],
+				bole_volume_m3_new = emerge[sp, bole_volume_conic_m3],
+				total_volume_m3_new = emerge[sp, total_volume_m3]
+			)
+			genQ = cmdstan_model("./yang2024-genQ_submodel.stan")
+		} else {
+			filename = paste0("./yang/", gr, ".rds")
+			fit = readRDS(filename)
+			stanData = list(
+				N = training_dt[sp, .N],
+				bole_volume_m3 = training_dt[sp, bole_volume_m3],
+				total_volume_m3 = training_dt[sp, total_volume_m3],
+				N_new = emerge[sp, .N],
+				bole_volume_m3_new = emerge[sp, bole_volume_conic_m3],
+				total_volume_m3_new = emerge[sp, total_volume_m3]
+			)
+			genQ = cmdstan_model("./yang2024-genQ.stan")
+		}
+	}
+	str_name = emerge[sp, str_name]
+	
+	sim = genQ$generate_quantities(fit, data = stanData,
+		seed = woodstock_seed, parallel_chains = min(n_chains, 4))
+
+	v_gen = t(posterior::as_draws_matrix(sim$draws("v_gen")))
+	opposite_res = v_gen - emerge[sp, total_volume_m3]
+
+	v_gen_list[[sp]] = cbind(dt_sim[sp], as.data.table(v_gen))
+	v_res_list[[sp]] = cbind(dt_sim[sp], as.data.table(opposite_res))
+}
+
+ll = rbindlist(l = v_gen_list)
+opposite_res = rbindlist(l = v_res_list)
+dim(ll)
+ll[, 1:5]
+setnames(ll, old = as.character(1:4000), new = paste0("draws_", 1:4000))
+setnames(opposite_res, old = as.character(1:4000), new = paste0("draws_", 1:4000))
+saveRDS(ll, "./temporary_for_boxplot.rds")
+by_struct = ll[, lapply(.SD, mean), by = str_name, .SDcols = patterns("^draws_")]
+by_struct_res = opposite_res[, lapply(.SD, mean), by = str_name, .SDcols = patterns("^draws_")]
+
+dim(by_struct)
+dim(by_struct_res)
+by_struct[, 1:5]
+by_struct_res[, 1:5]
+opposite_res[, .N, by = str_name]
+
+mean_res = by_struct_res[, {
+	qs = apply(.SD, 1, quantile, probs = c(0, 0.025, 0.5, 0.975, 1)) # matrix: rows = quantiles, cols = str_name
+	qs_dt = as.data.table(t(qs)) # Transpose
+	setnames(qs_dt, c("q0", "q025", "q50", "q975", "q100"))
+	cbind(str_name = str_name, res_mean = rowMeans(.SD), qs_dt)
+}, .SDcols = patterns("^draws_")]
+
+fwrite(mean_res, "../../../writing/article_allometry/data/residuals_structure.csv")
+individual_res = opposite_res[, .(speciesName_sci, dataset, tree_id, str_name,
+	opposite_res = rowMeans(.SD)), .SDcols = patterns("^draws_")]
+fwrite(individual_res[, .(str_name, opposite_res)],
+	"../../../writing/article_allometry/data/individual_residuals_structure.csv")
+
+individual_res[, mean(opposite_res), by = str_name]
+```
+
+```{r}
+## Boxplot of opposite res, this way, below zero means underestimated, and above zero means overestimated
+# boxplot(opposite_res ~ str_name, data = qq,
+# 	xlab = "Structure type",
+# 	ylab = "Residuals")
+# abline(h = 0, lwd = 0.85, lty = "dashed", col = "#595859")
+
+aa = boxplot(opposite_res ~ str_name, data = individual_res,
+	xlab = "Structure type",
+	ylab = "Residuals")
+abline(h = 0, lwd = 0.85, lty = "dashed", col = "#595859")
+```
+
+## Try emerge with groups instead of sp-specific
+```{r}
+params_dt_group = params_dt[, .(group, c, j, k, m, n,s)]
+params_dt_group[, rep := .N, by = .(group, c)]
+params_dt_group = unique(params_dt_group[rep > 1])
+setkey(params_dt_group, group) # It is unique, so that's cool!
+```
+
+Predict by group
+```{r}
+emerge[, pred_group := yang2024_vol(bole_volume_conic_m3, params_dt_group[group]), by = group]
+emerge[is.na(pred_group), .N]
+```
+
+```{r}
+plot(emerge[, pred_group], emerge[, total_volume_m3], col = emerge[, colour], pch = 19,
+	axes = FALSE, xlab = "Predictions (group)", ylab = "Observations")
+abline(a = 0, b = 1, lwd = 0.85, lty = "dashed", col = "#595859")
+legend("topleft", legend = ls_colours[, str_name], fill = ls_colours[, colour], bty = "n")
+axis(1)
+axis(2, las = 1)
+
+plot(seq_len(emerge[, .N]), emerge[, total_volume_m3 - pred_group], col = emerge[, colour], pch = 19,
+	axes = FALSE, xlab = "Index", ylab = "Residuals")
+abline(h = 0, lwd = 0.85, lty = "dashed", col = "#595859")
+legend("topleft", legend = ls_colours[, str_name], fill = ls_colours[, colour], bty = "n")
+axis(1)
+axis(2, las = 1)
+
+plot(emerge[, total_volume_m3], emerge[, total_volume_m3 - pred_group], col = emerge[, colour], pch = 19,
+	axes = FALSE, xlab = "Observations", ylab = "Residuals")
+abline(h = 0, lwd = 0.85, lty = "dashed", col = "#595859")
+legend("topleft", legend = ls_colours[, str_name], fill = ls_colours[, colour], bty = "n")
+axis(1)
+axis(2, las = 1)
+```
+
+```{r}
+emerge[, as.list(quantile(total_volume_m3 - pred_group, probs = c(0, 0.025, 0.5, 0.987, 1))), by = str_name]
+emerge[, .N, by = str_name]
+plot(density(emerge[str_name == ls_colours[1, str_name], total_volume_m3 - pred_group]), main = ls_colours[1, str_name],
+	col = ls_colours[1, colour], lwd = 2, axes = FALSE, xlab = "Residuals", ylab = "Density")
+axis(1)
+axis(2, las = 1)
+
+plot(density(emerge[str_name == ls_colours[2, str_name], total_volume_m3 - pred_group]), main = ls_colours[2, str_name],
+	col = ls_colours[2, colour], lwd = 2, axes = FALSE, xlab = "Residuals", ylab = "Density")
+axis(1)
+axis(2, las = 1)
+
+plot(density(emerge[str_name == ls_colours[3, str_name], total_volume_m3 - pred_group]), main = ls_colours[3, str_name],
+	col = ls_colours[3, colour], lwd = 2, axes = FALSE, xlab = "Residuals", ylab = "Density")
+axis(1)
+axis(2, las = 1)
+
+## Boxplot
+qq = emerge[, .(str_name, res = total_volume_m3 - pred_group, colour)]
+boxplot(res ~ str_name, data = qq, col = unique(qq$colour[order(qq$str_name)]),
+	xlab = "Structure type",
+	ylab = "Residuals")
+abline(h = 0, lwd = 0.85, lty = "dashed", col = "#595859")
+```
+
+Less precise by group than by using species-specific models when possible. Yahoo!
