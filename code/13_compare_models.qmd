@@ -1211,6 +1211,12 @@ if (!file.exists("./yang/rsquared_flopp_yang.rds"))
 fwrite(R2D2, "../../../writing/article_allometry/data/rsquared.csv", na = "NaN")
 ```
 
+## Check discrepancy R2 and R2 loo
+
+```{r}
+R2D2[, .(r_comp = R2_selected/R2_loo_selected, v_comp = R2_selected_Vtot/R2_loo_selected_Vtot), by = species]
+```
+
 ## Other stuff, to compare Vallet with my model
 
 ```{r}
