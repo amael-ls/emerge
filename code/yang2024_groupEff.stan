@@ -4,7 +4,7 @@
 */
 
 functions {
-	vector r_yang_6(vector x, row_vector pars) // Function for the 6 parameters model
+	vector r_yang_6(vector x, row_vector pars, vector groupEff) // Function for the 6 parameters model
 	{
 		/*
 			The vector of parameters, pars, is in this order:
@@ -15,14 +15,24 @@ functions {
 			5 -> n,
 			6 -> s
 		*/
-		return (pars[4] - pars[1]) * exp(pars[2] - pars[3]*x) .* (pars[3]*x/pars[2]).^pars[2] +
-			pars[1] - (pars[1] - pars[5])*exp(-pars[6]*x);
+
+		int N = size(x);
+		vector[N] mu_new_logit = logit(
+			(pars[4] - pars[1]) * exp(pars[2] - pars[3]*x) .* (pars[3]*x/pars[2]).^pars[2] +
+			pars[1] - (pars[1] - pars[5])*exp(-pars[6]*x)
+		) + groupEff; // logit(mu) + group effect <-- unconstrained scale!!
+
+		return inv_logit(mu_new_logit); // Constrained scale (0, 1)
 	}
 }
 
 data {
 	// Dimensions
 	int <lower = 1> N; // Number of trees
+	int <lower = 1, upper = N> N_plot; // Number of plots (dimension of the group effect)
+
+	// Indices
+	array[N] int <lower = 1, upper = N_plot> plot_ind; // Indices
 
 	// Predictors
 	vector[N] bole_volume_m3;
@@ -43,6 +53,9 @@ parameters {
 	real <lower = 0, upper = 1> m_beta;
 	real <lower = 0, upper = 1> n;
 	real <lower = 0> s_multiplier;
+	
+	// Group effect
+	vector[N_plot] groupEff;
 
 	real <lower = 0> phi; // Precision (well kind of...)
 }
@@ -53,8 +66,8 @@ transformed parameters {
 	real m = c + (1 - c)*m_beta; // Forces m to be between c and 1
 	// real s = (5 + s_multiplier)*k/j; // Force s to be at least 5*k/j, i.e., at least m + exp[-5] for x = j/k
 	real s = 5 + s_multiplier; // Force s to be at least 5
-	vector [N] shape1 = phi*r_yang_6(bole_volume_m3, [c, j, k, m, n, s]);
-	vector [N] shape2 = phi*(1 - r_yang_6(bole_volume_m3, [c, j, k, m, n, s]));
+	vector [N] shape1 = phi*r_yang_6(bole_volume_m3, [c, j, k, m, n, s], groupEff[plot_ind]);
+	vector [N] shape2 = phi*(1 - r_yang_6(bole_volume_m3, [c, j, k, m, n, s], groupEff[plot_ind]));
 }
 
 model{
@@ -68,6 +81,9 @@ model{
 	target += gamma_lpdf(s_multiplier | 1.5, 0.5); // Right skewed
 
 	target += gamma_lpdf(phi | 3, 0.5); // Right skewed
+
+	// Prior random effect
+	target += normal_lpdf(groupEff | 0, 10);
 	
 	// Likelihood
 	target += beta_lpdf(ratio | shape1, shape2);
@@ -82,5 +98,5 @@ generated quantities {
 	for (i in 1:N)
 		v_gen[i] = 1/c * bole_volume_m3[i]^( 1 - (log(r_gen[i]) - log(c)) / log(bole_volume_m3[i]) );
 	v_gen_mean = 1/c * bole_volume_m3 .^
-		( 1 - (log(r_yang_6(bole_volume_m3, [c, j, k, m, n, s])) - log(c)) ./ log(bole_volume_m3) );
+		( 1 - (log(r_yang_6(bole_volume_m3, [c, j, k, m, n, s], groupEff[plot_ind])) - log(c)) ./ log(bole_volume_m3) );
 }
