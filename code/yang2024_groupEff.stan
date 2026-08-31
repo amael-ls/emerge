@@ -1,10 +1,10 @@
-
 /*
-	Stan code to test the model from Yang 2024
+	Stan code to test the model from Yang 2024, with a plot-level random effect
+	on the logit scale of the mean ratio (non-centered parameterization)
 */
 
 functions {
-	vector r_yang_6(vector x, row_vector pars, vector groupEff) // Function for the 6 parameters model
+	vector r_yang_6(vector x, row_vector pars) // Function for the 6 parameters model
 	{
 		/*
 			The vector of parameters, pars, is in this order:
@@ -15,27 +15,19 @@ functions {
 			5 -> n,
 			6 -> s
 		*/
-
-		int N = size(x);
-		vector[N] mu_new_logit = logit(
-			(pars[4] - pars[1]) * exp(pars[2] - pars[3]*x) .* (pars[3]*x/pars[2]).^pars[2] +
-			pars[1] - (pars[1] - pars[5])*exp(-pars[6]*x)
-		) + groupEff; // logit(mu) + group effect <-- unconstrained scale!!
-
-		return inv_logit(mu_new_logit); // Constrained scale (0, 1)
+		return (pars[4] - pars[1]) * exp(pars[2] - pars[3]*x) .* (pars[3]*x/pars[2]).^pars[2] +
+			pars[1] - (pars[1] - pars[5])*exp(-pars[6]*x);
 	}
 }
 
 data {
 	// Dimensions
 	int <lower = 1> N; // Number of trees
-	int <lower = 1, upper = N> N_plot; // Number of plots (dimension of the group effect)
-
-	// Indices
-	array[N] int <lower = 1, upper = N_plot> plot_ind; // Indices
+	int <lower = 1> N_plot; // Number of plots
 
 	// Predictors
 	vector[N] bole_volume_m3;
+	array[N] int <lower = 1, upper = N_plot> ind_plot; // Plot index for each tree
 
 	// Data
 	vector[N] total_volume_m3;
@@ -53,21 +45,28 @@ parameters {
 	real <lower = 0, upper = 1> m_beta;
 	real <lower = 0, upper = 1> n;
 	real <lower = 0> s_multiplier;
-	
-	// Group effect
-	vector[N_plot] groupEff;
 
 	real <lower = 0> phi; // Precision (well kind of...)
+
+	// Plot-level random effect (non-centered)
+	vector[N_plot] plot_effect_raw;
+	real <lower = 0> sigma_plot;
 }
 
 transformed parameters {
 	real c = 0.6 + 0.4*c_beta; // Forces c to be between 0.6 and 1
-	// real m = 0.8 + 0.2*m_beta; // Forces m to be between 0.8 and 1
 	real m = c + (1 - c)*m_beta; // Forces m to be between c and 1
-	// real s = (5 + s_multiplier)*k/j; // Force s to be at least 5*k/j, i.e., at least m + exp[-5] for x = j/k
 	real s = 5 + s_multiplier; // Force s to be at least 5
-	vector [N] shape1 = phi*r_yang_6(bole_volume_m3, [c, j, k, m, n, s], groupEff[plot_ind]);
-	vector [N] shape2 = phi*(1 - r_yang_6(bole_volume_m3, [c, j, k, m, n, s], groupEff[plot_ind]));
+
+	vector[N_plot] plot_effect = plot_effect_raw * sigma_plot; // Non-centered
+
+	vector [N] shape1;
+	vector [N] shape2;
+	{
+		vector[N] mu = inv_logit(logit(r_yang_6(bole_volume_m3, [c, j, k, m, n, s])) + plot_effect[ind_plot]);
+		shape1 = phi*mu;
+		shape2 = phi*(1 - mu);
+	}
 }
 
 model{
@@ -75,28 +74,32 @@ model{
 	target += beta_lpdf(c_beta | 3, 3); // Centred
 	target += normal_lpdf(j | 1, 0.1);
 	target += gamma_lpdf(k | 2, 10); // Right skewed
-	// target += beta_lpdf(m_beta | 3, 3); // Centred
 	target += beta_lpdf(m_beta | 1, 8); // Left-skewed
 	target += beta_lpdf(n | 1, 8); // Right skewed
 	target += gamma_lpdf(s_multiplier | 1.5, 0.5); // Right skewed
 
 	target += gamma_lpdf(phi | 3, 0.5); // Right skewed
 
-	// Prior random effect
-	target += normal_lpdf(groupEff | 0, 10);
-	
+	// Plot-level random effect
+	target += std_normal_lpdf(plot_effect_raw);
+	target += normal_lpdf(sigma_plot | 0, 1); // Half-normal(0,1), truncation constant omitted (does not affect sampling)
+
 	// Likelihood
 	target += beta_lpdf(ratio | shape1, shape2);
 }
-
 
 generated quantities {
 	array[N] real r_gen = beta_rng(shape1, shape2);
 	vector[N] v_gen;
 	vector[N] v_gen_mean;
 
-	for (i in 1:N)
-		v_gen[i] = 1/c * bole_volume_m3[i]^( 1 - (log(r_gen[i]) - log(c)) / log(bole_volume_m3[i]) );
-	v_gen_mean = 1/c * bole_volume_m3 .^
-		( 1 - (log(r_yang_6(bole_volume_m3, [c, j, k, m, n, s], groupEff[plot_ind])) - log(c)) ./ log(bole_volume_m3) );
+	{
+		vector[N] mu_plot = shape1 ./ (shape1 + shape2); // recovered from shape1,shape2 rather than re-exported
+		for (i in 1:N)
+			v_gen[i] = 1/c * bole_volume_m3[i]^( 1 - (log(r_gen[i]) - log(c)) / log(bole_volume_m3[i]) );
+		v_gen_mean = 1/c * bole_volume_m3 .^
+			( 1 - (log(mu_plot) - log(c)) ./ log(bole_volume_m3) );
+	}
 }
+
+
