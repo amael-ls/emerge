@@ -16,7 +16,7 @@ source("./tool_functions.R")
 # Global variables (paths and others)
 source("./global_variables.R")
 
-# Tree data (14 species)
+# Tree data (all species)
 tree_dt = readRDS(paste0(path_data, "tree_dt.rds"))
 setkey(tree_dt, group)
 

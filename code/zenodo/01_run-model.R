@@ -117,7 +117,6 @@ for (sp in ls_species)
 		saveRDS(fit, paste0(path_output, filename, ".rds"))
 	}
 
-	source("./tool_functions.R")
 	div = plot_sp(fit, sp, simplif = TRUE, n_bins = 4, pal = "Hiroshige",
 		selected_variable = "height", print_plot = TRUE)
 
