@@ -89,5 +89,4 @@ if (file.exists(paste0(path_output, "comparison_full-sub.rds")))
 	comp = merge.data.table(comp, rhat_dt, by = "species")
 	comp = merge.data.table(comp, tree_dt[, .N, by = speciesName_sci], by.x = "species", by.y = "speciesName_sci")
 	saveRDS(save_ls, paste0(path_output, "comparison_full-sub.rds"))
-	fwrite(R2D2, "../../../writing/article_allometry/data/rsquared.csv")
 }
