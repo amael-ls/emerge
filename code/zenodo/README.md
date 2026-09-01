@@ -7,7 +7,7 @@ bibliography: references.bib
 
 ## Introduction
 
-This zenodo repo is to reproduce the results of Anonymous et al. Please contact the main author ANONYMOUS if you are interested in recreating the dataset from raw data, as this is not provided in this repo. You can also find the scripts that were used to create data of Anonymous et al on github ANONYMOUS LINK.
+This zenodo repo is to reproduce the results of Anonymous et al. Please contact the main author ANONYMOUS if you are interested in recreating the dataset from raw data, as this is not provided in this repo.
 
 ## Description of the scripts
 
@@ -15,6 +15,7 @@ In order to reproduce the results, you just need to run the scripts in numerical
 - `00_pre-run.R` verifies directories, data, and join [the three datasets](#description-of-the-datasets) to create the data used to paramtrise the 14 species. It also check Stan language and compiles the models
 - `01_run-model.R` run the species-specific models and two generic models (broadleaf and conifer, not used in the study, but could be useful one day)
 - `02_run-model_groups.R` run the pooled species models
+- `03_conmpare-models.R` compare the species-specific full and sub models
 
 ## Description of the datasets
 
