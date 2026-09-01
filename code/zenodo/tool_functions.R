@@ -637,19 +637,45 @@ rebuild_comp = function(save_ls)
 {
 	ls_species = names(save_ls)
 	
-	comp = data.table::data.table(species = ls_species, best = "", elpd_diff = -Inf, se_diff = -Inf,
+	comp = data.table(species = ls_species, best = "", elpd_diff = -Inf, se_diff = -Inf,
 		warning = FALSE, key = "species")
-	weights_dt = data.table::data.table(species = ls_species, best = "", W_full = -Inf, W_sub = -Inf, key = "species")
-	R2D2 = data.table::data.table(species = ls_species, R2_full = -Inf, R2_sub = -Inf, key = "species")
-	rhat_dt = data.table::data.table(species = ls_species, Rhat_full = -Inf, Rhat_sub = -Inf, key = "species")
+
+	weights_dt = data.table(species = ls_species, best = "", W_full = -Inf, W_sub = -Inf, key = "species")
+
+	rhat_dt = data.table(species = ls_species, Rhat_full = -Inf, Rhat_sub = -Inf, key = "species")
+
+	R2D2 = data.table(species = ls_species,
+		R2_full = -Inf, R2_sub = -Inf, R2_Vtot_full = -Inf, R2_Vtot_sub = -Inf,
+		R2_loo_full = -Inf, R2_loo_sub = -Inf, R2_loo_Vtot_full = -Inf, R2_loo_Vtot_sub = -Inf,
+		key = "species")
 
 	for (sp in ls_species)
 	{
 		weights_dt[sp, c("W_full", "W_sub") := as.list(save_ls[[sp]]$weights)]
-		R2D2[sp, c("R2_full", "R2_sub") := .(save_ls[[sp]]$avg_full, save_ls[[sp]]$avg_sub)]
+	  
+	  comp[.(sp), c("best", "elpd_diff", "se_diff", "warning") :=
+			.(save_ls[[sp]]$comploo[1, "model"], save_ls[[sp]]$comploo[2, "elpd_diff"],
+			save_ls[[sp]]$comploo[2, "se_diff"], save_ls[[sp]]$warning)]
+
+		R2D2[.(sp), c("R2_full", "R2_sub") := .(
+			median(save_ls[[sp]][["rsq_distrib"]][["full"]]),
+			median(save_ls[[sp]][["rsq_distrib"]][["sub"]])
+		)]
+
+		R2D2[.(sp), c("R2_Vtot_full", "R2_Vtot_sub") := .(
+			median(save_ls[[sp]][["rsq_vtot_distrib"]][["full"]][["rsq_vtot"]]),
+			median(save_ls[[sp]][["rsq_vtot_distrib"]][["sub"]][["rsq_vtot"]])
+		)]
 		
-		comp[sp, c("best", "warning") := .(save_ls[[sp]]$best, save_ls[[sp]]$warning)]
-		comp[sp, c("elpd_diff", "se_diff") := as.list(save_ls[[sp]]$comploo[2, c("elpd_diff", "se_diff")])]
+		R2D2[.(sp), c("R2_loo_full", "R2_loo_sub") := .(
+			median(save_ls[[sp]][["rsq_loo_distrib_r"]][["full"]]),
+			median(save_ls[[sp]][["rsq_loo_distrib_r"]][["sub"]])
+		)]
+
+		R2D2[.(sp), c("R2_loo_Vtot_full", "R2_loo_Vtot_sub") := .(
+			median(save_ls[[sp]][["rsq_loo_distrib_v"]][["full"]]),
+			median(save_ls[[sp]][["rsq_loo_distrib_v"]][["sub"]])
+		)]
 
 		rhat_dt[sp, c("Rhat_full", "Rhat_sub") := .(save_ls[[sp]][["rhat_full"]], save_ls[[sp]][["rhat_sub"]])]
 	}
