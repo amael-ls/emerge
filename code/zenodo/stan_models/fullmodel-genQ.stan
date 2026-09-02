@@ -43,7 +43,7 @@ parameters {
 	// Parameters of the 'bumpy' function r_6_params
 	real <lower = 0, upper = 1> c_beta;
 	real <lower = 0> j; // Model still defined for j > 1, but it adds an unrealistic inflexion point
-	real <lower = 0> k;
+	real <lower = 0> tau; // bump location, replaces k
 	real <lower = 0, upper = 1> m_beta;
 	real <lower = 0, upper = 1> n;
 	real <lower = 0> s_multiplier;
@@ -55,6 +55,8 @@ transformed parameters {
 	real c = 0.6 + 0.4*c_beta; // Forces c to be between 0.6 and 1
 	real m = c + (1 - c)*m_beta; // Forces m to be between c and 1
 	real s = 5 + s_multiplier; // Force s to be at least 5
+	real k = j / tau; // deterministic, no Jacobian needed
+
 	vector [N] shape1 = phi*r_6_params(bole_volume_m3, [c, j, k, m, n, s]);
 	vector [N] shape2 = phi*(1 - r_6_params(bole_volume_m3, [c, j, k, m, n, s]));
 }
