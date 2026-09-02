@@ -73,7 +73,7 @@ for (sp in ls_species)
 		results = vallet_bayesian$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4),
 			max_treedepth = 12)
 
-		results$save_output_files(dir = path_output, basename = sp_filename, random = FALSE)
+		results$save_output_files(dir = path_output, basename = paste0(sp_filename, "_vallet"), random = FALSE)
 		saveRDS(results, filename)
 	} else {
 		results = readRDS(filename)
