@@ -10,13 +10,13 @@ functions {
 			The vector of parameters, pars, is in this order:
 			1 -> c,
 			2 -> j,
-			3 -> k,
+			3 -> tau,
 			4 -> m,
 			5 -> n,
 			6 -> s
 		*/
-		return (pars[4] - pars[1]) * exp(pars[2] - pars[3]*x) .*
-			(pars[3]*x/pars[2]).^pars[2] +
+		return (pars[4] - pars[1]) * exp(pars[2] *(1 - x/pars[3])) .*
+			(x/pars[3]).^pars[2] +
 			pars[1] - (pars[1] - pars[5])*exp(-pars[6]*x);
 	}
 }
@@ -43,7 +43,7 @@ parameters {
 	real <lower = 0> tau; // bump location, replaces k
 	real <lower = 0, upper = 1> m_beta;
 	real <lower = 0, upper = 1> n;
-	real <lower = 0> s_multiplier;
+	real <lower = 0> theta; // parameter to force mu_2 negligible at x = tau (see def of s)
 
 	real <lower = 0> phi; // Precision (well kind of...)
 }
@@ -51,21 +51,21 @@ parameters {
 transformed parameters {
 	real c = 0.6 + 0.4*c_beta; // Forces c to be between 0.6 and 1
 	real m = c + (1 - c)*m_beta; // Forces m to be between c and 1
-	real s = 5 + s_multiplier; // Force s to be at least 5
-	real k = j / tau; // deterministic, no Jacobian needed
+	real s = (5 + theta)/tau; // Force s to be at least 5*tau, i.e., at least m + exp[-5] for x = tau
+	real k = j / tau; // deterministic transofrm, no Jacobian needed
 
 	// Parameters of the beta distribution
-	vector [N] shape1 = phi*r_6_params(bole_volume_m3, [c, j, k, m, n, s]);
-	vector [N] shape2 = phi*(1 - r_6_params(bole_volume_m3, [c, j, k, m, n, s]));
+	vector [N] shape1 = phi*r_6_params(bole_volume_m3, [c, j, tau, m, n, s]);
+	vector [N] shape2 = phi*(1 - r_6_params(bole_volume_m3, [c, j, tau, m, n, s]));
 }
 
 model {
 	target += beta_lpdf(c_beta | 3, 3);
-	target += normal_lpdf(j | 1, 0.1);
-	target += lognormal_lpdf(tau | log(2), 0.7); // informative prior on location
+	target += lognormal_lpdf(j | -0.38, 1.06); // mean = 1.2, var = 3, 95% interval: 0.085 -- 5.47
+	target += lognormal_lpdf(tau | -0.38, 1.06); // mean = 1.2, var = 3, 95% interval: 0.085 -- 5.47
 	target += beta_lpdf(m_beta | 1, 8);
 	target += beta_lpdf(n | 1, 8);
-	target += gamma_lpdf(s_multiplier | 1.5, 0.5);
+	target += gamma_lpdf(theta | 3, 0.5); // 95% interval: 1.24 -- 14.45
 	target += gamma_lpdf(phi | 3, 0.5);
 
 	target += beta_lpdf(ratio | shape1, shape2);
@@ -80,5 +80,5 @@ generated quantities {
 	for (i in 1:N)
 		v_gen[i] = 1/c * bole_volume_m3[i]^( 1 - (log(r_gen[i]) - log(c)) / log(bole_volume_m3[i]) );
 	v_gen_mean = 1/c * bole_volume_m3 .^
-		( 1 - (log(r_6_params(bole_volume_m3, [c, j, k, m, n, s])) - log(c)) ./ log(bole_volume_m3) );
+		( 1 - (log(r_6_params(bole_volume_m3, [c, j, tau, m, n, s])) - log(c)) ./ log(bole_volume_m3) );
 }
