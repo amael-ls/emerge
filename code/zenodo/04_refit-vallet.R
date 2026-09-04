@@ -23,19 +23,6 @@ source("./tool_functions.R")
 # Global variables (paths and others)
 source("./global_variables.R")
 
-# Table 5 from Vallet2006
-vallet_dt = data.table(speciesName_sci = c("Abies alba", "Fagus sylvatica", "Picea abies", "Pinus pinaster", "Pinus sylvestris", "Pseudotsuga menziesii", "Quercus petraea"),
-	alpha = c(0.550, 0.395, 0.631, 0.235, 0.297, 0.534, 0.471),
-	sd_alpha = c(0.015, 0.01, 0.007, 0.041, 0.025, 0.01, 0.014),
-	beta = c(7.49e-4, 2.66e-4, -9.46e-4, 9.7e-4, 3.18e-4, -5.3e-4, -3.45e-4),
-	sd_beta = c(3.9e-5, 4.9e-5, 7.2e-5, 4.06e-4, 1.4e-4, 9.7e-5, 1.3e-5),
-	gamma = c(0.277, 0.421, NA, 0.396, 0.384, NA, 0.377),
-	sd_gamma = c(0.034, 0.025, NA, 0.057, 0.058, NA, 0.031),
-	delta = c(NA, 45.4, NA, 198.8, 204.0, 56.6, NA),
-	sd_delta = c(NA, 4, NA, 40, 26.6, 13.8, NA),
-	var_res = c(0.0031, 0.0036, 0.0023, 0.0079, 0.0028, 0.0041 , 0.004),
-	n_params = c(3, 4, 2, 4, 4, 3, 3), key = "speciesName_sci")
-
 # Loading training dataset
 tree_dt = readRDS(paste0(path_data, "tree_dt_14species.rds"))
 tree_dt = tree_dt[(!is.na(circumference_m)) & (!is.na(height))]
@@ -116,8 +103,11 @@ for (sp in ls_species)
 
 	## Plot Bayes vs Freq
 	plot(tree_dt[sp, freq_vallet], tree_dt[sp, bayes_vallet], pch = 19, cex = 0.55,
-		axes = FALSE, xlab = "Frequentist", ylab = "Bayesian")
+		axes = FALSE, xlab = "Frequentist", ylab = "Bayesian", main = sp)
 	abline(a = 0, b = 1, lwd = 1.5, col = "#CD212A")
 	axis(1)
 	axis(2, las = 1)
 }
+
+if (!file.exists(paste0(path_output, "pred_vallet.rds")))
+	saveRDS(tree_dt, paste0(path_output, "pred_vallet.rds"))
