@@ -92,3 +92,12 @@ R2D2[, rmse_percent := rmse_med/meanV*100]
 
 if (!file.exists(paste0(path_pgfplotstable, "rsquared.csv")))
 	fwrite(R2D2, paste0(path_pgfplotstable, "rsquared.csv"), na = "NaN")
+
+if (file.exists(paste0(path_output, "longuetaud_VEF.rds")))
+{
+	longuetaud_pars = readRDS(paste0(path_output, "longuetaud_VEF.rds"))
+	if (!file.exists(paste0(path_pgfplotstable, "longuetaud_VEF.csv")))
+		fwrite(longuetaud_pars, paste0(path_pgfplotstable, "longuetaud_VEF.csv"))
+} else {
+	stop("You must run 06_VEF-longuetaud.R before")
+}
