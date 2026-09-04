@@ -4,7 +4,9 @@
 # 	version of Vallet 2006 fitted in file 04 for 7 species
 
 ## Packages needed to reproduce the study
-renv::restore()
+# renv::restore()
+
+rm(list = ls())
 
 library(data.table)
 library(cmdstanr)
@@ -18,20 +20,20 @@ source("./tool_functions.R")
 source("./global_variables.R")
 
 # Loading training dataset
-tree_dt = readRDS(paste0(path_data, "tree_dt_14species.rds"))
-tree_dt = tree_dt[(!is.na(circumference_m)) & (!is.na(height))]
+tree_dt = readRDS(paste0(path_output, "pred_vallet.rds"))
+training_dt = readRDS(paste0(path_data, "tree_dt_14species.rds")) # Dataset used for the full and submodel
 
 # Species parametrised in Vallet et al. 2006
 ls_species = c("Abies alba", "Fagus sylvatica", "Picea abies", "Pinus pinaster", "Pinus sylvestris",
 	"Pseudotsuga menziesii", "Quercus petraea")
-tree_dt = tree_dt[ls_species]
-setkey(tree_dt, speciesName_sci)
+training_dt = training_dt[ls_species]
+setkey(training_dt, speciesName_sci)
 
 ## Run comparison
 # Compile models
-vallet_genQ = cmdstan_model(path_models, "vallet.stan")
-full_genQ = cmdstan_model(path_models, "fullmodel-genQ.stan")
-sub_genQ = cmdstan_model(path_models, "submodel-genQ.stan")
+vallet_genQ = cmdstan_model(paste0(path_models, "vallet-genQ.stan"))
+full_genQ = cmdstan_model(paste0(path_models, "fullmodel-genQ.stan"))
+sub_genQ = cmdstan_model(paste0(path_models, "submodel-genQ.stan"))
 
 comp_dt = data.table(speciesName_sci = ls_species, best = "", elpd_diff = -Inf, se_diff = -Inf,
 	wrn_mine = "", wrn_vallet = "", key = "speciesName_sci")
@@ -44,45 +46,44 @@ names(rsq_distrib) = ls_species
 for (sp in ls_species)
 {
 	sp_filename = stri_replace(str = sp, replacement = "-", regex = " ")
-	filename = paste0(output_dir, sp_filename, ".rds")
+	filename = paste0(path_output, sp_filename, "_vallet.rds")
 	is_douglas = ifelse(sp == "Pseudotsuga menziesii", 1, 0) # Boolean style compatible with Stan language
 
 	stanData_gen = list(
-		N = training_dt[sp, .N],
+		N = tree_dt[sp, .N],
 		N_params = vallet_dt[sp, n_params],
 		is_douglas = is_douglas,
 
-		bole_volume_m3 = training_dt[sp, bole_volume_m3],
-		circumference_cm = training_dt[sp, 100*circumference_m], # Was in cm in Vallet2006!
-		height = training_dt[sp, height],
+		bole_volume_m3 = tree_dt[sp, bole_volume_m3],
+		circumference_cm = tree_dt[sp, 100*circumference_m], # Was in cm in Vallet2006!
+		height = tree_dt[sp, height],
 
-		total_volume_m3 = training_dt[sp, total_volume_m3],
+		total_volume_m3 = tree_dt[sp, total_volume_m3],
 
 		# New data, which are the same...
-		N_new = training_dt[sp, .N],
+		N_new = tree_dt[sp, .N],
 
-		bole_volume_m3_new = training_dt[sp, bole_volume_m3],
-		circumference_cm_new = training_dt[sp, 100*circumference_m], # Was in cm in Vallet2006!
-		height_new = training_dt[sp, height],
+		bole_volume_m3_new = tree_dt[sp, bole_volume_m3],
+		circumference_cm_new = tree_dt[sp, 100*circumference_m], # Was in cm in Vallet2006!
+		height_new = tree_dt[sp, height],
 
-		total_volume_m3_new = training_dt[sp, total_volume_m3]
+		total_volume_m3_new = tree_dt[sp, total_volume_m3]
 	)
 
 	# Generate data Bayesian vallet
 	fit_vallet = readRDS(filename)
 	sim_vallet = vallet_genQ$generate_quantities(fitted_params = fit_vallet, data = stanData_gen,
 		parallel_chains = min(4, n_chains))
-	
+
 	# Generate data my model
-	if (sp %in% c("Fraxinus excelsior", "Picea abies", "Pinus laricio"))
+	if (sp %in% c("Fraxinus excelsior", "Pinus uncinata"))
 	{
-		sp_filename = paste0(sp_filename, "_submodel")
-		filename = paste0(path_output, sp_filename, ".rds")
+		sp_filename = paste0(sp_filename, "_submodel.rds")
 		fit = readRDS(filename)
 		sim = sub_genQ$generate_quantities(fitted_params = fit, data = stanData_gen,
 			parallel_chains = min(4, n_chains))
 	} else {
-		filename = paste0(path_output, sp_filename, "_fullmodel.rds")
+		filename = paste0(path_output, sp_filename, "_fullmodel_theta.rds")
 		fit = readRDS(filename)
 		sim = full_genQ$generate_quantities(fitted_params = fit, data = stanData_gen,
 			parallel_chains = min(4, n_chains))
@@ -107,7 +108,7 @@ for (sp in ls_species)
 				n_verybad = sum(loo_vallet$diagnostics$pareto_k > 1)
 			}
 		}
-		
+
 		# ... for my model/submodel
 		r_eff = loo::relative_eff(exp(sim$draws("log_lik")), cores = 8)
 		loo_mine = loo::loo(x = sim$draws("log_lik"), r_eff = r_eff, cores = 8)
@@ -129,7 +130,7 @@ for (sp in ls_species)
 			.(warning_mine, warning_vallet)]
 
 		## Compute R squared for Vallet (already done in 13_compare_models.qmd for my sub/model)
-		# R squared for the volume,  based on Gelman 2019 as there are Pareto warnings (disqualify R2-loo)
+		# R squared for the volume, based on Gelman 2019 as there are Pareto warnings (disqualify R2-loo)
 		var_fit_vallet = apply(X = posterior::as_draws_matrix(sim_vallet$draws("v_gen_mean")),
 			MARGIN = 1, FUN = var) # The var contains the correction 1/(n - 1) already!
 		var_res_vallet = apply(X = posterior::as_draws_matrix(fit_vallet$draws("sigma")),
@@ -144,38 +145,23 @@ for (sp in ls_species)
 	pred_mine = apply(X = sim$draws("v_gen_mean"), MARGIN = 3, FUN = mean)
 
 	rm(sim, sim_vallet, fit, fit_vallet)
-	
-	plot(stanData_gen$total_volume_m3, pred_vallet, pch = 19, cex = 0.65,
-		xlab = "Observed", ylab = "Predictions", axes = FALSE)
-	points(stanData_gen$total_volume_m3, pred_mine, col = "#FAB255", pch = 19, cex = 0.45)
-	ind = pred_vallet < stanData_gen$bole_volume_m3
-	if (any(ind))
-		points(stanData_gen$total_volume_m3[ind], pred_vallet[ind], col = "#0F7BA2",
-			pch = 19, cex = 0.75)
-	legend("topleft", legend = c("Vallet", "Mine", "Pb Vallet"), fill = c("#000000", "#FAB255", "#0F7BA2"))
-	axis(1)
-	axis(2, las = 1)
-	abline(a = 0, b = 1, lwd = 2, col = "#CD212A")
 
-	## Check pred vs bole volume, is it always above the 1:1 line?
-	plot(stanData_gen$bole_volume_m3, pred_vallet, pch = 19, cex = 0.65,
-		xlab = "Bole volume", ylab = "Predictions", axes = FALSE)
-	points(stanData_gen$bole_volume_m3, pred_mine, col = "#FAB255", pch = 19, cex = 0.45)
 	ind = pred_vallet < stanData_gen$bole_volume_m3
-	if (any(ind))
-		points(stanData_gen$bole_volume_m3[ind], pred_vallet[ind], col = "#0F7BA2",
-			pch = 19, cex = 0.75)
-	axis(1)
-	axis(2, las = 1)
-	abline(a = 0, b = 1, lty = "dotted")
+
+	pgfplots_dt = data.table(obs = tree_dt[.(sp), total_volume_m3], vallet_2006 = tree_dt[.(sp), freq_vallet],
+		vallet_2026 = pred_vallet, mine = pred_mine)
+	pgfplots_dt[, pb_vallet := as.integer(ind)] # 0 = no problem, 1 = tot < bole
+	pgf_file = paste0(path_pgfplotsfig, "vallet-mine_", sp_filename, ".csv")
+
+	if (!file.exists(pgf_file))
+		fwrite(pgfplots_dt, pgf_file)
 }
 
 if (!file.exists(paste0(path_output, "comparison_vallet-mine.rds")))
 {
 	saveRDS(comp_dt, paste0(path_output, "comparison_vallet-mine.rds"))
 	saveRDS(R2D2, paste0(path_output, "rsquared_vallet.rds"))
-} else {
-	comp_dt = readRDS(paste0(path_output, "comparison_vallet-mine.rds"))
-	R2D2 = readRDS(paste0(path_output, "rsquared_vallet.rds"))
-}
 
+	fwrite(comp_dt, paste0(path_pgfplotstable, "comp_dt_vallet.csv"))
+	fwrite(R2D2, paste0(path_pgfplotstable, "rsquared_vallet.csv"))
+}
