@@ -34,7 +34,7 @@ if (!file.exists(tree_file))
 	inra = inra[, .(speciesName_sci, tree_id = unique_id, plot_id, fct_type, year, circumference_m, height,
 		taper_height = taper_height_flo, bole_volume_m3, total_volume_m3)]
 	setkey(inra, speciesName_sci)
-	
+
 	# Loading Swiss data (EFM protocol)
 	filename = paste0(path_data, "switzerland.rds")
 	if (!file.exists(filename))
@@ -43,7 +43,7 @@ if (!file.exists(tree_file))
 	swiss = unique(swiss[, .(speciesName_sci, tree_id, plot_id, fct_type, year, circumference_m, height,
 		taper_height = hdec, bole_volume_m3, total_volume_m3)])
 	setkey(swiss, speciesName_sci)
-	
+
 	# Modern Emerge data (Oudin's protocol, data collected in 2 campaigns 2009-2010)
 	filename = paste0(path_data, "emerge_2009-2010.rds")
 	if (!file.exists(filename))
@@ -52,13 +52,13 @@ if (!file.exists(tree_file))
 	emerge[, year := as.integer(stringi::stri_replace_all(str = dataset, replacement = "", regex = "emerge_"))]
 	emerge = emerge[, .(speciesName_sci, tree_id, fct_type, year, circumference_m, height, taper_height,
 		bole_volume_m3 = bole_volume_conic_m3, total_volume_m3)]
-	
+
 	# Species groups, determined during EMERGE project
 	filename = paste0(path_data, "ls-groups.rds")
 	if (!file.exists(filename))
 		stop(paste0("The file <", filename, "> does not exist! Check path and working directory"))
 	ls_groups = readRDS(filename)
-	
+
 	# Bind everything
 	tree_dt = rbindlist(list(inra = inra, swiss = swiss, emerge = emerge), idcol = "origin", fill = TRUE)
 	tree_dt[, r := bole_volume_m3/total_volume_m3]
@@ -74,6 +74,10 @@ ls_species = tree_dt[, .(n_indiv = .N), by = speciesName_sci][order(-n_indiv)]
 
 min_indiv = 150
 ls_species = ls_species[n_indiv > min_indiv]
+
+## Join Quercus sp. (609) with other Quercus but petraea, i.e., with ilex, pubescens, robur, and rubra
+tree_dt[speciesName_sci %in% c("Quercus ilex", "Quercus pubescens", "Quercus robur", "Quercus rubra"),
+	speciesName_sci := "Quercus sp."]
 
 ## Subset tree_dt and save the 14 species dataset
 tree_dt = tree_dt[speciesName_sci %in% ls_species[, speciesName_sci]]
