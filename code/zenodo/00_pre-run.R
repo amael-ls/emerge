@@ -35,8 +35,11 @@ if (!dir.exists(path_models))
 if (!dir.exists(path_output))
 	dir.create(path_output)
 
-if (!dir.exists(path_pgfplots))
-	dir.create(path_pgfplots)
+if (!dir.exists(path_pgfplotsfig))
+	dir.create(path_pgfplotsfig)
+
+if (!dir.exists(path_pgfplotstable))
+	dir.create(path_pgfplotstable)
 
 ## Check data
 tree_file = paste0(path_data, "tree_dt.rds")
