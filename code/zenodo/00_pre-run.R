@@ -5,10 +5,23 @@
 
 ## Packages needed to reproduce the study
 renv::restore()
+# renv::init() # TO REMOVE
+# renv::deactivate(clean = TRUE)
 
 library(data.table)
 library(cmdstanr)
 library(stringi)
+
+
+# # To remove after
+# library(MetBrewer)
+# library(bayesplot)
+# library(bayesboot)
+# library(posterior)
+# library(terra)
+# library(loo)
+
+# renv::snapshot() # Select 2
 
 ## Check/make directories
 source("./global_variables.R")
@@ -21,6 +34,9 @@ if (!dir.exists(path_models))
 
 if (!dir.exists(path_output))
 	dir.create(path_output)
+
+if (!dir.exists(path_pgfplots))
+	dir.create(path_pgfplots)
 
 ## Check data
 tree_file = paste0(path_data, "tree_dt.rds")
