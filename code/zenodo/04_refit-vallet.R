@@ -80,14 +80,14 @@ for (sp in ls_species)
 	}
 
 	bayes_params = getParams(results, paste0("vec_params[", 1:vallet_dt[sp, n_params], "]"), type = "mean")
-	
+
 	if (vallet_dt[sp, n_params] == 2)
 	{
 		names(bayes_params) = c("alpha", "beta")
 		freq_params = vallet_dt[sp, c(alpha, beta)]
 		names(freq_params) = names(bayes_params)
 	}
-	
+
 	if (vallet_dt[sp, n_params] == 3)
 	{
 		names(bayes_params) = c("alpha", "beta", "gamma")
@@ -101,14 +101,14 @@ for (sp in ls_species)
 			names(freq_params) = names(bayes_params)
 		}
 	}
-	
+
 	if (vallet_dt[sp, n_params] == 4)
 	{
 		names(bayes_params) = c("alpha", "beta", "gamma", "delta")
 		freq_params = vallet_dt[sp, c(alpha, beta, gamma, delta)]
 		names(freq_params) = names(bayes_params)
 	}
-	
+
 	tree_dt[sp, bayes_vallet :=
 		form_vallet(100*circumference_m, height, bayes_params, vallet_dt[sp, n_params], is_douglas)]
 	tree_dt[sp, freq_vallet :=
@@ -121,5 +121,3 @@ for (sp in ls_species)
 	axis(1)
 	axis(2, las = 1)
 }
-
-
