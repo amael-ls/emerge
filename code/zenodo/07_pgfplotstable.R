@@ -53,8 +53,8 @@ if (file.exists(paste0(path_output, "comparison_full-sub.rds")))
 	stop("You need to run 03_compare-models.R")
 }
 
-if (!file.exists(paste0(path_pgfplots, "comparison.csv")))
-	fwrite(comp, paste0(path_pgfplots, "comparison.csv"), na = "NaN")
+if (!file.exists(paste0(path_pgfplotstable, "comparison.csv")))
+	fwrite(comp, paste0(path_pgfplotstable, "comparison.csv"), na = "NaN")
 
 #### Work on R2
 ## Load R squared for bole volume
@@ -90,5 +90,5 @@ mean_totvol = tree_dt_14[, .(meanV = mean(total_volume_m3), q25 = quantile(total
 R2D2 = merge.data.table(R2D2, mean_totvol, by.x = "species", by.y = "speciesName_sci")
 R2D2[, rmse_percent := rmse_med/meanV*100]
 
-if (!file.exists(paste0(path_pgfplots, "rsquared.csv")))
-	fwrite(R2D2, paste0(path_pgfplots, "rsquared.csv"), na = "NaN")
+if (!file.exists(paste0(path_pgfplotstable, "rsquared.csv")))
+	fwrite(R2D2, paste0(path_pgfplotstable, "rsquared.csv"), na = "NaN")
