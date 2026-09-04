@@ -30,6 +30,7 @@ data{
 
 transformed data {
 	vector[N] hdn = sqrt(circumference_cm) ./ height;
+	vector[N] cylindre_vol = circumference_cm.^2 .* height/(40000*pi());
 }
 
 parameters {
@@ -38,11 +39,11 @@ parameters {
 }
 
 model {
-	target += normal_lpdf(vec_params[1] | 0, 0.4);
-	target += normal_lpdf(vec_params[2] | 0, 0.0005);
+	target += normal_lpdf(vec_params[1] | 0, 1);
+	target += normal_lpdf(vec_params[2] | 0, 0.001); // Circumference in cm, so not very large!
 
 	if (N_params > 2 && is_douglas != 1)
-		target += normal_lpdf(vec_params[3] | 0, 0.4);
+		target += normal_lpdf(vec_params[3] | 0, 1);
 	
 	if (is_douglas == 1)
 		target += normal_lpdf(vec_params[3] | 45, 10);
@@ -50,9 +51,9 @@ model {
 	if (N_params == 4)
 		target += normal_lpdf(vec_params[4] | 45, 10);
 	
-	target += gamma_lpdf(sigma | 0.06^2/0.01, 0.06/0.01);
+	target += gamma_lpdf(sigma | 0.3^2/0.05, 0.3/0.05); // mean = 0.3, sd = 0.2
 	
-	target += normal_lpdf(total_volume_m3 | vallet(circumference_cm, hdn, vec_params, N_params, is_douglas) ./
-		(40000*pi()) .* circumference_cm.^2 .* height, sigma);
+	target += normal_lpdf(total_volume_m3 | vallet(circumference_cm, hdn, vec_params, N_params, is_douglas) .*
+		cylindre_vol, sigma);
 }
 
