@@ -15,8 +15,7 @@ functions {
 			5 -> n,
 			6 -> s
 		*/
-		return (pars[4] - pars[1]) * exp(pars[2] *(1 - x/pars[3])) .*
-			(x/pars[3]).^pars[2] +
+		return (pars[4] - pars[1]) * exp(pars[2] *(1 - x/pars[3])) .* (x/pars[3]).^pars[2] +
 			pars[1] - (pars[1] - pars[5])*exp(-pars[6]*x);
 	}
 }
