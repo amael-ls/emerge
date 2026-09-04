@@ -54,24 +54,24 @@ for (gr in ls_groups)
 	)
 
 	## Run model
-	if (file.exists(paste0(path_data, gr, "_fullmodel.rds")))
+	if (file.exists(paste0(path_output, gr, "_fullmodel_theta.rds")))
 	{
-		fit = readRDS(paste0(path_data, gr, "_fullmodel.rds"))
+		fit = readRDS(paste0(path_output, gr, "_fullmodel_theta.rds"))
 	} else {
 		fit = fullmodel$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4),
 			iter_warmup = 1500, iter_sampling = 1000, max_treedepth = 10)
 
 		## Save results
-		fit$save_output_files(dir = path_data, basename = gr, random = FALSE)
-		saveRDS(fit, paste0(path_data, gr, "_fullmodel.rds"))
+		fit$save_output_files(dir = path_output, basename = gr, random = FALSE)
+		saveRDS(fit, paste0(path_output, gr, "_fullmodel_theta.rds"))
 	}
 
 	div = plot_gr(fit, gr, simplif = FALSE, n_bins = 4, pal = "Hiroshige", selected_variable = "height",
-		print_plot = TRUE)
+		print_plot = FALSE)
 
 	rhat_ok = max(div[["rhats"]]) <= 1.01
 	no_div = !div[["any_div"]]
-	
+
 	success_dt[.(gr), rhat_ok := ..rhat_ok]
 	success_dt[.(gr), no_div := ..no_div]
 
@@ -93,7 +93,7 @@ success_dt[, rhat_ok_sub := NA]
 success_dt[, no_div_sub := NA]
 
 ## Run model
-for (gr in ls_pb)
+for (gr in ls_groups)
 {
 	print(paste("Running", gr))
 
@@ -105,24 +105,24 @@ for (gr in ls_pb)
 	)
 
 	## Run model
-	if (file.exists(paste0(path_data, gr, "_submodel.rds")))
+	if (file.exists(paste0(path_output, gr, "_submodel.rds")))
 	{
-		fit = readRDS(paste0(path_data, gr, "_submodel.rds"))
+		fit = readRDS(paste0(path_output, gr, "_submodel.rds"))
 	} else {
 		fit = submodel$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4),
 			iter_warmup = 1500, iter_sampling = 1000, max_treedepth = 10)
 
 		## Save results
-		fit$save_output_files(dir = path_data, basename = paste0(gr, "_submodel"), random = FALSE)
-		saveRDS(fit, paste0(path_data, gr, "_submodel.rds"))
+		fit$save_output_files(dir = path_output, basename = paste0(gr, "_submodel"), random = FALSE)
+		saveRDS(fit, paste0(path_output, gr, "_submodel.rds"))
 	}
 
 	div = plot_gr(fit, gr, simplif = TRUE, n_bins = 4, pal = "Hiroshige", selected_variable = "height",
-		print_plot = TRUE)
+		print_plot = FALSE)
 
 	rhat_ok = max(div[["rhats"]]) <= 1.01
 	no_div = !div[["any_div"]]
-	
+
 	success_dt[.(gr), rhat_ok_sub := ..rhat_ok]
 	success_dt[.(gr), no_div_sub := ..no_div]
 
@@ -132,5 +132,59 @@ for (gr in ls_pb)
 
 success_dt[, success_sub := rhat_ok_sub & no_div_sub]
 
+success_dt[, any_success := success_full | success_sub]
+
 if (!file.exists(paste0(path_output, "group-success.rds")))
 	saveRDS(success_dt, paste0(path_output, "group-success.rds"))
+
+
+
+# ----------------------------------------------------------------------------------------
+# ------------------    Run the full model, for broadleaves/conifers    ------------------
+# ----------------------------------------------------------------------------------------
+
+setkey(tree_dt, fct_type)
+
+## Run model for broadleaves
+filename = "broadleaf"
+
+# Subset to broadleaves
+stanData = list(
+	N = tree_dt[.("broadleaf")][, .N],
+	bole_volume_m3 = tree_dt[.("broadleaf")][, bole_volume_m3],
+	total_volume_m3 = tree_dt[.("broadleaf")][, total_volume_m3]
+)
+
+# Run model
+if (!file.exists(paste0(path_output, filename, ".rds")))
+{
+	fit = fullmodel$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4),
+		iter_warmup = 1500, iter_sampling = 1000, max_treedepth = 10, seed = seed_dt["broadleaf", full])
+
+	## Save results
+	fit$save_output_files(dir = path_output, basename = filename, random = FALSE)
+	saveRDS(fit, paste0(path_output, filename, ".rds"))
+}
+
+
+
+## Run model for conifers
+filename = "conifer"
+
+# Subset to conifers
+stanData = list(
+	N = tree_dt[.("conifer")][, .N],
+	bole_volume_m3 = tree_dt[.("conifer")][, bole_volume_m3],
+	total_volume_m3 = tree_dt[.("conifer")][, total_volume_m3]
+)
+
+# Run model
+if (!file.exists(paste0(path_output, filename, ".rds")))
+{
+	fit = fullmodel$sample(data = stanData, chains = n_chains, parallel_chains = min(n_chains, 4),
+		iter_warmup = 1500, iter_sampling = 1000, max_treedepth = 10, seed = seed_dt["broadleaf", full])
+
+	## Save results
+	fit$save_output_files(dir = path_output, basename = filename, random = FALSE)
+	saveRDS(fit, paste0(path_output, filename, ".rds"))
+}
