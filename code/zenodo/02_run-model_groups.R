@@ -3,8 +3,6 @@
 # This file is to run the pooled species models
 
 ## Packages needed to reproduce the study
-renv::restore()
-
 library(data.table)
 library(cmdstanr)
 library(stringi)
