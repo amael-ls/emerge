@@ -3,30 +3,30 @@
 # We compare our approach fitted in 01 and 02, and selected in 03 with the Bayesian
 # 	version of Vallet 2006 fitted in file 04 for 7 species
 
-## Packages needed to reproduce the study
+#### Load packages
 library(data.table)
 library(cmdstanr)
 library(stringi)
 
-## Load data
-# Tool functions
+#### Load data
+## Tool functions
 source("./tool_functions.R")
 
-# Global variables (paths and others)
+## Global variables (paths and others)
 source("./global_variables.R")
 
-# Loading training dataset
+## Loading training dataset
 tree_dt = readRDS(paste0(path_output, "pred_vallet.rds"))
 training_dt = readRDS(paste0(path_data, "tree_dt_14species.rds")) # Dataset used for the full and submodel
 
-# Species parametrised in Vallet et al. 2006
+## Species parametrised in Vallet et al. 2006
 ls_species = c("Abies alba", "Fagus sylvatica", "Picea abies", "Pinus pinaster", "Pinus sylvestris",
 	"Pseudotsuga menziesii", "Quercus petraea")
 training_dt = training_dt[ls_species]
 setkey(training_dt, speciesName_sci)
 
-## Run comparison
-# Compile models
+#### Run comparison
+## Compile models
 vallet_genQ = cmdstan_model(paste0(path_models, "vallet-genQ.stan"))
 full_genQ = cmdstan_model(paste0(path_models, "fullmodel-genQ.stan"))
 sub_genQ = cmdstan_model(paste0(path_models, "submodel-genQ.stan"))

@@ -6,7 +6,7 @@
 #		Modeling Volume Expansion Factors for Temperate Tree Species in France.
 #		Forest Ecology and Management 292: 111–21. https://doi.org/10.1016/j.foreco.2012.12.023.
 
-#### Packages needed to reproduce the study
+#### Load packages
 library(data.table)
 library(cmdstanr)
 library(stringi)
