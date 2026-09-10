@@ -8,12 +8,12 @@ functions {
 	{
 		/*
 			The vector of parameters, pars, is in this order:
-			1 -> alpha,
+			1 -> logit_alpha, around 1.4 to be around 0.8 on the real scale
 			2 -> beta,
 			3 -> gamma
 			4 -> delta
 		*/
-		return pars[1] + exp(-pars[2]*x) .* (pars[3]*x + pars[4]);
+		return inv_logit(pars[1] + exp(-pars[2]*x) .* (pars[3]*x + pars[4]));
 	}
 }
 
@@ -44,6 +44,7 @@ parameters {
 
 transformed parameters {
 	real alpha = 0.6 + 0.4*c_alpha; // Forces alpha (=c the asymptote) to be between 0.6 and 1
+	real logit_alpha = logit(alpha); // pars[1] in r_4_params
 	vector [N] shape1 = phi*r_4_params(bole_volume_m3, [alpha, beta_, gamma, delta]);
 	vector [N] shape2 = phi*(1 - r_4_params(bole_volume_m3, [alpha, beta_, gamma, delta]));
 }

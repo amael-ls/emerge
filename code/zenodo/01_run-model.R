@@ -121,6 +121,62 @@ for (sp in ls_species)
 
 
 #### DRAFT ZONE --------------------------------------------------------------------------------
+## Set priors for the submodel using logit
+logit(inv_logit(0.01))
+
+logit(0.2)
+logit(0.9)
+
+(mu = inv_logit(-1.4)) # Gives 0.2
+(mu = inv_logit(2.20))
+
+## Prior for delta:
+#	I want alpha + delta = 0.2
+#	alpha is around 0.8
+#	Thus delta is -0.6.
+#	On the log scale, I want alpha + delta = -1.4, with alpha = 1.4 (inv_logit(1.4) = 0.8)
+#	So, I need to be around -2.8
+
+mu = function(alpha, delta)
+	return(alpha + delta)
+
+alpha = rnorm(1e4, mean = 1.4, sd = 0.1)
+delta = rnorm(1e4, mean = -2.8, sd = 0.1)
+
+hist(inv_logit(mu(alpha, delta)))
+
+mu = function(x, alpha, beta, gamma, delta)
+	return(alpha + exp(-beta*x)*(gamma*x + delta))
+
+curve(mu(x, 0.8, 11.93, 4, -0.37), to = 5)
+curve(logit(mu(x, 0.8, 11.93, 4, -0.37)), to = 5)
+
+prior_pred_check = function(x, n)
+{
+	c_alpha = rbeta(n = n, shape1 = 3, shape2 = 3)
+	alpha = 0.6 + 0.4*c_alpha
+	logit_alpha = logit(alpha)
+
+	beta = rgamma(n = n, shape = 8, rate = 2)
+
+	gamma = rgamma(n = n, shape = 1, rate = 3.5)
+
+	delta = rnorm(n = n, mean = -2.8, sd = 1)
+
+	mu = matrix(data = NA_real_, nrow = n, ncol = length(x))
+	for (i in 1:n)
+		mu[i, ] = logit_alpha[i] + exp(-beta[i]*x)*(gamma[i]*x + delta[i])
+
+	return(inv_logit(mu))
+}
+
+vbole = seq(0.01, 5, length.out = 30)
+test = inv_logit(prior_pred_check(x = vbole, n = 1e2))
+
+plot(1, type = "n", xlim = range(vbole), ylim = c(0, 1), xlab = "V bole", ylab = "ratio")
+for (i in seq_len(nrow(test)))
+	lines(vbole, test[i, ])
+
 # Extract posterior draws
 draws_df = setDT(posterior::as_draws_df(fit$draws(variables = c("c", "j", "k", "m", "n", "s", "tau", "theta"))))
 setnames(draws_df, old = c(".chain", ".iteration", ".draw"), new = c("chain", "iteration", "draw"))
