@@ -4,10 +4,6 @@
 # 	version of Vallet 2006 fitted in file 04 for 7 species
 
 ## Packages needed to reproduce the study
-# renv::restore()
-
-rm(list = ls())
-
 library(data.table)
 library(cmdstanr)
 library(stringi)
