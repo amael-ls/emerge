@@ -4,24 +4,7 @@
 # install.packages("cmdstanr", repos = c('https://stan-dev.r-universe.dev', getOption("repos")))
 
 ## Packages needed to reproduce the study
-renv::restore()
-# renv::init() # TO REMOVE
-# renv::deactivate(clean = TRUE)
-
 library(data.table)
-library(cmdstanr)
-library(stringi)
-
-
-# # To remove after
-# library(MetBrewer)
-# library(bayesplot)
-# library(bayesboot)
-# library(posterior)
-# library(terra)
-# library(loo)
-
-# renv::snapshot() # Select 2
 
 ## Check/make directories
 source("./global_variables.R")
@@ -108,8 +91,7 @@ if (!file.exists(filename))
 
 ## Check stan installation, help can be found at https://mc-stan.org/cmdstanr/index.html
 cmdstanr::cmdstan_path()
-if (cmdstanr::cmdstan_path() == "")
-	warning("You might have to install Stan language or to set the correct path")
+
 # cmdstanr::check_cmdstan_toolchain()
 # cmdstanr::install_cmdstan(cores = 2)
 # cmdstanr::cmdstan_version() # I used the version 2.39.0
@@ -119,10 +101,10 @@ if (cmdstanr::cmdstan_path() == "")
 filename = paste0(path_models, "fullmodel.stan")
 if (!file.exists(filename))
 	stop(paste0("The model <", filename, "> could not be found"))
-fullmodel = cmdstan_model(filename)
+fullmodel = cmdstanr::cmdstan_model(filename)
 
 # Submodel
 filename = paste0(path_models, "submodel.stan")
 if (!file.exists(filename))
 	stop(paste0("The model <", filename, "> could not be found"))
-submodel = cmdstan_model(filename)
+submodel = cmdstanr::cmdstan_model(filename)
