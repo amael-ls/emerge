@@ -1,3 +1,26 @@
+#### Aim of script: Contains miscellaneous functions
+## Comments
+# Line 5: form_vallet, predicts total volume from Vallet 2006
+# Line 23: getParams, extract/sum-up draws from Bayesian fit
+
+## Function to predict total volume from Vallet 2006
+form_vallet = function(circumference_cm, height, params, n_params, is_douglas)
+{
+	res = params["alpha"] + params["beta"]*circumference_cm
+
+	if (is_douglas == 1)
+		return(res*(1 + params["delta"]/circumference_cm^2))
+	
+	if (n_params >= 3)
+		res = res + params["gamma"]*sqrt(circumference_cm)/height
+
+	if (n_params == 4)
+		res = res*(1 + params["delta"]/circumference_cm^2)
+	
+	res = res/(40000*pi) * circumference_cm^2*height # Conversion to volume
+	return(res)
+}
+
 ## Get fixed values parameters (will not work for draws with third dimension > 1)
 getParams = function(model_cmdstan, params_names, type = "mean", ...)
 {
@@ -181,48 +204,158 @@ lazyTrace = function(draws, filename = NULL, ...)
 ## Function to plot divergences (when any during Bayesian run)
 plot_divergences = function(fit, div, simplif = FALSE)
 {
-	params = getParams(model_cmdstan = fit, params_names = c("c", "j", "k", "m", "n", "s"), type = "all")
+	params = getParams(model_cmdstan = fit, params_names = c("c", "j", "k", "m", "n", "s", "tau"), type = "all")
 
 	div_c = posterior::subset_draws(params[, , "c"], draw = which(div == 1))
 	div_j = posterior::subset_draws(params[, , "j"], draw = which(div == 1))
-	div_m = posterior::subset_draws(params[, , "m"], draw = which(div == 1))
 	div_k = posterior::subset_draws(params[, , "k"], draw = which(div == 1))
+	div_m = posterior::subset_draws(params[, , "m"], draw = which(div == 1))
+	div_n = posterior::subset_draws(params[, , "n"], draw = which(div == 1))
 	div_s = posterior::subset_draws(params[, , "s"], draw = which(div == 1))
+	div_tau = posterior::subset_draws(params[, , "tau"], draw = which(div == 1))
 
-	# Plot divergence for c and j
+	# Plot divergence for m and...
+	# ... c
+	plot(params[, , "m"], params[, , "c"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "c", ylab = "c", main = "m and c")
+	points(div_c, div_j, pch = 18, col = "#0F7BA2")
+
+	# ... and tau
+	plot(params[, , "m"], params[, , "tau"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "c", ylab = "tau", main = "m and tau")
+	points(div_c, div_j, pch = 18, col = "#0F7BA2")
+
+	# ... and j
+	plot(params[, , "m"], params[, , "j"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "c", ylab = "j", main = "m and j")
+	points(div_c, div_j, pch = 18, col = "#0F7BA2")
+
+	# ... and n
+	plot(params[, , "m"], params[, , "n"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "c", ylab = "n", main = "m and n")
+	points(div_c, div_j, pch = 18, col = "#0F7BA2")
+
+	# ... and s
+	plot(params[, , "m"], params[, , "s"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "c", ylab = "s", main = "m and s")
+	points(div_c, div_j, pch = 18, col = "#0F7BA2")
+
+
+
+	# Plot divergence for c and...
+	# ... and tau
+	plot(params[, , "c"], params[, , "tau"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "c", ylab = "tau", main = "c and tau")
+	points(div_c, div_j, pch = 18, col = "#0F7BA2")
+
+	# ... and j
 	plot(params[, , "c"], params[, , "j"], pch = 19, cex = 0.65, col = "#FAB255",
 		xlab = "c", ylab = "j", main = "c and j")
 	points(div_c, div_j, pch = 18, col = "#0F7BA2")
 
-	# Plot divergence for c and k
-	plot(params[, , "c"], params[, , "k"], pch = 19, cex = 0.65, col = "#FAB255",
-		xlab = "c", ylab = "k", main = "c and k")
-	points(div_c, div_k, pch = 18, col = "#0F7BA2")
+	# ... and n
+	plot(params[, , "c"], params[, , "n"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "c", ylab = "n", main = "c and n")
+	points(div_c, div_j, pch = 18, col = "#0F7BA2")
 
-	# Plot divergence for c and m
-	plot(params[, , "c"], params[, , "m"], pch = 19, cex = 0.65, col = "#FAB255",
-		xlab = "c", ylab = "m", main = "c and m")
-	points(div_c, div_m, pch = 18, col = "#0F7BA2")
+	# ... and s
+	plot(params[, , "c"], params[, , "s"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "c", ylab = "s", main = "c and s")
+	points(div_c, div_j, pch = 18, col = "#0F7BA2")
 
-	# Plot divergence for j and k
-	plot(params[, , "j"], params[, , "k"], pch = 19, cex = 0.65, col = "#FAB255",
-		xlab = "j", ylab = "k", main = "j and k")
-	points(div_j, div_k, pch = 18, col = "#0F7BA2")
 
-	# Plot divergence for j and m
-	plot(params[, , "j"], params[, , "m"], pch = 19, cex = 0.65, col = "#FAB255",
-		xlab = "j", ylab = "m", main = "j and m")
-	points(div_j, div_m, pch = 18, col = "#0F7BA2")
 
-	# Plot divergence for k and m
-	plot(params[, , "k"], params[, , "m"], pch = 19, cex = 0.65, col = "#FAB255",
-		xlab = "k", ylab = "m", main = "k and m")
-	points(div_k, div_m, pch = 18, col = "#0F7BA2")
+	# Plot divergence for tau and...
+	# ... and j
+	plot(params[, , "tau"], params[, , "j"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "tau", ylab = "j", main = "tau and j")
+	points(div_c, div_j, pch = 18, col = "#0F7BA2")
+
+	# ... and n
+	plot(params[, , "tau"], params[, , "n"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "tau", ylab = "n", main = "tau and n")
+	points(div_c, div_j, pch = 18, col = "#0F7BA2")
+
+	# ... and s
+	plot(params[, , "tau"], params[, , "s"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "tau", ylab = "s", main = "tau and s")
+	points(div_c, div_j, pch = 18, col = "#0F7BA2")
+
+
+
+	# Plot divergence for j and...
+	# ... and n
+	plot(params[, , "j"], params[, , "n"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "j", ylab = "n", main = "j and n")
+	points(div_c, div_j, pch = 18, col = "#0F7BA2")
+
+	# ... and s
+	plot(params[, , "j"], params[, , "s"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "j", ylab = "s", main = "j and s")
+	points(div_c, div_j, pch = 18, col = "#0F7BA2")
+
+
+
+	# Plot divergence for n and...
+	# ... and s
+	plot(params[, , "n"], params[, , "s"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "n", ylab = "s", main = "n and s")
+	points(div_c, div_j, pch = 18, col = "#0F7BA2")
+}
+
+## Function to plot joint posterior of two parameters
+plot_joint = function(fit, params, div)
+{
+	if (length(params) > 6)
+		stop("Too many parameters, choose 6 params at most")
 	
-	# Bonus plots of susceptible correlated parameters: k and s
-	plot(params[, , "k"], params[, , "s"], pch = 19, cex = 0.65, col = "#FAB255",
-		xlab = "k", ylab = "s", main = "k and s")
-	points(div_k, div_s, pch = 18, col = "#0F7BA2")
+}
+
+## Function to plot joint posterior of two parameters
+plot_joint_dirty = function(fit, div)
+{
+	params = getParams(model_cmdstan = fit, params_names = c("alpha", "beta_", "gamma", "delta"), type = "all")
+	div_a = posterior::subset_draws(params[, , "alpha"], draw = which(div == 1))
+	div_b = posterior::subset_draws(params[, , "beta_"], draw = which(div == 1))
+	div_c = posterior::subset_draws(params[, , "gamma"], draw = which(div == 1))
+	div_d = posterior::subset_draws(params[, , "delta"], draw = which(div == 1))
+
+	# Plot divergence for alpha and...
+	# ... and beta_
+	plot(params[, , "alpha"], params[, , "beta_"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "alpha", ylab = "beta_", main = "alpha and beta_")
+	points(div_a, div_b, pch = 18, col = "#0F7BA2")
+
+	# ... and gamma
+	plot(params[, , "alpha"], params[, , "gamma"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "alpha", ylab = "gamma", main = "alpha and gamma")
+	points(div_a, div_c, pch = 18, col = "#0F7BA2")
+
+	# ... and delta
+	plot(params[, , "alpha"], params[, , "delta"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "alpha", ylab = "delta", main = "alpha and delta")
+	points(div_a, div_d, pch = 18, col = "#0F7BA2")
+
+
+
+	# Plot divergence for beta_ and...
+	# ... and gamma
+	plot(params[, , "beta_"], params[, , "gamma"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "beta_", ylab = "gamma", main = "beta_ and gamma")
+	points(div_b, div_c, pch = 18, col = "#0F7BA2")
+
+	# ... and delta
+	plot(params[, , "beta_"], params[, , "delta"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "beta_", ylab = "delta", main = "beta_ and delta")
+	points(div_b, div_d, pch = 18, col = "#0F7BA2")
+
+
+
+	# Plot divergence for gamma and...
+	# ... and delta
+	plot(params[, , "gamma"], params[, , "delta"], pch = 19, cex = 0.65, col = "#FAB255",
+		xlab = "gamma", ylab = "delta", main = "gamma and delta")
+	points(div_c, div_d, pch = 18, col = "#0F7BA2")
 }
 
 ## Function to plot a species fit (simplif = TRUE for submodel)
@@ -549,8 +682,6 @@ plot_gr = function(fit, gr, forest = tree_dt[.(gr)], pred = TRUE, simplif = FALS
 			obs_bole = forest[, bole_volume_m3], obs_tot = forest[, total_volume_m3], params = paramsVec))
 	}
 
-	print("Hello 3")
-
 	# Plot chains if any rhat problem
 	if (any(rhats > 1.05))
 	{
@@ -652,8 +783,8 @@ rebuild_comp = function(save_ls)
 	for (sp in ls_species)
 	{
 		weights_dt[sp, c("W_full", "W_sub") := as.list(save_ls[[sp]]$weights)]
-	  
-	  comp[.(sp), c("best", "elpd_diff", "se_diff", "warning") :=
+
+		comp[.(sp), c("best", "elpd_diff", "se_diff", "warning") :=
 			.(save_ls[[sp]]$comploo[1, "model"], save_ls[[sp]]$comploo[2, "elpd_diff"],
 			save_ls[[sp]]$comploo[2, "se_diff"], save_ls[[sp]]$warning)]
 
@@ -703,11 +834,14 @@ comparison_full_sub = function(sp, tree_dt, path_models, path_output,
 	)
 
 	## Load fitted model
-	full_file = paste0(path_output, stringi::stri_replace(str = sp, regex = " ", replacement = "-"), "_fullmodel")
+	full_file = paste0(path_output, stringi::stri_replace(str = sp, regex = " ", replacement = "-"), "_fullmodel_theta")
 	sub_file = paste0(path_output, stringi::stri_replace(str = sp, regex = " ", replacement = "-"), "_submodel")
 
 	if (sp == "Quercus sp.")
+	{
 		full_file = stringi::stri_replace(str = full_file, regex = "._", replacement = "_")
+		sub_file = stringi::stri_replace(str = sub_file, regex = "._", replacement = "_")
+	}
 
 	full = readRDS(paste0(full_file, ".rds"))
 	sub = readRDS(paste0(sub_file, ".rds"))
@@ -889,4 +1023,60 @@ comparison_full_sub = function(sp, tree_dt, path_models, path_output,
 		rsq_loo_distrib_r = list(full = r2_loo_full_r, sub = r2_loo_sub_r),
 		rsq_loo_distrib_v = list(full = r2_loo_full_vtot, sub = r2_loo_sub_vtot),
 		rhat_full = rhat_full_m, rhat_sub = rhat_sub_m))
+}
+
+## Function to compute "traditional" RMSE
+RMSE_bayes = function(sp, tree_dt, path_output, path_models, is_simplif = FALSE,
+	woodstock_seed = 1969 - 08 - 18)
+{
+	#### Generate quantitities
+	## Compile generator models
+	genQ = cmdstanr::cmdstan_model(paste0(path_models, "fullmodel-genQ.stan"))
+	filename = paste0(path_output, stringi::stri_replace(str = sp, regex = " ", replacement = "-"),
+		"_fullmodel_theta.rds")
+
+	if (is_simplif)
+	{
+		genQ = cmdstanr::cmdstan_model(paste0(path_models, "submodel-genQ.stan"))
+		filename = paste0(path_output, stringi::stri_replace(str = sp, regex = " ", replacement = "-"),
+			"_submodel.rds")
+	}
+
+	if (sp == "Quercus sp.")
+	{
+		filename = stri_replace_first(str = filename, regex = "\\._fullmodel",
+			replacement = "_fullmodel")
+		filename = stri_replace_first(str = filename, regex = "\\._submodel",
+			replacement = "_submodel")
+	}
+
+	## Prepare data
+	stanData = list(
+		N = tree_dt[.(sp)][, .N],
+		N_new = tree_dt[.(sp)][, .N],
+		bole_volume_m3 = tree_dt[.(sp)][, bole_volume_m3],
+		bole_volume_m3_new = tree_dt[.(sp)][, bole_volume_m3],
+		total_volume_m3 = tree_dt[.(sp)][, total_volume_m3],
+		total_volume_m3_new = tree_dt[.(sp)][, total_volume_m3]
+	)
+
+	## Compute rmse with respect to the mean
+	fit = readRDS(filename)
+	n_chains = fit$num_chains()
+	sim = genQ$generate_quantities(fitted_params = fit, data = stanData,
+		seed = woodstock_seed, parallel_chains = min(n_chains, 4))
+
+	sim = posterior::as_draws_matrix(sim$draws("v_gen_mean"))
+	rmse = numeric(dim(sim)[1])
+	mape = numeric(dim(sim)[1])
+
+	n_indiv = tree_dt[.(sp)][, .N]
+
+	for (i in seq_along(rmse))
+	{
+		rmse[i] = sqrt(1/n_indiv * sum((sim[i,] - tree_dt[.(sp)][, total_volume_m3])^2))
+		mape[i] = 100/n_indiv * sum(abs((sim[i,] - tree_dt[.(sp)][, total_volume_m3])/tree_dt[.(sp)][, total_volume_m3]))
+	}
+
+	return(list(rmse = rmse, mape = mape))
 }
