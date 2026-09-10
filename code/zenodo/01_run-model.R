@@ -10,6 +10,8 @@ library(data.table)
 library(cmdstanr)
 library(stringi)
 
+options(max.print = 500)
+
 #### Load data
 ## Tool functions
 source("./tool_functions.R")
@@ -26,7 +28,9 @@ seed_dt = readRDS(paste0(path_data, "ls_seeds.rds"))
 
 ## Load stan models
 fullmodel = cmdstan_model(paste0(path_models, "fullmodel.stan"))
-submodel = cmdstan_model(paste0(path_models, "submodel.stan"))
+submodel =  submodel = cmdstanr::cmdstan_model(stan_file = file.path(path_models, "submodel.stan"),
+	dir = "~/work/stan_models/")
+
 
 
 
@@ -78,12 +82,12 @@ for (sp in ls_species)
 # ---------------------------------------------------------------------------------------
 # ---------------------    Run the sub model, for the 14 species    ---------------------
 # ---------------------------------------------------------------------------------------
-
+sp = "Pinus uncinata"
 for (sp in ls_species)
 {
 	print(paste("Running", sp))
 
-	filename = paste0(stri_replace(str = sp, regex = " ", replacement = "-"), "_submodel")
+	filename = paste0(stri_replace(str = sp, regex = " ", replacement = "-"), "_submodel_logit")
 	le_cid = seed_dt[.(sp), submodel]
 
 	if (sp == "Quercus sp.")
@@ -122,13 +126,19 @@ for (sp in ls_species)
 
 #### DRAFT ZONE --------------------------------------------------------------------------------
 ## Set priors for the submodel using logit
+logit = function(x)
+	return (log(x/(1 - x)))
+
+inv_logit = function(x)
+	return (1/(1 + exp(-x)))
+
 logit(inv_logit(0.01))
 
 logit(0.2)
 logit(0.9)
 
 (mu = inv_logit(-1.4)) # Gives 0.2
-(mu = inv_logit(2.20))
+(mu = inv_logit(2.20)) # Gives 0.9
 
 ## Prior for delta:
 #	I want alpha + delta = 0.2
@@ -137,19 +147,11 @@ logit(0.9)
 #	On the log scale, I want alpha + delta = -1.4, with alpha = 1.4 (inv_logit(1.4) = 0.8)
 #	So, I need to be around -2.8
 
-mu = function(alpha, delta)
-	return(alpha + delta)
-
-alpha = rnorm(1e4, mean = 1.4, sd = 0.1)
-delta = rnorm(1e4, mean = -2.8, sd = 0.1)
-
-hist(inv_logit(mu(alpha, delta)))
-
-mu = function(x, alpha, beta, gamma, delta)
+mu_fct = function(x, alpha, beta, gamma, delta)
 	return(alpha + exp(-beta*x)*(gamma*x + delta))
 
-curve(mu(x, 0.8, 11.93, 4, -0.37), to = 5)
-curve(logit(mu(x, 0.8, 11.93, 4, -0.37)), to = 5)
+curve(mu_fct(x, 0.8, 11.93, 4, -0.37), to = 5)
+curve(logit(mu_fct(x, 0.8, 11.93, 4, -0.37)), to = 5)
 
 prior_pred_check = function(x, n)
 {
@@ -157,25 +159,29 @@ prior_pred_check = function(x, n)
 	alpha = 0.6 + 0.4*c_alpha
 	logit_alpha = logit(alpha)
 
-	beta = rgamma(n = n, shape = 8, rate = 2)
+	beta = rgamma(n = n, shape = 2^2/2^2, rate = 2/2^2)
 
-	gamma = rgamma(n = n, shape = 1, rate = 3.5)
+	# gamma = rnorm(n = n, mean = 0, sd = 1)
+	gamma = rgamma(n = n, shape = 2^2/2^2, rate = 2/2)
 
 	delta = rnorm(n = n, mean = -2.8, sd = 1)
 
 	mu = matrix(data = NA_real_, nrow = n, ncol = length(x))
 	for (i in 1:n)
-		mu[i, ] = logit_alpha[i] + exp(-beta[i]*x)*(gamma[i]*x + delta[i])
+		mu[i, ] = mu_fct(x, logit_alpha[i], beta[i], gamma[i], delta[i])
 
-	return(inv_logit(mu))
+	return(list(y = inv_logit(mu), alpha = logit_alpha, beta = beta, gamma = gamma, delta = delta, n = n))
 }
 
 vbole = seq(0.01, 5, length.out = 30)
-test = inv_logit(prior_pred_check(x = vbole, n = 1e2))
+test = prior_pred_check(x = vbole, n = 1e3)
 
 plot(1, type = "n", xlim = range(vbole), ylim = c(0, 1), xlab = "V bole", ylab = "ratio")
-for (i in seq_len(nrow(test)))
-	lines(vbole, test[i, ])
+for (i in seq_len(test[["n"]]))
+	lines(vbole, test[["y"]][i, ])
+
+hist(test[["beta"]])
+hist(test[["gamma"]])
 
 # Extract posterior draws
 draws_df = setDT(posterior::as_draws_df(fit$draws(variables = c("c", "j", "k", "m", "n", "s", "tau", "theta"))))
