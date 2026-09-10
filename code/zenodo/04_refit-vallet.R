@@ -10,8 +10,6 @@
 # 	our dataset which is well extended by Swiss data for that species.
 
 ## Packages needed to reproduce the study
-renv::restore()
-
 library(data.table)
 library(cmdstanr)
 library(stringi)
