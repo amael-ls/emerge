@@ -11,19 +11,19 @@
 #		Efficient Estimation and Correction of Selection-Induced Bias with Order Statistics.
 #		Statistics and Computing 34 (4): 132. https://doi.org/10.1007/s11222-024-10442-4.
 
-## Packages needed to reproduce the study
+#### Load packages
 library(data.table)
 library(cmdstanr)
 library(stringi)
 
-## Load data
-# Tool functions
+#### Load data
+## Tool functions
 source("./tool_functions.R")
 
-# Global variables (paths and others)
+## Global variables (paths and others)
 source("./global_variables.R")
 
-# Tree data (14 species)
+## Tree data (14 species)
 tree_dt = readRDS(paste0(path_data, "tree_dt_14species.rds"))
 
 # ------------------------------------------------------------------------------------------

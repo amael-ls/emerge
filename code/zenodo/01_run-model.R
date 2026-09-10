@@ -5,26 +5,26 @@
 # species to paramtrise are, without surprise, the most abundant.
 # For a quick test, use sp = "Fraxinus excelsior", it is the fastest to run
 
-## Packages needed to reproduce the study
+#### Load packages
 library(data.table)
 library(cmdstanr)
 library(stringi)
 
-## Load data
-# Tool functions
+#### Load data
+## Tool functions
 source("./tool_functions.R")
 
-# Global variables (paths and others)
+## Global variables (paths and others)
 source("./global_variables.R")
 
-# Tree data (14 species)
+## Tree data (14 species)
 tree_dt = readRDS(paste0(path_data, "tree_dt_14species.rds"))
 ls_species = tree_dt[, unique(speciesName_sci)]
 
-# Seeds that were used to run the models (full and submodel)
+## Seeds that were used to run the models (full and submodel)
 seed_dt = readRDS(paste0(path_data, "ls_seeds.rds"))
 
-# Load stan models
+## Load stan models
 fullmodel = cmdstan_model(paste0(path_models, "fullmodel.stan"))
 submodel = cmdstan_model(paste0(path_models, "submodel.stan"))
 

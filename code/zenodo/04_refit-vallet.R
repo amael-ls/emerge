@@ -9,33 +9,33 @@
 # We found that the predictions are quite similar, except for Abies alba. This might originate from
 # 	our dataset which is well extended by Swiss data for that species.
 
-## Packages needed to reproduce the study
+#### Load packages
 library(data.table)
 library(cmdstanr)
 library(stringi)
 
-## Load data
-# Tool functions
+#### Load data
+## Tool functions
 source("./tool_functions.R")
 
-# Global variables (paths and others)
+## Global variables (paths and others)
 source("./global_variables.R")
 
-# Loading training dataset
+## Loading training dataset
 tree_dt = readRDS(paste0(path_data, "tree_dt_14species.rds"))
 tree_dt = tree_dt[(!is.na(circumference_m)) & (!is.na(height))]
 
-# Species parametrised in Vallet et al. 2006
+## Species parametrised in Vallet et al. 2006
 ls_species = c("Abies alba", "Fagus sylvatica", "Picea abies", "Pinus pinaster", "Pinus sylvestris",
 	"Pseudotsuga menziesii", "Quercus petraea")
 tree_dt = tree_dt[ls_species]
 setkey(tree_dt, speciesName_sci)
 
-## Refit Vallet 2006 in Bayesian with our dataset
-# Compile
+#### Refit Vallet 2006 in Bayesian with our dataset
+## Compile
 vallet_bayesian = cmdstan_model(paste0(path_models, "vallet.stan"))
 
-# Run Bayesian fit and compare with original Freq fit
+## Run Bayesian fit and compare with original Freq fit
 for (sp in ls_species)
 {
 	sp_filename = stri_replace(str = sp, replacement = "-", regex = " ")

@@ -109,8 +109,29 @@ if (!file.exists(filename))
 	stop(paste0("The model <", filename, "> could not be found"))
 fullmodel = cmdstanr::cmdstan_model(filename)
 
+filename = paste0(path_models, "fullmodel-genQ.stan")
+if (!file.exists(filename))
+	stop(paste0("The model <", filename, "> could not be found"))
+full_genQ = cmdstanr::cmdstan_model(filename)
+
 ## Submodel
 filename = paste0(path_models, "submodel.stan")
 if (!file.exists(filename))
 	stop(paste0("The model <", filename, "> could not be found"))
 submodel = cmdstanr::cmdstan_model(filename)
+
+filename = paste0(path_models, "submodel-genQ.stan")
+if (!file.exists(filename))
+	stop(paste0("The model <", filename, "> could not be found"))
+sub_genQ = cmdstanr::cmdstan_model(filename)
+
+## Vallet's model (Bayesian refit of the study from Vallet et al, 2006)
+filename = paste0(path_models, "vallet.stan")
+if (!file.exists(filename))
+	stop(paste0("The model <", filename, "> could not be found"))
+vallet = cmdstanr::cmdstan_model(filename)
+
+filename = paste0(path_models, "vallet-genQ.stan")
+if (!file.exists(filename))
+	stop(paste0("The model <", filename, "> could not be found"))
+vallet_genQ = cmdstanr::cmdstan_model(filename)
