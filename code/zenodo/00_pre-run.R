@@ -3,9 +3,10 @@
 # For cmdstanr, you might need to run (see https://mc-stan.org/cmdstanr/articles/cmdstanr.html):
 # install.packages("cmdstanr", repos = c('https://stan-dev.r-universe.dev', getOption("repos")))
 
-## Packages needed to reproduce the study
+#### Load packages
 library(data.table)
 
+#### Check-up
 ## Check/make directories
 source("./global_variables.R")
 
@@ -24,7 +25,15 @@ if (!dir.exists(path_pgfplotsfig))
 if (!dir.exists(path_pgfplotstable))
 	dir.create(path_pgfplotstable)
 
-## Check data
+## Check stan installation, help can be found at https://mc-stan.org/cmdstanr/index.html
+cmdstanr::cmdstan_path()
+
+# cmdstanr::check_cmdstan_toolchain()
+# cmdstanr::install_cmdstan(cores = 2)
+# cmdstanr::cmdstan_version() # I used the version 2.39.0
+
+#### Build data
+## Data containing all species
 tree_file = paste0(path_data, "tree_dt.rds")
 if (!file.exists(tree_file))
 {
@@ -71,13 +80,17 @@ if (!file.exists(tree_file))
 	tree_dt = readRDS(tree_file)
 }
 
-## Keep only species with more than 150 individual records
+## Subset to most abundant species (at least 150 individual records)
 ls_species = tree_dt[, .(n_indiv = .N), by = speciesName_sci][order(-n_indiv)]
 
 min_indiv = 150
 ls_species = ls_species[n_indiv > min_indiv]
 
 ## Join Quercus sp. (609) with other Quercus but petraea, i.e., with ilex, pubescens, robur, and rubra
+if (any(c("Quercus ilex", "Quercus pubescens", "Quercus robur", "Quercus rubra") %in% ls_species))
+	stop(paste("I assumed that Quercus ilex, pubescens, robur, and rubra have less than",
+		min_indiv, "individuals, but this is not satisfied!"))
+
 tree_dt[speciesName_sci %in% c("Quercus ilex", "Quercus pubescens", "Quercus robur", "Quercus rubra"),
 	speciesName_sci := "Quercus sp."]
 
@@ -89,21 +102,14 @@ filename = paste0(path_data, "tree_dt_14species.rds")
 if (!file.exists(filename))
 	saveRDS(tree_dt, filename)
 
-## Check stan installation, help can be found at https://mc-stan.org/cmdstanr/index.html
-cmdstanr::cmdstan_path()
-
-# cmdstanr::check_cmdstan_toolchain()
-# cmdstanr::install_cmdstan(cores = 2)
-# cmdstanr::cmdstan_version() # I used the version 2.39.0
-
-## Compile models
-# Full model
+#### Compile stan models
+## Full model
 filename = paste0(path_models, "fullmodel.stan")
 if (!file.exists(filename))
 	stop(paste0("The model <", filename, "> could not be found"))
 fullmodel = cmdstanr::cmdstan_model(filename)
 
-# Submodel
+## Submodel
 filename = paste0(path_models, "submodel.stan")
 if (!file.exists(filename))
 	stop(paste0("The model <", filename, "> could not be found"))
