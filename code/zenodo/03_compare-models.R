@@ -12,8 +12,6 @@
 #		Statistics and Computing 34 (4): 132. https://doi.org/10.1007/s11222-024-10442-4.
 
 ## Packages needed to reproduce the study
-renv::restore()
-
 library(data.table)
 library(cmdstanr)
 library(stringi)
