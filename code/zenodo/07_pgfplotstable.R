@@ -1,13 +1,10 @@
 #### Aim of script: Generate the files for pgfplots table Latex
 ## Comments:
 # This file is not necessary for the study itself. It only creates csv files
-#	to be read by latex using pgfplots and pgfplotstable
+#	to be read by latex using pgfplotstable
 
-rm(list = ls())
-
+#### Load packages
 library(data.table)
-library(cmdstanr)
-library(stringi)
 
 #### Load common data and tool functions
 ## Tool functions
@@ -16,6 +13,7 @@ source("./tool_functions.R")
 ## Global variables (paths and others)
 source("./global_variables.R")
 
+## Load data
 tree_dt = readRDS(paste0(path_data, "tree_dt.rds"))
 tree_dt_14 = readRDS(paste0(path_data, "tree_dt_14species.rds"))
 
@@ -66,7 +64,7 @@ R2D2 = merge.data.table(R2D2, comp[, .(species, best)], by = "species")
 
 ## Modify manually the column "selected" for Pinus laricio and strobus, as non-significant diff.
 R2D2[, selected := best]
-if (any(comp[c("Pinus laricio", "Pinus strobus"), elpd_diff > 3]))
+if (any(comp[c("Pinus laricio", "Pinus strobus"), elpd_diff > 4]))
 	stop("The ELPD was below three for Pinus laricio and strobus but that does not seem the case anymore")
 
 R2D2[c("Pinus laricio", "Pinus strobus"), selected := "full"]
