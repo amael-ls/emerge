@@ -69,6 +69,7 @@ generated quantities {
 
 	for (i in 1:N)
 		v_gen[i] = 1/alpha * bole_volume_m3[i]^( 1 - (log(r_gen[i]) - log(alpha)) / log(bole_volume_m3[i]) );
-	v_gen_mean = 1/alpha * bole_volume_m3 .^ ( 1 - (log(r_4_params(bole_volume_m3, [alpha, beta_, gamma, delta])) -
+	v_gen_mean = 1/alpha *
+		bole_volume_m3 .^ ( 1 - (log(r_4_params(bole_volume_m3, [logit_alpha, beta_, gamma, delta])) -
 		log(alpha)) ./ log(bole_volume_m3) );
 }
