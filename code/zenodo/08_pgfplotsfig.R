@@ -453,3 +453,9 @@ threshold_dt[percent_c < 4, .(speciesName_sci, percent_c, x1, x3)]
 
 if (!file.exists(paste0(path_output, "lambert_calculus.rds")))
 	saveRDS(threshold_dt, paste0(path_output, "lambert_calculus.rds"))
+
+#### Draft zone for Pinus uncinata (to check location parameters)
+plot(fct_output["vbole", ], fct_output["Pinus uncinata", ], type = "l")
+abline(v = threshold_dt["Pinus uncinata", x3])
+abline(h = mu_logit_fct(threshold_dt["Pinus uncinata", x3], pars))
+points(tree_dt["Pinus uncinata", bole_volume_m3], tree_dt["Pinus uncinata", r], pch = 19, cex = 0.75, col = "#FAB255")
