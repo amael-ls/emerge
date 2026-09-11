@@ -28,9 +28,7 @@ seed_dt = readRDS(paste0(path_data, "ls_seeds.rds"))
 
 ## Load stan models
 fullmodel = cmdstan_model(paste0(path_models, "fullmodel.stan"))
-submodel =  submodel = cmdstanr::cmdstan_model(stan_file = file.path(path_models, "submodel.stan"),
-	dir = "~/work/stan_models/")
-
+submodel =  cmdstan_model(paste0(path_models, "submodel.stan"))
 
 
 
@@ -82,12 +80,11 @@ for (sp in ls_species)
 # ---------------------------------------------------------------------------------------
 # ---------------------    Run the sub model, for the 14 species    ---------------------
 # ---------------------------------------------------------------------------------------
-sp = "Pinus uncinata"
 for (sp in ls_species)
 {
 	print(paste("Running", sp))
 
-	filename = paste0(stri_replace(str = sp, regex = " ", replacement = "-"), "_submodel_logit")
+	filename = paste0(stri_replace(str = sp, regex = " ", replacement = "-"), "_submodel")
 	le_cid = seed_dt[.(sp), submodel]
 
 	if (sp == "Quercus sp.")
@@ -126,12 +123,6 @@ for (sp in ls_species)
 
 #### DRAFT ZONE --------------------------------------------------------------------------------
 ## Set priors for the submodel using logit
-logit = function(x)
-	return (log(x/(1 - x)))
-
-inv_logit = function(x)
-	return (1/(1 + exp(-x)))
-
 logit(inv_logit(0.01))
 
 logit(0.2)
@@ -180,8 +171,47 @@ plot(1, type = "n", xlim = range(vbole), ylim = c(0, 1), xlab = "V bole", ylab =
 for (i in seq_len(test[["n"]]))
 	lines(vbole, test[["y"]][i, ])
 
-hist(test[["beta"]])
-hist(test[["gamma"]])
+## Posterior predictive check
+mu_fct_invlogit = function(x, alpha, beta, gamma, delta) # All the parameters are on the logit scale!
+	return(inv_logit(alpha + exp(-beta*x)*(gamma*x + delta)))
+
+vtot_simplif = function(x, pars) # All the parameters are on the logit scale!
+{
+	alpha = pars["logit_alpha"]
+	beta = pars["beta_"]
+	gamma = pars["gamma"]
+	delta = pars["delta"]
+	return(x/mu_fct_invlogit(x, alpha, beta, gamma, delta))
+}
+	
+
+params = getParams(model_cmdstan = fit, params_names = c("logit_alpha", "beta_", "gamma", "delta"))
+
+plot(stanData$bole_volume_m3, stanData$bole_volume_m3/stanData$total_volume_m3,
+	pch = 19, cex = 0.75, xlab = "Bole volume", ylab = "Ratio")
+
+curve(mu_fct_invlogit(x, params["logit_alpha"], params["beta_"], params["gamma"], params["delta"]),
+	add = TRUE, lwd = 3, col = "#CD212A")
+
+
+plot(stanData$bole_volume_m3, stanData$total_volume_m3,
+	pch = 19, cex = 0.75, xlab = "Bole volume", ylab = "Total volume")
+
+curve(vtot_simplif(x, params), add = TRUE, lwd = 3, col = "#CD212A")
+
+plot(fit$draws("logit_alpha"), fit$draws("beta_"))
+plot(fit$draws("logit_alpha"), fit$draws("gamma"))
+plot(fit$draws("logit_alpha"), fit$draws("delta"))
+
+plot(fit$draws("beta_"), fit$draws("gamma"))
+plot(fit$draws("beta_"), fit$draws("delta"))
+
+plot(fit$draws("gamma"), fit$draws("delta"))
+
+lazyTrace(fit$draws("logit_alpha"))
+lazyTrace(fit$draws("beta_"))
+lazyTrace(fit$draws("gamma"))
+lazyTrace(fit$draws("delta"))
 
 # Extract posterior draws
 draws_df = setDT(posterior::as_draws_df(fit$draws(variables = c("c", "j", "k", "m", "n", "s", "tau", "theta"))))
