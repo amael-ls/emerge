@@ -2,9 +2,13 @@
 ## Comments:
 # This file is not necessary for the study itself. It only creates csv files
 #	to be read by latex using pgfplots
+#
+# When I am using the simplified model, and despite it is a submodel of the general case,
+#	it seems that I need some cautiousness on the computation with Lambert function, especially
+#	with \varepsilon... Check p.12--13 Notebook 4.
+#
 
-rm(list = ls())
-
+#### Load packages
 library(data.table)
 library(stringi)
 library(mgcv)
@@ -17,8 +21,9 @@ source("./tool_functions.R")
 source("./global_variables.R")
 
 ## Other functions
-pred_fct_Vtot = function(sp, stanData_gen, path_models, is_simplif = FALSE, n_points = 5,
-	woodstock_seed = 1969 - 08 - 18)
+# Function to pred Vtot, with uncertainty from the parameters + residuals
+pred_fct_Vtot = function(sp, stanData_gen, path_models, path_output, is_simplif = FALSE,
+	n_points = 5, woodstock_seed = 1969 - 08 - 18)
 {
 	## Generate quantities for full/submodel
 	genQ = cmdstanr::cmdstan_model(paste0(path_models, "fullmodel-genQ.stan"))
@@ -30,6 +35,13 @@ pred_fct_Vtot = function(sp, stanData_gen, path_models, is_simplif = FALSE, n_po
 		genQ = cmdstanr::cmdstan_model(paste0(path_models, "submodel-genQ.stan"))
 		filename = paste0(path_output, stringi::stri_replace(str = sp, regex = " ", replacement = "-"),
 			"_submodel.rds")
+	}
+
+	if (sp == "Pinus-uncinata")
+	{
+		genQ = cmdstanr::cmdstan_model(paste0(path_models, "pinus_uncinata-genQ.stan"))
+		filename = paste0(path_output, stringi::stri_replace(str = sp, regex = " ", replacement = "-"),
+			"_logit.rds")
 	}
 
 	fit = readRDS(filename)
@@ -76,6 +88,18 @@ pred_fct_Vtot = function(sp, stanData_gen, path_models, is_simplif = FALSE, n_po
 		randomSample_v = dt_v, randomSample_r = dt_r, n_points = n_points))
 }
 
+# Second derivative of mu_1, evaluated at x = tau = j/k (full model)
+mu_2nd = function(k, j, m, c, s, n)
+	return(-k^2/j*(m - c) - s^2*(c - n)*exp(-s*j/k))
+
+# Second derivative of mu_1, evaluated at x = tau = j/k (submodel equivalent)
+mu_2nd_submodel = function(k, m, c, n)
+{
+	gamma = k*(m - c)*exp(1)
+	delta = n - c
+	return(-k*gamma*exp(-k*(1/k - delta/gamma)))
+}
+
 ## Load data
 tree_dt = readRDS(paste0(path_data, "tree_dt_14species.rds"))
 ls_species = tree_dt[, unique(speciesName_sci)]
@@ -91,7 +115,7 @@ range_dt[, need_extension := 1.1*max_t < q995_flopp_u]
 ## Number of new data for predict
 n_indiv = 500
 
-for (sp in ls_species[12:14])
+for (sp in ls_species)
 {
 	print(paste("Running", sp))
 	sp_filename = stri_replace(str = sp, replacement = "-", regex = " ")
@@ -122,8 +146,13 @@ for (sp in ls_species[12:14])
 	if ((sp == "Fraxinus excelsior") || (sp == "Pinus uncinata"))
 		simplif = TRUE # Remember that laricio and strobus are fullmodel (ELPD_diff < 4)
 
+	if (sp == "Pinus uncinata")
+	{
+		warning("Pinus uncinata is treated separately. I still think there is not enough info in the data used to parametrise Pinus uncinata")
+	}
+
 	temp = pred_fct_Vtot(sp = sp_filename, stanData_gen = stanData, path_models = path_models,
-		is_simplif = simplif)
+		path_output = path_output, is_simplif = simplif)
 
 	dt = data.table(bole_volume_m3 = stanData$bole_volume_m3_new, pred_avg = temp$pred, pred_avg_r = temp$pred_r,
 		q05_v_u = temp$quant[, q05], q95_v_u = temp$quant[, q95],
@@ -183,6 +212,247 @@ for (sp in ls_species[12:14])
 	fwrite(dt, paste0(path_pgfplotsfig, sp_filename, ".csv"))
 }
 
+## Second derivative of mu for Pinus uncinata, evaluated at xM
+pinus_uncinata_mu_2nd = function(pars)
+{
+	logit_alpha <- pars["logit_alpha"]
+	beta_ <- pars["beta_"]
+	gamma <- pars["gamma"]
+	delta <- pars["delta"]
+	zstar <- logit_alpha + (gamma / beta_) * exp(-1 + beta_ * delta / gamma)
+	fstar <- inv_logit(zstar)
+	return (-beta_ * gamma * exp(-1 + beta_ * delta / gamma) * fstar * (1 - fstar))
+}
+
+#### Compute threshold with Lambert function, plot ratio on one Fig.
+## Common variables
+n_points = 750
+vbole = seq(0, 7, length.out = n_points) # 7 is a good compromise for the 6 species I am interestied in
+
+threshold_dt = data.table(speciesName_sci = tree_dt[, unique(speciesName_sci)], simplif = FALSE,
+	x1 = NA_real_, x2 = NA_real_, wp = NA_real_, c = NA_real_, eps = NA_real_, div_by = NA_integer_,
+	delta_mc = NA_real_, diff_eps = NA_real_, key = "speciesName_sci")
+
+params_dt = data.table(speciesName_sci = tree_dt[, unique(speciesName_sci)], c = NA_real_,
+	j = NA_real_, k = NA_real_, m = NA_real_, n = NA_real_, s = NA_real_, tau = NA_real_, key = "speciesName_sci")
+
+fct_output = matrix(data = NA_real_, nrow = threshold_dt[, .N] + 1, ncol = n_points)
+rownames(fct_output) = c("vbole", threshold_dt[, speciesName_sci])
+fct_output["vbole", ] = vbole
+
+loaded = FALSE
+
+if (!file.exists(paste0(path_output, "lambert_calculus.rds")))
+{
+	for (sp in tree_dt[, unique(speciesName_sci)])
+	{
+		print(paste("Doing species", sp))
+
+		## Get params
+		if ((sp == "Fraxinus excelsior") || (sp == "Pinus uncinata"))
+			next # Simplified species, done after
+
+		sp_filename = stri_replace(str = sp, replacement = "-", regex = " ")
+		if (sp == "Quercus sp.")
+			sp_filename = stri_replace(str = sp_filename, replacement = "", regex = "\\.")
+
+		filename = paste0(path_output, sp_filename, "_fullmodel_theta", ".rds")
+		fit = readRDS(filename)
+
+		paramsVec = getParams(model_cmdstan = fit, params_names = c("c", "j", "k", "m", "n", "s", "tau"),
+			type = "mean")
+		rm(fit)
+
+		m = paramsVec["m"]
+		j = paramsVec["j"]
+		c = paramsVec["c"]
+		k = paramsVec["k"]
+
+		epsilon = 2/100*c # 2% of the asymptotic rate
+		div_by = 1
+
+		if (epsilon > (m - c))
+		{
+			warning(paste("The condition epsilon < m - c is not respeced for", sp))
+			count = 0
+			while (epsilon > (m - c) && count < 10)
+			{
+				count = count + 1
+				epsilon = epsilon/2
+			}
+
+			if (epsilon > (m - c))
+			{
+				warning(paste("Could not solve the problem for", sp, "by setting epsilon = epsilon/1024"))
+				next
+			}
+			warning(paste("Divided epsilon by", 2^count, "for", sp))
+			div_by = 2^count
+		}
+
+		xi = -exp(-1) * (epsilon/(m - c))^(1/j)
+		wp = -j/k * lamW::lambertW0(xi)
+		wm = -j/k * lamW::lambertWm1(xi)
+
+		if (wm < j/k)
+			warning("My analytical calculus showed that this should not be possible...")
+
+		s = paramsVec["s"]
+		n = paramsVec["n"]
+		tau = paramsVec["tau"]
+
+		params_dt[sp, c("c", "j", "k", "m", "n", "s", "tau") := as.list(paramsVec)]
+
+		x2 = 1/s*(log(c - n) - log(epsilon))
+
+		diff = abs(pred_ratio(wm, paramsVec) - c) - epsilon
+
+		threshold_dt[sp, c("x1", "x2","wp", "c", "eps", "div_by", "delta_mc", "diff_eps") :=
+			.(wm, ..x2, ..wp, ..c, epsilon, ..div_by, (..m - ..c), diff)]
+
+		fct_output[sp, ] = pred_ratio(vbole, paramsVec)
+	}
+} else {
+	threshold_dt = readRDS(paste0(path_output, "lambert_calculus.rds"))
+	fct_output = readRDS(paste0(path_output, "ratio_output.rds"))
+	params_dt = readRDS(paste0(path_output, "avg_params.rds"))
+	loaded = TRUE
+}
+
+## Compute threshold with the Lambert function for species using submodel (Fraxinus excelsior)
+if (!loaded)
+{
+	# Fraxinus excelsior
+	sp = "Fraxinus excelsior"
+	print(paste("Doing species", sp))
+
+	sp_filename = stri_replace(str = sp, replacement = "-", regex = " ")
+
+	filename = paste0(path_output, sp_filename, "_submodel", ".rds")
+	fit = readRDS(filename)
+
+	paramsVec_simplif = getParams(model_cmdstan = fit,
+		params_names = c("alpha", "beta_", "gamma", "delta"), type = "mean")
+
+	rm(fit)
+
+	alpha = paramsVec_simplif["alpha"] # Frax: 0.7159374
+	beta = paramsVec_simplif["beta_"]  # Frax: 5.184622
+	gamma = paramsVec_simplif["gamma"] # Frax: 2.829555
+	delta = paramsVec_simplif["delta"] # Frax: -0.02979472
+
+	epsilon = 2*alpha/100
+	epsilon < gamma/beta*exp(beta*delta/gamma - 1)
+
+	xi = -beta*epsilon/gamma*exp(-beta*delta/gamma)
+
+	wp = -1/beta * (lamW::lambertW0(xi) + beta*delta/gamma)
+	wm = -1/beta * (lamW::lambertWm1(xi) + beta*delta/gamma)
+
+	paramsVec = c(
+		c = unname(paramsVec_simplif["alpha"]),
+		j = 1,
+		k = unname(paramsVec_simplif["beta_"]),
+		m = unname(exp(-1)*paramsVec_simplif["gamma"]/paramsVec_simplif["beta_"] +
+			paramsVec_simplif["alpha"]),
+		n = unname(paramsVec_simplif["delta"] + paramsVec_simplif["alpha"]),
+		s = unname(paramsVec_simplif["beta_"])
+	)
+	fct_output[sp, ] = pred_ratio(vbole, paramsVec)
+
+	params_dt[sp, c("c", "j", "k", "m", "n", "s") := as.list(paramsVec)]
+
+	diff = abs(pred_ratio(wm, paramsVec) - alpha) - epsilon
+
+	threshold_dt[sp, c("x1", "wp", "c", "eps", "div_by", "delta_mc", "diff_eps") :=
+		.(wm, ..wp, ..alpha, epsilon, 1, gamma/beta*exp(-1), diff)]
+
+	# ------------------------------------------------------------------------------
+	# Pinus uncinata treated separatly
+	sp = "Pinus uncinata"
+	print(paste("Doing species", sp))
+
+	sp_filename = stri_replace(str = sp, replacement = "-", regex = " ")
+
+	filename = paste0(path_output, sp_filename, "_logit", ".rds")
+	fit = readRDS(filename)
+
+	pars = getParams(model_cmdstan = fit,
+		params_names = c("alpha", "beta_", "gamma", "delta", "logit_alpha"), type = "mean")
+
+	rm(fit)
+
+	alpha = pars["alpha"] # Pinus uncinata: 0.8848285
+	logit_alpha = pars["logit_alpha"] # Pinus uncinata: 2.104958
+	beta = pars["beta_"]  # Pinus uncinata: 1.154964
+	gamma = pars["gamma"] # Pinus uncinata: 0.6170549
+	delta = pars["delta"] # Pinus uncinata: -0.6233957
+
+	epsilon = 1.25*alpha/100
+	(epsilon_logit = logit(epsilon + alpha) - logit_alpha)
+	epsilon_logit < gamma/beta*exp(beta*delta/gamma - 1)
+
+	xi = -beta*epsilon_logit/gamma*exp(-beta*delta/gamma)
+
+	wp = -1/beta * (lamW::lambertW0(xi) + beta*delta/gamma)
+	wm = -1/beta * (lamW::lambertWm1(xi) + beta*delta/gamma)
+
+	mu_logit_fct = function(x, pars)
+		return (inv_logit(pars["logit_alpha"] + exp(-pars["beta_"]*x) *
+			(pars["gamma"]*x + pars["delta"])))
+
+	vtot_logit_fct = function(x, pars)
+		return (x/mu_logit_fct(x, pars))
+
+	fct_output[sp, ] = mu_logit_fct(vbole, pars)
+
+	diff = abs(mu_logit_fct(wm, pars) - alpha) - epsilon
+
+	threshold_dt[sp, c("x1", "wp", "c", "eps", "div_by", "delta_mc", "diff_eps") :=
+		.(wm, ..wp, ..alpha, epsilon, 1, gamma/beta*exp(-1), diff)]
+
+	saveRDS(fct_output, paste0(path_output, "ratio_output.rds"))
+	saveRDS(params_dt, paste0(path_output, "avg_params.rds"))
+}
+
+## Add ratio (m - c)/epsilon to know how many times peak above epsilon
+threshold_dt[, eps_mc := delta_mc/eps]
+threshold_dt[, .(speciesName_sci, x1, wp, eps_mc)]
+
+## Add curvature at x_M (i.e., second derivative) at maximum x
+params_dt[, curve := mu_2nd(k, j, m, c, s, n), by = speciesName_sci]
+params_dt["Fraxinus excelsior", curve := mu_2nd_submodel(k, m, c, n)]
+params_dt["Pinus uncinata", curve := pinus_uncinata_mu_2nd(pars)]
+
+## Add how much percentage of c lies in m - c, and x3 the location of the max
+threshold_dt = merge.data.table(x = threshold_dt,
+	y = params_dt[, .(speciesName_sci, curve, percent_c = 100*(m - c)/c, x3 = j/k)], by = "speciesName_sci")
+
+# Modify manually for Fraxinus excelsior (see notebook 4, p. 55 03 August 2026)
+p = params_dt["Fraxinus excelsior", .(k, n, m, c)]
+threshold_dt["Fraxinus excelsior", x3 := -1/p[, k] * ((p[, n] - p[, c])*exp(1)/(p[, m] - p[, c]) - 1)]
+
+# Modify manually for Pinus uncinata
+threshold_dt["Pinus uncinata", x3 := (pars["gamma"] - pars["beta_"] * pars["delta"]) / (pars["beta_"] * pars["gamma"])]
+
+## Export the data for pgfplots
+# Write fct_ouput
+filename = paste0(path_pgfplotsfig, "ratio-fct_all-sp.csv")
+if (!file.exists(filename))
+{
+	temp = as.data.table(t(fct_output))
+	fwrite(temp, filename)
+}
+
+## Write treshold_dt
+filename = paste0(path_pgfplotstable, "thresholds.csv")
+if (!file.exists(filename))
+	fwrite(threshold_dt, filename)
+
+threshold_dt[percent_c < 4, .(speciesName_sci, percent_c, x1, x3)]
+
+if (!file.exists(paste0(path_output, "lambert_calculus.rds")))
+	saveRDS(threshold_dt, paste0(path_output, "lambert_calculus.rds"))
 
 
 #### DRAFT ZONE
