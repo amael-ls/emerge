@@ -1,4 +1,3 @@
-
 /*
 	Stan code for submodel
 */
@@ -8,12 +7,12 @@ functions {
 	{
 		/*
 			The vector of parameters, pars, is in this order:
-			1 -> logit_alpha, around 1.4 to be around 0.8 on the real scale
+			1 -> alpha,
 			2 -> beta,
 			3 -> gamma
 			4 -> delta
 		*/
-		return inv_logit(pars[1] + exp(-pars[2]*x) .* (pars[3]*x + pars[4]));
+		return pars[1] + exp(-pars[2]*x) .* (pars[3]*x + pars[4]);
 	}
 }
 
@@ -37,24 +36,23 @@ parameters {
 	real <lower = 0, upper = 1> c_alpha;
 	real <lower = 0> beta_;
 	real <lower = 0> gamma;
-	real delta;
+	real <upper = 0> delta; // Expected to be negative since n = alpha + delta and alpha > 0.6
 
 	real <lower = 0> phi; // Precision (well kind of...)
 }
 
 transformed parameters {
 	real alpha = 0.6 + 0.4*c_alpha; // Forces alpha (=c the asymptote) to be between 0.6 and 1
-	real logit_alpha = logit(alpha); // pars[1] in r_4_params
-	vector [N] shape1 = phi*r_4_params(bole_volume_m3, [logit_alpha, beta_, gamma, delta]);
-	vector [N] shape2 = phi*(1 - r_4_params(bole_volume_m3, [logit_alpha, beta_, gamma, delta]));
+	vector [N] shape1 = phi*r_4_params(bole_volume_m3, [alpha, beta_, gamma, delta]);
+	vector [N] shape2 = phi*(1 - r_4_params(bole_volume_m3, [alpha, beta_, gamma, delta]));
 }
 
 model{
 	// Prior linear regression
 	target += beta_lpdf(c_alpha | 3, 3); // Centred
-	target += gamma_lpdf(beta_ | 1, 0.5); // Gives a mean of 2 and sd of 2
-	target += gamma_lpdf(gamma | 1, 0.5); // Gives a mean of 2 and sd of 2
-	target += normal_lpdf(delta | -2.8, 1);
+	target += gamma_lpdf(beta_ | 2, 5); // Right skewed
+	target += gamma_lpdf(gamma | 2, 1); // Right skewed
+	target += normal_lpdf(delta | -0.3, 0.075); // centred, mostly between -0.5 and -0.1
 
 	target += gamma_lpdf(phi | 3, 0.5); // Right skewed
 	
