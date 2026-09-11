@@ -3,7 +3,31 @@
 # Line 5: form_vallet, predicts total volume from Vallet 2006
 # Line 23: getParams, extract/sum-up draws from Bayesian fit
 
-## Function to predict total volume from Vallet 2006
+#' Predict total tree volume using the Vallet et al. (2006) model
+#'
+#' Predicts total aboveground stem volume from stem circumference and tree
+#' height using the model of Vallet et al. (2006). Different model variants
+#' are selected through the number of parameters, with a specific formulation
+#' available for Douglas-fir.
+#'
+#' @param circumference_cm Numeric. Stem circumference in centimetres.
+#' @param height Numeric. Total tree height in metres.
+#' @param params Named numeric vector containing the model parameters
+#'   `alpha`, `beta`, and, depending on the model, `gamma` and `delta`.
+#' @param n_params Integer. Number of model parameters (2, 3, or 4).
+#' @param is_douglas Logical or integer. Whether to use the Douglas-fir
+#'   formulation.
+#'
+#' @return Numeric. Predicted total aboveground volume in cubic metres.
+#'
+#' @references
+#' Vallet, P., Dhôte, J.-F., Moguédec, G. L., Ravart, M., & Pignard, G.
+#' (2006). Development of total aboveground volume equations for seven
+#' important forest tree species in France. *Forest Ecology and Management*,
+#' *229*(1–3), 98–110. \doi{10.1016/j.foreco.2006.03.013}
+#'
+#' @export
+
 form_vallet = function(circumference_cm, height, params, n_params, is_douglas)
 {
 	res = params["alpha"] + params["beta"]*circumference_cm
@@ -21,7 +45,35 @@ form_vallet = function(circumference_cm, height, params, n_params, is_douglas)
 	return(res)
 }
 
-## Get fixed values parameters (will not work for draws with third dimension > 1)
+## Get fixed values parameters (will not work for draws with third dimension > 1
+#' Extract parameter values from a CmdStan model
+#'
+#' Extracts parameter values or summaries from a CmdStan model. Parameters can
+#' be returned as all draws, by chain and iteration, as means or medians, or
+#' as a set of standard quantiles.
+#'
+#' @param model_cmdstan A fitted CmdStan model object.
+#' @param params_names Character vector of parameter names to extract.
+#' @param type Character. Type of values to return: `"all"` for all draws,
+#'   `"chain"` for the mean of a specified chain, `"chain-iter"` for a
+#'   specific iteration and chain, `"mean"` for the posterior mean,
+#'   `"median"` for the posterior median, or `"quantile"` for posterior
+#'   quantiles.
+#' @param ... Additional arguments required by some `type` values. `chain`
+#'   specifies the chain number for `"chain"` and `"chain-iter"`; `iter`
+#'   specifies the iteration for `"chain-iter"`. `probs` is currently ignored
+#'   for `"quantile"`.
+#'
+#' @return A numeric vector for `"chain"`, `"chain-iter"`, `"mean"`, and
+#'   `"median"`; a data.table of summary statistics for `"quantile"`; or the
+#'   CmdStan draws object for `"all"`.
+#'
+#' @note
+#' The function currently only supports scalar parameters (i.e. parameters
+#' whose draws have a third dimension of 1).
+#'
+#' @export
+
 getParams = function(model_cmdstan, params_names, type = "mean", ...)
 {
 	if (!(type %in% c("all", "chain", "chain-iter", "mean", "median", "quantile")))
@@ -105,7 +157,27 @@ getParams = function(model_cmdstan, params_names, type = "mean", ...)
 	return(vals)
 }
 
-## Bayesplot is having troubles on my mac (Arial font not always found), so I create my own traces plot
+#' Plot MCMC trace plots
+#'
+#' Creates trace plots for MCMC draws, with a separate colour for each chain.
+#' The function provides a lightweight alternative to `bayesplot` and can
+#' optionally save the plot as a PDF.
+#'
+#' @param draws An MCMC draws array, such as a `draws_array` object from
+#'   `cmdstanr`, with dimensions iteration, chain, and parameter.
+#' @param filename Character. Optional filename (without extension) for saving
+#'   the plot as a PDF.
+#' @param ... Optional plotting arguments. `xlab`, `ylab`, and `main` specify
+#'   axis labels and the title; `scaling` scales the values plotted; `chain_id`
+#'   selects chains to display; `val1`, `val2`, etc. add horizontal reference
+#'   lines; `label1`, `label2`, etc. label the corresponding reference lines;
+#'   and `iter1`, `iter2`, etc. add vertical lines at specified iterations.
+#'
+#' @return No value is returned. A trace plot is produced in the current
+#'   graphics device and, if `filename` is provided, saved as a PDF.
+#'
+#' @export
+
 lazyTrace = function(draws, filename = NULL, ...)
 {
 	if (!is.array(draws) && !all(class(draws) %in% c("draws_array", "draws", "array")))
@@ -201,8 +273,28 @@ lazyTrace = function(draws, filename = NULL, ...)
 		dev.off()
 }
 
-## Function to plot divergences (when any during Bayesian run)
-plot_divergences = function(fit, div, simplif = FALSE)
+#' Plot parameter pairs associated with divergent transitions
+#'
+#' Produces pairwise diagnostic plots of selected model parameters, highlighting
+#' posterior draws associated with divergent transitions during Bayesian
+#' sampling.
+#'
+#' @param fit A fitted CmdStan model object.
+#' @param div An MCMC draws array, such as a `draws_array` object from
+#'   `cmdstanr`, with dimensions iteration, chain. Values equal to `1` identify
+#'   divergent draws.
+#'
+#' @return No value is returned. A series of pairwise scatter plots is
+#'   produced in the current graphics device.
+#'
+#' @details
+#' The diagnostic plots show pairwise relationships among the parameters
+#' `c`, `j`, `k`, `m`, `n`, `s`, and `tau`, with divergent draws highlighted
+#' separately from the remaining posterior draws.
+#'
+#' @export
+
+plot_divergences = function(fit, div)
 {
 	params = getParams(model_cmdstan = fit, params_names = c("c", "j", "k", "m", "n", "s", "tau"), type = "all")
 
@@ -359,6 +451,39 @@ plot_joint_dirty = function(fit, div)
 }
 
 ## Function to plot a species fit (simplif = TRUE for submodel)
+#' Plot species-specific model fit and diagnostics
+#'
+#' Produces diagnostic plots for a fitted species-specific Bayesian model,
+#' including the observed bole-to-total volume relationship and, optionally,
+#' predicted versus observed total volume. Divergent draws and problematic
+#' parameter convergence are also reported and visualised.
+#'
+#' @param fit A fitted CmdStan model object.
+#' @param sp Character. Species identifier used to select the corresponding
+#'   forest data.
+#' @param forest Data table containing tree observations. By default, the
+#'   observations for `sp` are selected from `tree_dt`.
+#' @param pred Logical. Whether to plot and return model predictions of total
+#'   volume.
+#' @param simplif Logical. Whether the simplified model formulation is used.
+#' @param n_bins Integer. Number of classes used to colour observations when
+#'   `selected_variable` is provided.
+#' @param pal Character. Name of the `MetBrewer` palette used for colouring
+#'   observations.
+#' @param selected_variable Character or `NULL`. Optional column of `forest`
+#'   used to classify and colour observations.
+#' @param print_plot Logical. Whether to produce the diagnostic plots. If
+#'   `FALSE`, only diagnostic information and, when requested, predictions are
+#'   returned.
+#'
+#' @return A list containing `any_div`, indicating whether divergent
+#'   transitions occurred, `loc`, containing the divergence indicators, and
+#'   `rhats`, containing parameter R-hat values. When `print_plot = FALSE`
+#'   and `pred = TRUE`, the list also contains predicted and observed volumes
+#'   and the fitted parameter values.
+#'
+#' @export
+
 plot_sp = function(fit, sp, forest = tree_dt[.(sp)], pred = TRUE, simplif = FALSE,
 	n_bins = 4, pal = "Hiroshige", selected_variable = NULL, print_plot = TRUE)
 {
@@ -563,6 +688,39 @@ plot_sp = function(fit, sp, forest = tree_dt[.(sp)], pred = TRUE, simplif = FALS
 }
 
 ## Same function as above but for groups
+#' Plot group-specific model fit and diagnostics
+#'
+#' Produces diagnostic plots for a fitted group-specific Bayesian model,
+#' including the observed bole-to-total volume relationship and, optionally,
+#' predicted versus observed total volume. Divergent draws and problematic
+#' parameter convergence are also reported and visualised.
+#'
+#' @param fit A fitted CmdStan model object.
+#' @param gr Character. Group identifier used to select the corresponding
+#'   forest data.
+#' @param forest Data table containing tree observations. By default, the
+#'   observations for `gr` are selected from `tree_dt`.
+#' @param pred Logical. Whether to plot and return model predictions of total
+#'   volume.
+#' @param simplif Logical. Whether the simplified model formulation is used.
+#' @param n_bins Integer. Number of classes used to colour observations when
+#'   `selected_variable` is provided.
+#' @param pal Character. Name of the `MetBrewer` palette used for colouring
+#'   observations.
+#' @param selected_variable Character or `NULL`. Optional column of `forest`
+#'   used to classify and colour observations.
+#' @param print_plot Logical. Whether to produce the diagnostic plots. If
+#'   `FALSE`, only diagnostic information and, when requested, predictions are
+#'   returned.
+#'
+#' @return A list containing `any_div`, indicating whether divergent
+#'   transitions occurred, `loc`, containing the divergence indicators, and
+#'   `rhats`, containing parameter R-hat values. When `print_plot = FALSE`
+#'   and `pred = TRUE`, the list also contains predicted and observed volumes
+#'   and the fitted parameter values.
+#'
+#' @export
+
 plot_gr = function(fit, gr, forest = tree_dt[.(gr)], pred = TRUE, simplif = FALSE,
 	n_bins = 4, pal = "Hiroshige", selected_variable = NULL, print_plot = TRUE)
 {
@@ -764,6 +922,23 @@ plot_gr = function(fit, gr, forest = tree_dt[.(gr)], pred = TRUE, simplif = FALS
 }
 
 ## Function to rebuild comparison between models
+#' Rebuild model comparison results
+#'
+#' Reconstructs model comparison tables from saved results for each species.
+#' Summarises model weights, LOO comparison statistics, R-squared measures,
+#' and R-hat diagnostics.
+#'
+#' @param save_ls Named list containing the saved model results for each
+#'   species. Each element is expected to contain the model weights, LOO
+#'   comparison results, R-squared distributions, and R-hat diagnostics used
+#'   by the function.
+#'
+#' @return A list containing four data tables: `comp` with LOO model
+#'   comparisons, `weights_dt` with model weights, `R2D2` with R-squared
+#'   summaries, and `rhat` with R-hat diagnostics.
+#'
+#' @export
+
 rebuild_comp = function(save_ls)
 {
 	ls_species = names(save_ls)
@@ -814,7 +989,32 @@ rebuild_comp = function(save_ls)
 	return(list(comp = comp, weights_dt = weights_dt, R2D2 = R2D2, rhat = rhat_dt))
 }
 
-## Function to compare model new version with submodel, based on PSIS-LOO
+## Function to compare full model with submodel, based on PSIS-LOO
+#' Compare full and submodels using PSIS-LOO
+#'
+#' Compares the full and submodel using PSIS-LOO, model weights, R-hat
+#' diagnostics, and several Bayesian R-squared measures. Posterior predictive
+#' quantities are generated for both models and optional diagnostic plots can
+#' be produced.
+#'
+#' @param sp Character. Species identifier used to select the corresponding
+#'   observations and fitted models.
+#' @param tree_dt Data table containing tree observations, including
+#'   `bole_volume_m3` and `total_volume_m3`.
+#' @param path_models Character. Path to the Stan model files.
+#' @param path_output Character. Path to the saved fitted models.
+#' @param woodstock_seed Numeric. Random seed used for posterior predictive
+#'   simulation.
+#' @param printPlot Logical. Whether to plot predicted values from the two
+#'   models against each other.
+#'
+#' @return A list containing the best model, PSIS-LOO comparison and model
+#'   weights, LOO warnings, Bayesian R-squared distributions for the ratio and
+#'   total volume, LOO-based R-squared distributions, and maximum R-hat values
+#'   for the full and submodels.
+#'
+#' @export
+
 comparison_full_sub = function(sp, tree_dt, path_models, path_output,
 	woodstock_seed = 1969 - 08 - 18, printPlot = FALSE)
 {
@@ -1026,6 +1226,29 @@ comparison_full_sub = function(sp, tree_dt, path_models, path_output,
 }
 
 ## Function to compute "traditional" RMSE
+#' Compute RMSE and MAPE from posterior predictions
+#'
+#' Computes the traditional root mean squared error (RMSE) and mean absolute
+#' percentage error (MAPE) between posterior predictions of total tree volume
+#' and observed total volume.
+#'
+#' @param sp Character. Species identifier used to select the observations and
+#'   fitted model.
+#' @param tree_dt Data table containing tree observations, including
+#'   `bole_volume_m3` and `total_volume_m3`.
+#' @param path_output Character. Path to the saved fitted model.
+#' @param path_models Character. Path to the Stan model files used to generate
+#'   posterior predictions.
+#' @param is_simplif Logical. Whether to use the simplified (submodel)
+#'   formulation instead of the full model.
+#' @param woodstock_seed Numeric. Random seed used for posterior predictive
+#'   simulation.
+#'
+#' @return A list containing posterior distributions of `rmse` and `mape`,
+#'   with one value per posterior draw.
+#'
+#' @export
+
 RMSE_bayes = function(sp, tree_dt, path_output, path_models, is_simplif = FALSE,
 	woodstock_seed = 1969 - 08 - 18)
 {
@@ -1080,3 +1303,61 @@ RMSE_bayes = function(sp, tree_dt, path_output, path_models, is_simplif = FALSE,
 
 	return(list(rmse = rmse, mape = mape))
 }
+
+## Function to compute the average ratio without params/residual uncertainty
+#' Predict the average bole-to-total volume ratio
+#'
+#' Computes the average bole-to-total volume ratio from model parameters,
+#' without accounting for parameter or residual uncertainty.
+#'
+#' @param x Numeric. Predictor value, typically tree size or bole volume.
+#' @param pars Named numeric vector or one-row data table containing the
+#'   parameters `c`, `j`, `k`, `m`, `n`, and `s`.
+#' @param expansion_factor Logical. If `TRUE`, returns the expansion factor
+#'   (the inverse of the predicted ratio) instead of the ratio.
+#'
+#' @return Numeric. Predicted average bole-to-total volume ratio, or its inverse
+#'   when `expansion_factor = TRUE`.
+#'
+#' @export
+
+pred_ratio = function(x, pars, expansion_factor = FALSE)
+{
+	if (is.data.table(pars))
+	{
+		if (pars[, .N] != 1)
+			stop("pars shoud correspond to one species only")
+		pars = c(c = pars[, c], j = pars[, j], k = pars[, k], m = pars[, m], n = pars[, n], s = pars[, s])
+	}
+	ratio = (pars["m"] - pars["c"]) * exp(pars["j"] - pars["k"]*x) * (pars["k"]*x/pars["j"])^pars["j"] +
+		pars["c"] - (pars["c"] - pars["n"])*exp(-pars["s"]*x)
+
+	if (expansion_factor)
+		return (1/ratio)
+	
+	return(ratio);
+}
+
+## Function to compute the average above-ground pred volume without params/residual uncertainty
+#' Predict average above-ground volume
+#'
+#' Computes the average above-ground tree volume from the predictor and model
+#' parameters, without accounting for parameter or residual uncertainty.
+#'
+#' @param x Numeric. Bole volume used to predict total volume.
+#' @param pars Named numeric vector or one-row data table containing the
+#'   parameters required by `pred_ratio`.
+#'
+#' @return Numeric. Predicted average above-ground tree volume.
+#'
+#' @export
+
+pred_vol = function(x, pars)
+	return(x/pred_ratio(x, pars))
+
+## Logit and inv_logit function
+logit = function(x)
+	return(log(x/(1 - x)))
+
+inv_logit = function(x)
+	return(1/(1 + exp(-x)))
