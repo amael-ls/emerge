@@ -188,3 +188,39 @@ plot(pred, stanData$total_volume_m3, pch = 19,
 abline(a = 0, b = 1, lty = "dashed", lwd = 0.75, col = "#9A9A9A")
 axis(1)
 axis(2, las = 1)
+
+
+
+rm(list = ls())
+tree_dt = readRDS("data/tree_dt.rds")
+aa = readRDS("results/pred_vallet.rds")
+params_dt = readRDS("results/avg_params.rds")
+ls_species = params_dt[, speciesName_sci]
+ls_species = c(ls_species[1:10], ls_species[12:14])
+
+tree_dt[, pred_amael := NA_real_]
+
+pred_ratio = function(x, pars, expansion_factor = FALSE)
+{
+	if (is.data.table(pars))
+	{
+		if (pars[, .N] != 1)
+			stop("pars shoud correspond to one species only")
+		pars = c(c = pars[, c], j = pars[, j], k = pars[, k], m = pars[, m], n = pars[, n], s = pars[, s])
+	}
+	ratio = (pars["m"] - pars["c"]) * exp(pars["j"] - pars["k"]*x) * (pars["k"]*x/pars["j"])^pars["j"] +
+		pars["c"] - (pars["c"] - pars["n"])*exp(-pars["s"]*x)
+
+	if (expansion_factor)
+		return (1/ratio)
+	
+	return(ratio);
+}
+
+pred_vol = function(x, pars)
+	return(x/pred_ratio(x, pars))
+
+for (sp in ls_species)
+	tree_dt[.(sp), pred_amael := pred_vol(bole_volume_m3, params_dt[.(sp), ])]
+
+saveRDS(tree_dt, "henri.rds")
