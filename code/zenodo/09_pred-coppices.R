@@ -46,9 +46,10 @@ names(v_res_list) = ls_species
 dt_sim = emerge[, .(speciesName_sci, dataset, tree_id, str_name)]
 sp_model = readRDS(paste0(path_output, "species-model.rds"))
 
+#### Predict volumes on Emerge data, and keep the residual for each draw (4000 per individual)
 if (!file.exists(paste0(path_output, "v_gen_list.rds")) && !file.exists(paste0(path_output, "v_res_list.rds")))
 {
-	for (sp in ls_species)
+	for (sp in ls_species[15:17])
 	{
 		filename = sp_model[.(sp), model]
 		full = stri_detect(str = filename, regex = "fullmodel_theta") ||
@@ -103,3 +104,68 @@ if (!file.exists(paste0(path_output, "v_gen_list.rds")) && !file.exists(paste0(p
 	v_gen_list = readRDS(paste0(path_output, "v_gen_list.rds"))
 	v_res_list = readRDS(paste0(path_output, "v_res_list.rds"))
 }
+
+## Reshape volumes and residuals
+v_gen = rbindlist(l = v_gen_list)
+opposite_res = rbindlist(l = v_res_list)
+
+setnames(v_gen, old = as.character(1:4000), new = paste0("draws_", 1:4000))
+setnames(opposite_res, old = as.character(1:4000), new = paste0("draws_", 1:4000))
+
+## Posterior distribution of the bias
+by_struct = v_gen[, lapply(.SD, mean), by = str_name, .SDcols = patterns("^draws_")]
+by_struct_res = opposite_res[, lapply(.SD, mean), by = str_name, .SDcols = patterns("^draws_")]
+
+## Quantiles residuals and average individual residuals
+mean_res = by_struct_res[, {
+	qs = apply(.SD, 1, quantile, probs = c(0, 0.025, 0.5, 0.975, 1)) # matrix: rows = quantiles, cols = str_name
+	qs_dt = as.data.table(t(qs)) # Transpose
+	setnames(qs_dt, c("q0", "q025", "q50", "q975", "q100"))
+	cbind(str_name = str_name, res_mean = rowMeans(.SD), qs_dt)
+}, .SDcols = patterns("^draws_")]
+
+individual_res = opposite_res[, .(speciesName_sci, dataset, tree_id, str_name,
+	opposite_res = rowMeans(.SD)), .SDcols = patterns("^draws_")]
+
+## Save outputs
+if (!file.exists(paste0(path_pgfplotstable, "residuals_structure.csv")))
+	fwrite(mean_res, paste0(path_pgfplotstable, "residuals_structure.csv"))
+
+if (!file.exists(paste0(path_pgfplotsfig, "individual_residuals_structure.csv")))
+	fwrite(individual_res[, .(str_name, opposite_res)],
+		paste0(path_pgfplotsfig, "individual_residuals_structure.csv"))
+
+#### Compute kernel densities of 'biases'
+by_struct_res = transpose(l = by_struct_res, make.names = "str_name")
+setnames(by_struct_res, new = stri_replace_all(str = names(by_struct_res), regex = "-", replacement = "_"))
+
+d_cws = density(by_struct_res[, coppice_with_standards], n = 512)
+d_sl = density(by_struct_res[, single_layered], n = 512)
+d_c = density(by_struct_res[, coppice], n = 512)
+
+densities_dt = data.table(x_cws = d_cws$x, y_cws = d_cws$y,
+	x_sl = d_sl$x, y_sl = d_sl$y,
+	x_c = d_c$x, y_c = d_c$y)
+
+## Save results
+if (!file.exists(paste0(path_pgfplotsfig, "posterior_structure.csv")))
+	fwrite(densities_dt, paste0(path_pgfplotsfig, "posterior_structure.csv"))
+
+#### Boxplot of opposite res, this way, below zero means underestimated, and above zero means overestimated
+aa = boxplot(opposite_res ~ str_name, data = individual_res,
+	xlab = "Structure type",
+	ylab = "Residuals")
+abline(h = 0, lwd = 0.85, lty = "dashed", col = "#595859")
+
+#### Check the type of trees that are rated outliers by boxplot function
+## List individuals
+individual_res[, is_outlier := opposite_res %in% boxplot.stats(opposite_res)$out, by = str_name]
+ls_pb = individual_res[(is_outlier), .(speciesName_sci, dataset, tree_id, opposite_res)]
+if (!all.equal(unique(ls_pb), ls_pb))
+	stop("ls_pb is not uniquely defined")
+
+## Get all information on these outliers
+ls_pb = emerge[ls_pb, on = .(speciesName_sci, tree_id)]
+ls_pb = ls_pb[, .(dataset, tree_id, str_name, speciesName_sci, circumference_m, height, taper_height,
+	bole_volume_conic_m3, branch_volume, twig_volume, total_volume_m3, opposite_res, underestimated = opposite_res < 0)]
+setkey(ls_pb, str_name, speciesName_sci)
