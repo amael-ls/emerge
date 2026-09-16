@@ -165,7 +165,232 @@ if (!all.equal(unique(ls_pb), ls_pb))
 	stop("ls_pb is not uniquely defined")
 
 ## Get all information on these outliers
-ls_pb = emerge[ls_pb, on = .(speciesName_sci, tree_id)]
+ls_pb = emerge[ls_pb, on = .(speciesName_sci, tree_id, dataset)]
 ls_pb = ls_pb[, .(dataset, tree_id, str_name, speciesName_sci, circumference_m, height, taper_height,
 	bole_volume_conic_m3, branch_volume, twig_volume, total_volume_m3, opposite_res, underestimated = opposite_res < 0)]
 setkey(ls_pb, str_name, speciesName_sci)
+
+
+
+# ------------------------------------------------------------------
+# ----------------------    Try some stuff    ----------------------
+# ------------------------------------------------------------------
+#### Add soe information from the DB. This part of the script will not work for reviewers
+
+os = Sys.info()[['sysname']]
+mnt_point = "/mnt/local_share/"
+if (os == "Linux" || os == "Darwin")
+{
+	if (!dir.exists(mnt_point))
+		stop(paste0("The mounting point <", mnt_point, "> does not exist"))
+	path_data = paste0(mnt_point, "data_orig/")
+	if (!dir.exists(path_data))
+		stop(paste0("Folder <", path_data, "> does not exist! Check mounting point and mounted folder"))
+} else if (os == "Windows") {
+	path_data = "//Del1509n015/2024_FairCarbon/data_orig/"
+	if (!dir.exists(path_data))
+		stop(paste0("Folder <", path_data, "> does not exist!"))
+} else {
+	stop(paste("Unknown Operating System:", os))
+}
+
+# Emerge data
+filename_emerge = paste0(path_data, "EMERGE.RData")
+if (!file.exists(filename_emerge))
+	stop(paste0("The file <", filename_emerge, "> does not exist"))
+
+load(filename_emerge)
+
+setDT(emerge_2010_arbres)
+setDT(emerge_bure09_arbres)
+
+emerge_2010_arbres = emerge_2010_arbres[, .(id, insersion_1ere_branche_vivante_m, h_fourche1_m)]
+emerge_bure09_arbres = emerge_bure09_arbres[, .(tree, hauteurbranchevivante_m, hauteurfourche1_m)]
+
+setnames(emerge_2010_arbres, new = c("tree_id", "height_1st_alive_branch", "height_fork"))
+setnames(emerge_bure09_arbres, new = c("tree_id", "height_1st_alive_branch", "height_fork"))
+
+ll = rbindlist(l = list(emerge_2010 = emerge_2010_arbres, emerge_2009 = emerge_bure09_arbres), idcol = "dataset")
+ls_pb = merge.data.table(ls_pb, ll, by = c("dataset", "tree_id"), all.x = TRUE)
+
+hist(ls_pb[(underestimated), total_volume_m3/bole_volume_conic_m3])
+hist(ls_pb[(underestimated), bole_volume_conic_m3/total_volume_m3])
+hist(ls_pb[!(underestimated), total_volume_m3/bole_volume_conic_m3])
+
+
+ls_pb[, fork_ratio := height_fork / height]
+
+fork_only = ls_pb[!is.na(height_fork)]
+fork_only[, .(mean_ratio = mean(fork_ratio), n = .N), by = underestimated]
+# Higher ratio increases proba underestimated. Against my intuition...
+
+wilcox.test(fork_ratio ~ underestimated, data = fork_only)
+
+## Test a GLM
+mod = glm(underestimated ~ 1 + height_fork, data = ls_pb[!is.na(height_fork)], family = binomial)
+
+summary(mod)
+
+
+a = coef(mod)[1]
+b = coef(mod)[2]
+
+# jitter the boolean underestimated so that overlapping points are visible (0 = FALSE, 1 = TRUE)
+set.seed(woodstock_seed)
+ls_pb[, bool_jit := as.integer(underestimated) + runif(.N, -0.03, 0.03)]
+
+# Plot the stuff!
+plot(ls_pb[!is.na(height_fork), height_fork], ls_pb[!is.na(height_fork), bool_jit],
+	pch = 19, col = "#050505AA",
+	xlab = "Height fork", ylab = "P(underestimated)",
+	main = "Fitted logiit curve",
+	ylim = c(-0.05, 1.05))
+
+curve(inv_logit(a + b * x),
+	add = TRUE, col = "#CD212A", lwd = 2)
+
+## Same stuff, but I try a proxy for NAs in height, and then the ratio of fork/height (0 = at the foot, 1 = at the top)
+ls_pb[, fork_proxy := fifelse(!is.na(height_fork), height_fork,
+	fifelse(!is.na(height_1st_alive_branch), height_1st_alive_branch,
+	taper_height))]
+
+mod = glm(underestimated ~ 1 + I(fork_proxy/height),
+	data = ls_pb, family = binomial)
+
+summary(mod)
+
+
+a = coef(mod)[1]
+b = coef(mod)[2]
+
+# Plot with the proxy
+plot(ls_pb[, fork_proxy/height], ls_pb[, bool_jit],
+	pch = 19, col = "#050505AA",
+	xlab = "Ratio Hfork/Htot", ylab = "P(underestimated)",
+	main = "Fitted logiit curve",
+	ylim = c(-0.05, 1.05))
+
+curve(inv_logit(a + b * x),
+	add = TRUE, col = "#CD212A", lwd = 2)
+
+# Same signal in both cases, the higher the fork, the more likely I underestimate.
+#	It goes against my intuition! I thought larger crown would occur for lower forks!
+# CHeck it
+
+plot(ls_pb[, fork_proxy/height], ls_pb[, bole_volume_conic_m3/total_volume_m3],
+	pch = 19, col = "#050505AA",
+	xlab = "Ratio Hfork/Htot", ylab = "r") # That looks quite random and covers the whole space!
+
+# So there is no rule of lower fork => larger crown => lower ratio bole/tot
+
+## Check in abs residuals
+ls_pb[abs(opposite_res) > 1.5] # These trees have high taper height!
+
+## Try a model with taper height
+mod = glm(underestimated ~ 1 + taper_height,
+	data = ls_pb, family = binomial)
+
+summary(mod)
+
+
+a = coef(mod)[1]
+b = coef(mod)[2]
+
+# Plot with the proxy
+plot(ls_pb[, taper_height], ls_pb[, bool_jit],
+	pch = 19, col = "#050505AA",
+	xlab = "Taper height", ylab = "P(underestimated)",
+	main = "Fitted logiit curve",
+	ylim = c(-0.05, 1.05))
+
+curve(inv_logit(a + b * x),
+	add = TRUE, col = "#CD212A", lwd = 2)
+
+# This time it goes with my intuition! Lower taper => higher proba underestimation.
+#	That mean that their are obvious discrepancies between taper height and fork height!
+#	Are these stuff reliable?
+
+plot(ls_pb[, taper_height], ls_pb[, height_fork],
+	pch = 19, col = "#050505AA", xlab = "Taper height", ylab = "Fork height")
+
+ls_pb[taper_height < height_fork] # There is none! And the relationship fork ~ taper is positive!
+
+# Conclusion: it seems that nothing separates the underestimated from the overestimated...
+
+#### Question: are the outliers different from the non-outliers?
+# Comments: I do the same stuff, but on the whole dataset
+
+## Add the information on trees as in ls_pb
+full_data = emerge[individual_res, on = .(speciesName_sci, tree_id, dataset, str_name), nomatch = NA]
+full_data = ll[full_data, on = .(dataset, tree_id), nomatch = NA]
+
+## Correction for unrealistic values
+full_data[height_1st_alive_branch == 0, height_1st_alive_branch := NA]
+
+## Compute explanatoru variables
+full_data[, fork_proxy := fifelse(!is.na(height_fork), height_fork, height_1st_alive_branch)]
+full_data[, fork_ratio := fork_proxy / height]
+
+## Run model
+mod = glm(is_outlier ~ 1 + fork_ratio, data = full_data, family = binomial)
+summary(mod)
+
+## Plot stuff
+set.seed(woodstock_seed)
+full_data[, jit_outlier := as.integer(is_outlier) + runif(.N, -0.03, 0.03)]
+
+a = coef(mod)[1]
+b = coef(mod)[2]
+
+# Plot with the proxy
+plot(full_data[, fork_ratio], full_data[, jit_outlier],
+	pch = 19, col = "#050505AA",
+	xlab = "Fork ratio", ylab = "P(outlier)",
+	main = "Fitted logit curve",
+	ylim = c(-0.05, 1.05))
+
+curve(inv_logit(a + b * x),
+	add = TRUE, col = "#CD212A", lwd = 2)
+
+# Does not discriminate at all...
+
+## Run model with taper height
+mod = glm(is_outlier ~ 1 + taper_height, data = full_data, family = binomial)
+summary(mod)
+
+## Plot stuff
+a = coef(mod)[1]
+b = coef(mod)[2]
+
+# Plot with the proxy
+plot(full_data[, taper_height], full_data[, jit_outlier],
+	pch = 19, col = "#050505AA",
+	xlab = "Fork ratio", ylab = "P(outlier)",
+	main = "Fitted logit curve",
+	ylim = c(-0.05, 1.05))
+
+curve(inv_logit(a + b * x),
+	add = TRUE, col = "#CD212A", lwd = 2)
+
+
+## Run model with fork proxy
+mod = glm(is_outlier ~ 1 + fork_proxy, data = full_data, family = binomial)
+summary(mod)
+
+## Plot stuff
+a = coef(mod)[1]
+b = coef(mod)[2]
+
+# Plot with the proxy
+plot(full_data[, fork_proxy], full_data[, jit_outlier],
+	pch = 19, col = "#050505AA",
+	xlab = "Fork ratio", ylab = "P(outlier)",
+	main = "Fitted logit curve",
+	ylim = c(-0.05, 1.05))
+
+curve(inv_logit(a + b * x),
+	add = TRUE, col = "#CD212A", lwd = 2)
+
+# OK, whatever I try, there is NO stuff that seems to distinguish outliers from
+#	non-outliers. In a way, it is a good sign! Maybe these trees are only
+#	exceptional trees!
