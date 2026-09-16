@@ -152,6 +152,9 @@ tree_dt[(group %in% ls_pb) & (fct_type == "conifer"), model := paste0(path_outpu
 ## Check that all the species have a group
 tree_dt[, any(is.na(model))]
 
+if (!file.exists(paste0(path_output, "species-model.rds")))
+	saveRDS(unique(tree_dt[, .(speciesName_sci, group, model)]), paste0(path_output, "species-model.rds"))
+
 #### Compute the averaged parameters for all species
 if (!file.exists(paste0(path_output, "avg_params_full.rds")))
 {
