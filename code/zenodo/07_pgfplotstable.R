@@ -129,6 +129,9 @@ tree_dt = merge.data.table(tree_dt, sp_specific_models, by.x = "speciesName_sci"
 tree_dt[model == "full",
 	model := paste0(path_output, stri_replace(speciesName_sci, regex = " ", replacement = "-"), "_fullmodel_theta.rds")]
 
+tree_dt[!is.na(model),
+	model := stri_replace(model, regex = "._fullmodel", replacement = "_fullmodel")]
+
 tree_dt[model == "sub",
 	model := paste0(path_output, stri_replace(speciesName_sci, regex = " ", replacement = "-"), "_submodel.rds")]
 
