@@ -5,6 +5,7 @@
 
 #### Load packages
 library(data.table)
+library(stringi)
 
 #### Load common data and tool functions
 ## Tool functions
@@ -37,14 +38,11 @@ if (file.exists(paste0(path_output, "comparison_full-sub.rds")))
 {
 	save_ls = readRDS(paste0(path_output, "comparison_full-sub.rds"))
 	rebuilt = rebuild_comp(save_ls)
-	comp = rebuilt$comp
 	weights_dt = rebuilt$weights_dt
 	R2D2 = rebuilt$R2D2
 	rhat_dt = rebuilt$rhat
 
-	comp = merge.data.table(comp, rhat_dt, by = "species")
-	comp = merge.data.table(comp, tree_dt[, .N, by = speciesName_sci],
-		by.x = "species", by.y = "speciesName_sci")
+	comp = readRDS(paste0(path_output, "comparison_dt.rds"))
 
 	rmse_mape_summary = readRDS(paste0(path_output, "rmse.rds"))
 } else {
@@ -89,7 +87,10 @@ R2D2 = merge.data.table(R2D2, mean_totvol, by.x = "species", by.y = "speciesName
 R2D2[, rmse_percent := rmse_med/meanV*100]
 
 if (!file.exists(paste0(path_pgfplotstable, "rsquared.csv")))
+{
+	saveRDS(R2D2, paste0(path_output, "rsquared.rds"))
 	fwrite(R2D2, paste0(path_pgfplotstable, "rsquared.csv"), na = "NaN")
+}
 
 if (file.exists(paste0(path_output, "longuetaud_VEF.rds")))
 {
@@ -98,4 +99,107 @@ if (file.exists(paste0(path_output, "longuetaud_VEF.rds")))
 		fwrite(longuetaud_pars, paste0(path_pgfplotstable, "longuetaud_VEF.csv"))
 } else {
 	stop("You must run 06_VEF-longuetaud.R before")
+}
+
+
+
+# -----------------------------------------------------------------------------
+# ------------    Extract parameters for all species and groups    ------------
+# -----------------------------------------------------------------------------
+
+ls_species = tree_dt[, unique(speciesName_sci)]
+
+success_dt = readRDS(paste0(path_output, "group-success.rds"))
+sp_specific_models = readRDS(paste0(path_output, "rsquared.rds"))[, .(species, model = selected)]
+
+group_models = readRDS(paste0(path_output, "comparison_dt_group.rds"))
+
+# Modify manually for groups with non-significant differences
+group_models[(elpd_diff < 4) & (best == "sub"), best := full]
+
+# Add best model information to
+success_dt = merge.data.table(x = success_dt, y = group_models[, .(group, best)], by = "group")
+
+#### Assign to each species a model (either sp-specific or group or generic model)
+## Species-specific models
+tree_dt = merge.data.table(tree_dt, sp_specific_models, by.x = "speciesName_sci",
+	by.y = "species", all.x = TRUE)
+
+# Link to files
+tree_dt[model == "full",
+	model := paste0(path_output, stri_replace(speciesName_sci, regex = " ", replacement = "-"), "_fullmodel_theta.rds")]
+
+tree_dt[model == "sub",
+	model := paste0(path_output, stri_replace(speciesName_sci, regex = " ", replacement = "-"), "_submodel.rds")]
+
+tree_dt[("Pinus uncinata"),
+	model := paste0(path_output, stri_replace(speciesName_sci, regex = " ", replacement = "-"), "_logit.rds")]
+
+## Group models (I assume that only the full model was selected, the case in my study)
+if (success_dt[, any(best != "full")])
+	stop("I assumed that only the full model was selected")
+
+ls_full_gr = success_dt[(success_full), group]
+tree_dt[is.na(model) & group %in% ls_full_gr, model := paste0(path_output, group, "_fullmodel_theta.rds")]
+
+## Assign generic models for groups that were not parametrised (A2), and for groups with too little indiv
+ls_pb = c(tree_dt[(is.na(model)), unique(group)],
+	success_dt[N_indiv < 150, group],
+	success_dt[!(any_success), group]) |> unique()
+tree_dt[(group %in% ls_pb) & (fct_type == "broadleaf"), model := paste0(path_output, "broadleaf.rds")]
+tree_dt[(group %in% ls_pb) & (fct_type == "conifer"), model := paste0(path_output, "conifer.rds")]
+
+## Check that all the species have a group
+tree_dt[, any(is.na(model))]
+
+#### Compute the averaged parameters for all species
+if (!file.exists(paste0(path_output, "avg_params_full.rds")))
+{
+	params_dt_full = unique(tree_dt[!("Pinus uncinata"), .(speciesName_sci, group)]) # Remove P. uncinata
+	pars_names = c("c", "j", "k", "m", "n", "s", "tau")
+	params_dt_full[, c(pars_names) :=
+		.(NA_real_, NA_real_, NA_real_, NA_real_, NA_real_, NA_real_, NA_real_)]
+
+	params_dt = readRDS(paste0(path_output, "avg_params.rds")) # Parameters of the 14 species
+	params_dt_full[params_dt, on = "speciesName_sci", `:=`
+		(c = i.c, j = i.j, k = i.k, m = i.m, n = i.n, s = i.s, tau = i.tau)]
+
+	for (gp in params_dt_full[, unique(group)])
+	{
+		print(paste("Group:", gp))
+		ls_species = params_dt_full[group == gp & is.na(c), unique(speciesName_sci)] # Non-parametrised species
+		filename = tree_dt[ls_species, unique(model)]
+		if (length(filename) != 1)
+			stop("There should be a unique model to load!")
+
+		fit = readRDS(filename)
+
+		load_sub = TRUE
+		generic = (stri_detect(filename, regex = "broadleaf") || stri_detect(filename, regex = "conifer"))
+		if ((success_dt[gp, success_full]) || (generic))
+		{
+			paramsVec = getParams(fit, params_names = pars_names, type = "mean")
+			load_sub = FALSE
+		}
+
+		if (load_sub)
+		{
+			warning("I thought there were only full or generic models... Check that out!")
+			paramsVec_simplif = getParams(model_cmdstan = fit,
+				params_names = c("alpha", "beta_", "gamma", "delta"), type = "mean")
+			paramsVec = c(
+				c = unname(paramsVec_simplif["alpha"]),
+				j = 1,
+				k = unname(paramsVec_simplif["beta_"]),
+				m = unname(exp(-1)*paramsVec_simplif["gamma"]/paramsVec_simplif["beta_"] +
+					paramsVec_simplif["alpha"]),
+				n = unname(paramsVec_simplif["delta"] + paramsVec_simplif["alpha"]),
+				s = unname(paramsVec_simplif["beta_"])
+			)
+		}
+
+		rm(fit)
+		params_dt_full[ls_species, c(pars_names) := as.list(paramsVec)]
+	}
+	saveRDS(params_dt_full, paste0(path_output, "avg_params_full.rds"))
 }
