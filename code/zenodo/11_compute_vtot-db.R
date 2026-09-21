@@ -1,0 +1,1 @@
+#### Aim of script: Compute the total volume for trees in database (campaigns 2020--2024)
