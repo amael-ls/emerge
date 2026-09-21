@@ -166,10 +166,50 @@ if (!file.exists(paste0(path_output, "avg_params_full.rds")))
 	params_dt_full[, c(pars_names) :=
 		.(NA_real_, NA_real_, NA_real_, NA_real_, NA_real_, NA_real_, NA_real_)]
 
-	params_dt = readRDS(paste0(path_output, "avg_params.rds")) # Parameters of the 14 species
-	params_dt_full[params_dt, on = "speciesName_sci", `:=`
-		(c = i.c, j = i.j, k = i.k, m = i.m, n = i.n, s = i.s, tau = i.tau)]
+	## Species-specific params
+	for (sp in sp_specific_models[, unique(species)])
+	{
+		if (sp == "Pinus uncinata")
+			next;
 
+		print(paste("Species:", sp))
+		sp_filename = stri_replace(str = sp, replacement = "-", regex = " ") |>
+			stri_replace(replacement = "", regex = "\\.")
+
+		load_sub = FALSE
+		if (sp_specific_models[sp, model] == "full")
+			filename = paste0(path_output, sp_filename, "_fullmodel_theta", ".rds")
+
+		if (sp_specific_models[sp, model] == "sub")
+		{
+			filename = paste0(path_output, sp_filename, "_fullmodel_theta", ".rds")
+			load_sub = TRUE
+		}
+
+		fit = readRDS(filename)
+
+		if (load_sub)
+		{
+			paramsVec_simplif = getParams(model_cmdstan = fit,
+				params_names = c("alpha", "beta_", "gamma", "delta"), type = "mean")
+			paramsVec = c(
+				c = unname(paramsVec_simplif["alpha"]),
+				j = 1,
+				k = unname(paramsVec_simplif["beta_"]),
+				m = unname(exp(-1)*paramsVec_simplif["gamma"]/paramsVec_simplif["beta_"] +
+					paramsVec_simplif["alpha"]),
+				n = unname(paramsVec_simplif["delta"] + paramsVec_simplif["alpha"]),
+				s = unname(paramsVec_simplif["beta_"])
+			)
+		} else {
+			paramsVec = getParams(fit, params_names = pars_names, type = "mean")
+		}
+
+		rm(fit)
+		params_dt_full[.(sp), c(pars_names) := as.list(paramsVec)]
+	}
+
+	## Group params for species WITHOUT species-specific models
 	for (gp in params_dt_full[, unique(group)])
 	{
 		print(paste("Group:", gp))
@@ -207,5 +247,24 @@ if (!file.exists(paste0(path_output, "avg_params_full.rds")))
 		rm(fit)
 		params_dt_full[ls_species, c(pars_names) := as.list(paramsVec)]
 	}
+
+	## Generic models params
+	# Broadleaves
+	fit = readRDS(paste0(path_output, "broadleaf.rds"))
+	broadleaf = getParams(fit, params_names = pars_names, type = "mean")
+	rm(fit)
+
+	# Conifers
+	fit = readRDS(paste0(path_output, "conifer.rds"))
+	conifer = getParams(fit, params_names = pars_names, type = "mean")
+	rm(fit)
+
+	temp_dt = rbindlist(l = list(broadleaf = as.list(broadleaf), conifer = as.list(conifer)),
+		idcol = "speciesName_sci")
+	temp_dt[, group := NA_character_]
+	setcolorder(temp_dt, neworder = names(params_dt_full))
+
+	params_dt_full = rbindlist(l = list(params_dt_full, temp_dt))
+
 	saveRDS(params_dt_full, paste0(path_output, "avg_params_full.rds"))
 }
