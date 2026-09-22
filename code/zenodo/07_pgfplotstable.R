@@ -261,10 +261,11 @@ if (!file.exists(paste0(path_output, "avg_params_full.rds")))
 
 	temp_dt = rbindlist(l = list(broadleaf = as.list(broadleaf), conifer = as.list(conifer)),
 		idcol = "speciesName_sci")
-	temp_dt[, group := NA_character_]
+	temp_dt[, group := c("broadleaf-generic", "conifer-generic")]
 	setcolorder(temp_dt, neworder = names(params_dt_full))
 
 	params_dt_full = rbindlist(l = list(params_dt_full, temp_dt))
+	setkey(params_dt_full, "speciesName_sci")
 
 	saveRDS(params_dt_full, paste0(path_output, "avg_params_full.rds"))
 }
