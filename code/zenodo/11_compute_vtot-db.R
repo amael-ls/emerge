@@ -1,6 +1,10 @@
 #### Aim of script: Compute the total volume for trees in database (campaigns 2020--2024)
 ## Comments
 # This file will not run outside of the French NFI
+# This script predicts the above-ground volume of trees in the French NFI database.
+# Note that they do not support posteriors, so predictions are only done with
+# the averaged coefficients. I checked and found that average of posterior predictions
+# matches medians and also predictions done with averaged coefficients.
 
 #### Load packages
 library(data.table)
