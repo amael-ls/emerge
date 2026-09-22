@@ -100,6 +100,10 @@ mu_2nd_submodel = function(k, m, c, n)
 	return(-k*gamma*exp(-k*(1/k - delta/gamma)))
 }
 
+# Second central moment of mu_1, i.e., variance computed around the mean (not tau) as it is a gamma fct
+var_mu = function(tau, j)
+	return(tau^2*(j + 1)/j^2)
+
 ## Load data
 tree_dt = readRDS(paste0(path_data, "tree_dt_14species.rds"))
 ls_species = tree_dt[, unique(speciesName_sci)]
@@ -434,6 +438,11 @@ threshold_dt["Fraxinus excelsior", x3 := -1/p[, k] * ((p[, n] - p[, c])*exp(1)/(
 
 # Modify manually for Pinus uncinata
 threshold_dt["Pinus uncinata", x3 := (pars["gamma"] - pars["beta_"] * pars["delta"]) / (pars["beta_"] * pars["gamma"])]
+
+# Add the computation of the second central moment
+params_dt[, var_mu := var_mu(tau, j), by = speciesName_sci]
+params_dt["Fraxinus excelsior", var_mu := var_mu(j/k, j)] # Equals to 2*tau^2 = 2/beta^2
+params_dt[, .(speciesName_sci, var_mu)]
 
 ## Export the data for pgfplots
 # Write fct_ouput
