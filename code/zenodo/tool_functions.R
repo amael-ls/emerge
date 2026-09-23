@@ -505,7 +505,7 @@ plot_sp = function(fit, sp, forest = tree_dt[.(sp)], pred = TRUE, simplif = FALS
 	{
 		if (!(selected_variable %in% colnames(forest)))
 			stop(paste0("'", selected_variable, "' is not a column of forest"))
-		
+
 		colours = MetBrewer::met.brewer(pal, n_bins)[1:n_bins]
 		forest[, colour_ind := as.numeric(cut(.SD[[selected_variable]], breaks = n_bins))] # Indices per category
 		forest[, colour := colours[colour_ind]] # Map selected variable to colour using indices
@@ -535,7 +535,7 @@ plot_sp = function(fit, sp, forest = tree_dt[.(sp)], pred = TRUE, simplif = FALS
 		return ((pars["m"] - pars["c"]) * exp(pars["j"] - pars["k"]*x) * (pars["k"]*x/pars["j"])^pars["j"] +
 			pars["c"] - (pars["c"] - pars["n"])*exp(-pars["s"]*x));
 	}
-	
+
 	psi = function(x, pars)
 	{
 		r = r_func(x, pars)
@@ -1058,16 +1058,18 @@ comparison_full_sub = function(sp, tree_dt, path_models, path_output,
 	## Predict on new data
 	sim_full = genQ_full$generate_quantities(fitted_params = full, data = stanData,
 		seed = woodstock_seed, parallel_chains = min(n_chains, 4))
-	
+
 	sim_sub = genQ_sub$generate_quantities(fitted_params = sub, data = stanData,
 		seed = woodstock_seed, parallel_chains = min(n_chains, 4))
 
-	## Save simulations
-	v_gen_mean_full = apply(X = sim_full$draws("v_gen_mean"), MARGIN = 3, FUN = mean)
-	v_gen_mean_sub = apply(X = sim_sub$draws("v_gen_mean"), MARGIN = 3, FUN = mean)
+	rm(full, sub)
 
+	## Save simulations
 	if (printPlot)
-	{	
+	{
+		v_gen_mean_full = apply(X = sim_full$draws("v_gen_mean"), MARGIN = 3, FUN = mean)
+		v_gen_mean_sub = apply(X = sim_sub$draws("v_gen_mean"), MARGIN = 3, FUN = mean)
+
 		plot(x = v_gen_mean_sub, y = v_gen_mean_full, pch = 19, xlab = "Sub", ylab = "New", axes = FALSE)
 		abline(a = 0, b = 1, col = "#CD212A")
 		axis(1)
@@ -1078,7 +1080,7 @@ comparison_full_sub = function(sp, tree_dt, path_models, path_output,
 	# ... for full model
 	r_eff_full = loo::relative_eff(exp(sim_full$draws("log_lik")), cores = 8)
 	loo_full = loo::loo(x = sim_full$draws("log_lik"), r_eff = r_eff_full, cores = 8, save_psis = TRUE)
-	
+
 	# ... for submodel
 	r_eff_sub = loo::relative_eff(exp(sim_sub$draws("log_lik")), cores = 8)
 	loo_sub = loo::loo(x = sim_sub$draws("log_lik"), r_eff = r_eff_sub, cores = 8, save_psis = TRUE)
@@ -1086,7 +1088,7 @@ comparison_full_sub = function(sp, tree_dt, path_models, path_output,
 	warning_loo_full = FALSE
 	if (any(loo_full$diagnostics$pareto_k >= 0.7))
 		warning_loo_full = TRUE
-	
+
 	warning_loo_sub = FALSE
 	if (any(loo_sub$diagnostics$pareto_k >= 0.7))
 		warning_loo_sub = TRUE
@@ -1106,7 +1108,7 @@ comparison_full_sub = function(sp, tree_dt, path_models, path_output,
 		MARGIN = 1, FUN = var) # The var contains the correction 1/(n - 1) already!
 	var_res_full = apply(X = posterior::as_draws_matrix(sim_full$draws("sigma_var")),
 		MARGIN = 1, FUN = mean)
-	
+
 	var_fit_sub = apply(X = posterior::as_draws_matrix(sim_sub$draws("r_gen_mean")),
 		MARGIN = 1, FUN = var)
 	var_res_sub = apply(X = posterior::as_draws_matrix(sim_sub$draws("sigma_var")),
@@ -1121,14 +1123,14 @@ comparison_full_sub = function(sp, tree_dt, path_models, path_output,
 		# Get parameters of r ~ BetaDistribution(a, b)
 		a_mat = posterior::as_draws_matrix(sim$draws("shape1_new")) # N_draws x N_obs
 		b_mat = posterior::as_draws_matrix(sim$draws("shape2_new")) # N_draws x N_obs
-	
+
 		warning_a_mat = FALSE
 		if (min(a_mat) <= 2)
 		{
 			warning_a_mat = TRUE
-			warning("The analytical calculus does not work!")
+			warning("The analytical calculus of R² Gelman for Vtot does not work!")
 		}
-	
+
 		# Variance of 1/r, dim: N_draws x N_obs, each column being the draws for one individual
 		var_1_over_r = b_mat * (a_mat + b_mat - 1) / ((a_mat - 1)^2 * (a_mat - 2))
 
@@ -1156,8 +1158,8 @@ comparison_full_sub = function(sp, tree_dt, path_models, path_output,
 			y = vtot
 			if (any(vtot < 0))
 				stop("Presence of negative total volumes!")
-		}			
-		
+		}
+
 		if (!(is.null(ratio)) && (is.null(vtot)))
 		{
 			corresponding_variable = "r_gen_mean"
@@ -1165,10 +1167,10 @@ comparison_full_sub = function(sp, tree_dt, path_models, path_output,
 			if (any(ratio < 0) || any(ratio > 1))
 				stop("Ratio not between 0 and 1!")
 		}
-		
+
 		if ((!(is.null(ratio)) && !(is.null(vtot))))
 			stop("Either ratio or vtot should be left NULL")
-		
+
 		mu_loo = loo::E_loo(posterior::as_draws_matrix(sim$draws(corresponding_variable)),
 			psis_object = psis_object, type = "mean",
 			log_ratios = -posterior::as_draws_matrix(sim$draws("log_lik")))$value
@@ -1208,7 +1210,7 @@ comparison_full_sub = function(sp, tree_dt, path_models, path_output,
 		ratio = stanData[["bole_volume_m3_new"]]/stanData[["total_volume_m3_new"]])
 	r2_loo_sub_r = loo_R2(sim = sim_sub, psis_object = loo_sub$psis_object, n_draws = n_draws,
 		ratio = stanData[["bole_volume_m3_new"]]/stanData[["total_volume_m3_new"]])
-	
+
 	r2_loo_full_vtot = loo_R2(sim = sim_full, psis_object = loo_full$psis_object, n_draws = n_draws,
 		vtot = stanData[["total_volume_m3_new"]])
 	r2_loo_sub_vtot = loo_R2(sim = sim_sub, psis_object = loo_sub$psis_object, n_draws = n_draws,
