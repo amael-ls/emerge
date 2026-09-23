@@ -37,7 +37,7 @@ nfi_data = exec_req(conn = db, req = paste0("
 
 	WHERE
 		tree.VEGET = '0' AND -- Living standing trees
-		tree.V > 0 AND -- I found some that are 0!
+		tree.V > 0 AND -- I found some that are 0! That's because of culls set to 100%
 		tree.INCREF IN ('15', '16', '17', '18', '19') -- Campaign from 2020 to 2024
 
 	ORDER BY
@@ -82,24 +82,24 @@ params_dt_group = readRDS(paste0(path_output, "avg_params_full.rds"))[!ls_specie
 	unique() |>
 	setkey(group)
 
-#### Compute total above-ground volume
+#### Compute total above-ground volume...
 nfi_data[, U_V0_ALAMOD := NA_real_]
 
-## For parametrised species
+## ...for parametrised species
 setkey(nfi_data, speciesName_sci)
 
 nfi_data[, U_V0_ALAMOD := pred_vol(bole_volume, params_dt_species[.(.BY$speciesName_sci)]),
 	by = speciesName_sci]
 
-## For groups AND NOT parametrised species
+## ...for groups AND NOT parametrised species
 nfi_data[!(ls_species), U_V0_ALAMOD := pred_vol(bole_volume, params_dt_group[.(.BY$group)]),
 	by = group]
 
-## For Pinus uncinata specifically
+## ...for Pinus uncinata which species-specific model is unreliable (lack of data in the tail), apply group
 nfi_data["Pinus uncinata", U_V0_ALAMOD := pred_vol(bole_volume, params_dt_group[.(.BY$group)]),
 	by = group]
 
-## For the group A2 that does not exist
+## ...for the group A2 that does not exist
 nfi_data[is.na(U_V0_ALAMOD), unique(group)]
 nfi_data[is.na(U_V0_ALAMOD), unique(speciesName_sci)] # Should be conifers only, Cupressus and Juniperus
 nfi_data[is.na(U_V0_ALAMOD), U_V0_ALAMOD := pred_vol(bole_volume, params_dt_group["conifer-generic"])]
