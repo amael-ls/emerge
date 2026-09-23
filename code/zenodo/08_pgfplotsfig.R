@@ -104,6 +104,17 @@ mu_2nd_submodel = function(k, m, c, n)
 var_mu = function(tau, j)
 	return(tau^2*(j + 1)/j^2)
 
+# Third central moment of mu_1, i.e., skewness
+skewness = function(j)
+	return(2/sqrt(j + 1))
+
+# Function for Pinus uncinata
+mu_logit_fct = function(x, pars)
+	return (inv_logit(pars["logit_alpha"] + exp(-pars["beta_"]*x) * (pars["gamma"]*x + pars["delta"])))
+
+vtot_logit_fct = function(x, pars)
+	return (x/mu_logit_fct(x, pars))
+
 ## Load data
 tree_dt = readRDS(paste0(path_data, "tree_dt_14species.rds"))
 ls_species = tree_dt[, unique(speciesName_sci)]
@@ -401,13 +412,6 @@ if (!loaded)
 	wp = -1/beta * (lamW::lambertW0(xi) + beta*delta/gamma)
 	wm = -1/beta * (lamW::lambertWm1(xi) + beta*delta/gamma)
 
-	mu_logit_fct = function(x, pars)
-		return (inv_logit(pars["logit_alpha"] + exp(-pars["beta_"]*x) *
-			(pars["gamma"]*x + pars["delta"])))
-
-	vtot_logit_fct = function(x, pars)
-		return (x/mu_logit_fct(x, pars))
-
 	fct_output[sp, ] = mu_logit_fct(vbole, pars)
 
 	diff = abs(mu_logit_fct(wm, pars) - alpha) - epsilon
@@ -419,30 +423,59 @@ if (!loaded)
 	saveRDS(params_dt, paste0(path_output, "avg_params.rds"))
 }
 
-## Add ratio (m - c)/epsilon to know how many times peak above epsilon
-threshold_dt[, eps_mc := delta_mc/eps]
-threshold_dt[, .(speciesName_sci, x1, wp, eps_mc)]
-
 ## Add curvature at x_M (i.e., second derivative) at maximum x
-params_dt[, curve := mu_2nd(k, j, m, c, s, n), by = speciesName_sci]
-params_dt["Fraxinus excelsior", curve := mu_2nd_submodel(k, m, c, n)]
-params_dt["Pinus uncinata", curve := pinus_uncinata_mu_2nd(pars)]
+if (!loaded)
+{
+	params_dt[, curve := mu_2nd(k, j, m, c, s, n), by = speciesName_sci]
+	params_dt["Fraxinus excelsior", curve := mu_2nd_submodel(k, m, c, n)]
+}
 
-## Add how much percentage of c lies in m - c, and x3 the location of the max
-threshold_dt = merge.data.table(x = threshold_dt,
-	y = params_dt[, .(speciesName_sci, curve, percent_c = 100*(m - c)/c, x3 = j/k)], by = "speciesName_sci")
+if (loaded)
+{
+	sp = "Pinus uncinata"
+	print(paste("Doing species", sp))
 
-# Modify manually for Fraxinus excelsior (see notebook 4, p. 55 03 August 2026)
-p = params_dt["Fraxinus excelsior", .(k, n, m, c)]
-threshold_dt["Fraxinus excelsior", x3 := -1/p[, k] * ((p[, n] - p[, c])*exp(1)/(p[, m] - p[, c]) - 1)]
+	sp_filename = stri_replace(str = sp, replacement = "-", regex = " ")
 
-# Modify manually for Pinus uncinata
-threshold_dt["Pinus uncinata", x3 := (pars["gamma"] - pars["beta_"] * pars["delta"]) / (pars["beta_"] * pars["gamma"])]
+	filename = paste0(path_output, sp_filename, "_logit", ".rds")
+	fit = readRDS(filename)
+
+	pars = getParams(model_cmdstan = fit,
+		params_names = c("alpha", "beta_", "gamma", "delta", "logit_alpha"), type = "mean")
+
+	rm(fit)
+	params_dt["Pinus uncinata", curve := pinus_uncinata_mu_2nd(pars)]
+}
+
+if (!loaded)
+{
+	## Add ratio (m - c)/epsilon to know how many times peak above epsilon
+	threshold_dt[, eps_mc := delta_mc/eps]
+	threshold_dt[, .(speciesName_sci, x1, wp, eps_mc)]
+
+	threshold_dt = merge.data.table(x = threshold_dt,
+		y = params_dt[, .(speciesName_sci, curve, percent_c = 100*(m - c)/c, x3 = j/k)], by = "speciesName_sci")
+	
+	## Add how much percentage of c lies in m - c, and x3 the location of the max
+	# Modify manually for Fraxinus excelsior (see notebook 4, p. 55 03 August 2026)
+	p = params_dt["Fraxinus excelsior", .(k, n, m, c)]
+	threshold_dt["Fraxinus excelsior", x3 := -1/p[, k] * ((p[, n] - p[, c])*exp(1)/(p[, m] - p[, c]) - 1)]
+
+	# Modify manually for Pinus uncinata
+	threshold_dt["Pinus uncinata", x3 := (pars["gamma"] - pars["beta_"] * pars["delta"]) / (pars["beta_"] * pars["gamma"])]
+}
 
 # Add the computation of the second central moment
 params_dt[, var_mu := var_mu(tau, j), by = speciesName_sci]
 params_dt["Fraxinus excelsior", var_mu := var_mu(j/k, j)] # Equals to 2*tau^2 = 2/beta^2
 params_dt[, .(speciesName_sci, var_mu)]
+
+# Add the computation of the third central moment
+params_dt[, skewness := skewness(j), by = speciesName_sci]
+
+if (!loaded)
+	threshold_dt = merge.data.table(x = threshold_dt,
+		y = params_dt[, .(speciesName_sci, var_mu, skewness)], by = "speciesName_sci")
 
 ## Export the data for pgfplots
 # Write fct_ouput
@@ -456,9 +489,10 @@ if (!file.exists(filename))
 ## Write treshold_dt
 filename = paste0(path_pgfplotstable, "thresholds.csv")
 if (!file.exists(filename))
-	fwrite(threshold_dt, filename)
+	fwrite(threshold_dt, filename, na = "NaN")
 
 threshold_dt[percent_c < 4, .(speciesName_sci, percent_c, x1, x3)]
+threshold_dt[, .(speciesName_sci, curve, var_mu)]
 
 if (!file.exists(paste0(path_output, "lambert_calculus.rds")))
 	saveRDS(threshold_dt, paste0(path_output, "lambert_calculus.rds"))
@@ -468,3 +502,17 @@ plot(fct_output["vbole", ], fct_output["Pinus uncinata", ], type = "l")
 abline(v = threshold_dt["Pinus uncinata", x3])
 abline(h = mu_logit_fct(threshold_dt["Pinus uncinata", x3], pars))
 points(tree_dt["Pinus uncinata", bole_volume_m3], tree_dt["Pinus uncinata", r], pch = 19, cex = 0.75, col = "#FAB255")
+
+broad = c("Fagus sylvatica", "Faxinus excelsior", "Quercus petraea", "Quercus sp.")
+plot(0, pch = "", xlim = c(0, 4), ylim = c(0.65, 0.95), axes = FALSE,
+	xlab = "Bole volume", ylab = "Ratio")
+axis(1)
+axis(2, las = 1)
+for (sp in ls_species)
+{
+	if (sp %in% broad)
+		curve(pred_ratio(x, params_dt[.(sp)]), add = TRUE, col = "#FAB255", lwd = 4)
+
+	if (!(sp %in% broad))
+		curve(pred_ratio(x, params_dt[.(sp)]), add = TRUE, col = "#0F7BA2", lwd = 2)
+}
