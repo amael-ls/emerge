@@ -553,7 +553,7 @@ plot_sp = function(fit, sp, forest = tree_dt[.(sp)], pred = TRUE, simplif = FALS
 	params = getParams(model_cmdstan = fit, params_names = pars_names, type = "all")
 	div = posterior::subset_draws(fit$sampler_diagnostics(), variable = "divergent__")
 
-	if (!print_plot & !pred)
+	if (!print_plot && !pred)
 		return (list(any_div = any(div != 0), loc = div, rhats = rhats))
 
 	# Plot figure r vs bole and fitted curve
@@ -600,7 +600,7 @@ plot_sp = function(fit, sp, forest = tree_dt[.(sp)], pred = TRUE, simplif = FALS
 		}
 	}
 
-	if (!print_plot & pred)
+	if (!print_plot && pred)
 	{
 		return (list(any_div = any(div != 0), loc = div, rhats = rhats, pred_tot = sim,
 			obs_bole = forest[, bole_volume_m3], obs_tot = forest[, total_volume_m3], params = paramsVec))
@@ -787,7 +787,7 @@ plot_gr = function(fit, gr, forest = tree_dt[.(gr)], pred = TRUE, simplif = FALS
 	params = getParams(model_cmdstan = fit, params_names = pars_names, type = "all")
 	div = posterior::subset_draws(fit$sampler_diagnostics(), variable = "divergent__")
 
-	if (!print_plot & !pred)
+	if (!print_plot && !pred)
 		return (list(any_div = any(div != 0), loc = div, rhats = rhats))
 
 	# Plot figure r vs bole and fitted curve
@@ -834,7 +834,7 @@ plot_gr = function(fit, gr, forest = tree_dt[.(gr)], pred = TRUE, simplif = FALS
 		}
 	}
 
-	if (!print_plot & pred)
+	if (!print_plot && pred)
 	{
 		return (list(any_div = any(div != 0), loc = div, rhats = rhats, pred_tot = sim,
 			obs_bole = forest[, bole_volume_m3], obs_tot = forest[, total_volume_m3], params = paramsVec))
