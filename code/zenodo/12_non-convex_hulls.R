@@ -6,13 +6,57 @@
 
 #### Load packages
 library(data.table)
-library(concaveman)
 library(terra)
-# library(sf)
+library(ks)
 
 #### Load common data and tool functions
 ## Tool functions
 source("./tool_functions.R")
+
+## Function to build species-specific concave hull
+sp_hull = function(dt, param = 0.2, type = "concave_ratio", trim_nfi = TRUE, level = 0.95, allowHoles = FALSE)
+{
+	if (param < 0 || param > 1)
+		stop("param must be between 0 and 1")
+
+	if (type != "concave_ratio" && type != "concave_length")
+		stop("I want a concave hull!")
+
+	pts_nfi = as.matrix(unique(dt[origin == "nfi", .(circumference_m, height)]))
+	if (trim_nfi) {
+		kd_nfi = kde(x = pts_nfi)
+		dens_nfi = predict(kd_nfi, x = pts_nfi)
+		thresh_nfi = contourLevels(kd_nfi, cont = 100 * level)
+		pts_nfi = pts_nfi[dens_nfi >= thresh_nfi, , drop = FALSE]
+	}
+
+	# Hull NFI
+	dt_vect_nfi = vect(dt[origin == "nfi", .(circumference_m, height)])
+	dt_vect_nfi_trimmed = vect(pts_nfi, type = "points")
+	nfi = hull(dt_vect_nfi, type = type, param = param, allowHoles = allowHoles)
+	nfi_trimmed = hull(dt_vect_nfi_trimmed, type = type, param = param, allowHoles = allowHoles)
+
+	# Hull training
+	dt_vect_train = vect(unique(dt[origin == "training", .(circumference_m, height)]))
+	training = hull(dt_vect_train, type = type, param = param, allowHoles = allowHoles)
+
+	# Compute overlap
+	overlap_full = expanse(intersect(nfi, training), unit = "m")
+	overlap_trimmed = expanse(intersect(nfi_trimmed, training), unit = "m")
+	nfi_area = expanse(nfi, unit = "m")
+	train_area = expanse(training, unit = "m")
+
+	overlap_2d = data.table(target = c("training", "NFI"),
+		area_target = c(train_area, nfi_area),
+		area_intersect_full = overlap_full,
+		area_intersect_trimmed = overlap_trimmed,
+		overlap_percent_full = 100 * c(overlap_full/train_area, overlap_full/nfi_area),
+		overlap_percent_trimmed = 100 * c(overlap_trimmed/train_area, overlap_trimmed/nfi_area)
+	)
+
+	return (list(nfi_hull = nfi, nfi_pt = dt_vect_nfi,
+		training_hull = training, training_pt = dt_vect_train, overlap = overlap_2d))
+}
 
 ## Global variables (paths and others)
 source("./global_variables.R")
@@ -38,6 +82,7 @@ nfi_data = inventR::exec_req(conn = db, req = paste0("
 		tree.ESS IN (", sp_code_nfi, ") AND -- Selected tree species
 		tree.VEGET = '0' AND -- Living standing trees
 		tree.V > 0 AND -- I found some that are 0! That's because of culls set to 100%
+		tree.SIMPLIF = '0' AND -- Trees with height measured
 		tree.INCREF IN ('15', '16', '17', '18', '19') -- Campaign from 2020 to 2024
 
 	ORDER BY
@@ -51,5 +96,56 @@ tree_dt = merge.data.table(tree_dt, nfi_codes, by = "speciesName_sci")
 tree_dt = tree_dt[, .SD, .SDcols = colnames(nfi_data)]
 
 # Row binding
-tree_dt = rbindlist(l = list(training = tree_dt, nfi = nfi_data), idcol = "origin")
+tree_dt = rbindlist(l = list(training = tree_dt, nfi = nfi_data), idcol = "origin")[
+	!is.na(circumference_m)][!is.na(height)]
+setkey(tree_dt, species_code_nfi)
+
 rm(nfi_data)
+
+#### Overlap circumference -- height space
+## Build hulls, compute overlaps
+ls_hulls = vector(mode = "list", length = length(ls_species))
+names(ls_hulls) = ls_species
+
+temp = vector(mode = "list", length = length(ls_species))
+names(temp) = ls_species
+
+tree_dt[, .N, by = species_code_nfi][order(N)]
+sp = "Pinus strobus"
+
+for (sp in ls_species)
+{
+	print(paste("Running", sp))
+
+	param = 0.2 # Seems ok visually
+	if (sp %in% c("Pinus laricio", "Pinus strobus"))
+		param = 0.3 # Adjusted visually
+
+	ls_hulls[[sp]] = sp_hull(dt = tree_dt[nfi_codes[.(sp), species_code_nfi]],
+		param = param, level = 0.975, trim_nfi = FALSE)
+
+	# Extract overlap
+	temp[[sp]] = ls_hulls[[sp]][["overlap"]]
+
+	# Plot
+	ext_nfi = ext(ls_hulls[[sp]][["nfi_hull"]])
+	ext_train = ext(ls_hulls[[sp]][["training_hull"]])
+
+	xlim = c(min(ext_nfi[1], ext_train[1]), max(ext_nfi[2], ext_train[2]))
+	ylim = c(min(ext_nfi[3], ext_train[3]), max(ext_nfi[4], ext_train[4]))
+
+	plot(ls_hulls[[sp]][["nfi_hull"]], col = "#0F7BA255", main = sp, xlim = xlim, ylim = ylim,
+		axes = FALSE, xlab = "Circumference", ylab = "Height", clip = TRUE)
+	plot(ls_hulls[[sp]][["training_hull"]], col = "#FAB25588", add = TRUE)
+
+	# points(ls_hulls[[sp]][["nfi_pt"]], pch = 19, cex = 0.5, col = "#5A5A5AAA")
+
+	axis(1)
+	axis(2, las = 1)
+}
+
+overlap = rbindlist(temp, idcol = "speciesName_sci")
+
+filename = paste0(path_pgfplotstable, "overlap.csv")
+if (!file.exists(filename))
+	fwrite(overlap[target == "NFI"], filename)
