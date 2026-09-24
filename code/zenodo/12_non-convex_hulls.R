@@ -14,7 +14,8 @@ library(ks)
 source("./tool_functions.R")
 
 ## Function to build species-specific concave hull
-sp_hull = function(dt, param = 0.2, type = "concave_ratio", trim_nfi = TRUE, level = 0.95, allowHoles = FALSE)
+sp_hull = function(dt, template, param = 0.2, type = "concave_ratio", trim_nfi = TRUE,
+	level = 0.95, allowHoles = FALSE)
 {
 	if (param < 0 || param > 1)
 		stop("param must be between 0 and 1")
@@ -53,6 +54,17 @@ sp_hull = function(dt, param = 0.2, type = "concave_ratio", trim_nfi = TRUE, lev
 		overlap_percent_full = 100 * c(overlap_full/train_area, overlap_full/nfi_area),
 		overlap_percent_trimmed = 100 * c(overlap_trimmed/train_area, overlap_trimmed/nfi_area)
 	)
+
+	# Export polygons for pgfplots latex
+	geom_nfi = as.data.table(geom(nfi))
+	filename = paste0(template, "_nfi.csv")
+	if(!file.exists(filename))
+		fwrite(geom_nfi[, .(x, y)], filename)
+
+	geom_train = as.data.table(geom(training))
+	filename = paste0(template, "_training.csv")
+	if(!file.exists(filename))
+		fwrite(geom_train[, .(x, y)], filename)
 
 	return (list(nfi_hull = nfi, nfi_pt = dt_vect_nfi,
 		training_hull = training, training_pt = dt_vect_train, overlap = overlap_2d))
@@ -116,12 +128,15 @@ sp = "Pinus strobus"
 for (sp in ls_species)
 {
 	print(paste("Running", sp))
+	if (sp == "Quercus sp.")
+		next;
 
 	param = 0.2 # Seems ok visually
 	if (sp %in% c("Pinus laricio", "Pinus strobus"))
 		param = 0.3 # Adjusted visually
 
-	ls_hulls[[sp]] = sp_hull(dt = tree_dt[nfi_codes[.(sp), species_code_nfi]],
+	template = paste0(path_pgfplotstable, stringi::stri_replace(str = sp, replacement = "-", regex = " "))
+	ls_hulls[[sp]] = sp_hull(dt = tree_dt[nfi_codes[.(sp), species_code_nfi]], template = template,
 		param = param, level = 0.975, trim_nfi = FALSE)
 
 	# Extract overlap
