@@ -146,6 +146,27 @@ for (sp in ls_species)
 
 overlap = rbindlist(temp, idcol = "speciesName_sci")
 
+#### Overlap bole volume space
+## Span of measurements
+range_dt = tree_dt[, .(min_bole_v = min(bole_volume_m3), max_bole_v = max(bole_volume_m3)),
+	by = .(species_code_nfi, origin)] |>
+	dcast(species_code_nfi ~ origin, value.var = c("min_bole_v", "max_bole_v")) # NA for 01 as not in NFI 2020--2024
+
+## Overlap (i.e., the smallest max - the largest min)
+range_dt[, overlap := min(max_bole_v_training, max_bole_v_nfi) -
+	max(min_bole_v_training, min_bole_v_nfi), by = species_code_nfi]
+range_dt[, overlap_percent := 100*overlap/(max_bole_v_nfi - min_bole_v_nfi)]
+
+#### Merge 2D space and bole volume overlaps
+## Keep only NFI target and columns of interest
+overlap = overlap[target == "NFI", .(speciesName_sci, circum_height = overlap_percent_full)]
+
+## Merging
+range_dt = merge.data.table(range_dt, nfi_codes, by = "species_code_nfi")
+range_dt = range_dt[, .(speciesName_sci, bole_volume = overlap_percent)]
+
+overlap = merge.data.table(overlap, range_dt)
+
 filename = paste0(path_pgfplotstable, "overlap.csv")
 if (!file.exists(filename))
-	fwrite(overlap[target == "NFI"], filename)
+	fwrite(overlap, filename)
