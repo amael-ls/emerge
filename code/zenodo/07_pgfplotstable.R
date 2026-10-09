@@ -269,3 +269,28 @@ if (!file.exists(paste0(path_output, "avg_params_full.rds")))
 
 	saveRDS(params_dt_full, paste0(path_output, "avg_params_full.rds"))
 }
+
+#### Other stuff for discussion
+
+aa = fread("~/work/library/XDM/xdm_species_density_data.csv")[, .(Species, Mean)] |>
+	setkey("Species")
+
+aa[stri_detect(str = Species, regex = paste(ls_species, collapse = "|"))]
+
+# BEFs:
+420.6/0.84 # Abies alba, 500.7143
+604.1/0.73 # Fagus sylvatica, 827.5342
+393.8/0.68 # Picea abies, 579.1176
+393.8/0.68 # Picea abies, 579.1176
+457.8/0.78 # Pinus sylvestris 586.9231
+
+## Teobaldilli 2009
+teobal = function(x, a, b, c) # Model 3 x = Growing stock
+	return(a + b/x^c)
+
+curve(teobal(x, 1.049, 1.581, 0.436), to = 600, main = "Broad.") # Broadleaves
+curve(teobal(x, 0.949, 3.791, 0.501), to = 200, main = "Pinus") # Pinus
+
+# Mean of model 3 between 300 and 600 m³ growing stock
+integrate(f = teobal, lower = 300, upper = 600, a = 1.049, b = 1.581, c = 0.436)$value/300 * 0.6401 # 0.7428541
+integrate(f = teobal, lower = 300, upper = 600, a = 0.949, b = 3.791, c = 0.501)$value/300 * 0.4578 # 0.5169585
