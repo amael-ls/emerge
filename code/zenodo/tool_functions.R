@@ -33,14 +33,14 @@ form_vallet = function(circumference_cm, height, params, n_params, is_douglas)
 	res = params["alpha"] + params["beta"]*circumference_cm
 
 	if (is_douglas == 1)
-		return(res*(1 + params["delta"]/circumference_cm^2))
-	
+		return(res*(1 + params["delta"]/circumference_cm^2)/(40000*pi) * circumference_cm^2*height)
+
 	if (n_params >= 3)
 		res = res + params["gamma"]*sqrt(circumference_cm)/height
 
 	if (n_params == 4)
 		res = res*(1 + params["delta"]/circumference_cm^2)
-	
+
 	res = res/(40000*pi) * circumference_cm^2*height # Conversion to volume
 	return(res)
 }
@@ -400,7 +400,6 @@ plot_joint = function(fit, params, div)
 {
 	if (length(params) > 6)
 		stop("Too many parameters, choose 6 params at most")
-	
 }
 
 ## Function to plot joint posterior of two parameters
@@ -1299,8 +1298,8 @@ RMSE_bayes = function(sp, tree_dt, path_output, path_models, is_simplif = FALSE,
 
 	for (i in seq_along(rmse))
 	{
-		rmse[i] = sqrt(1/n_indiv * sum((sim[i,] - tree_dt[.(sp)][, total_volume_m3])^2))
-		mape[i] = 100/n_indiv * sum(abs((sim[i,] - tree_dt[.(sp)][, total_volume_m3])/tree_dt[.(sp)][, total_volume_m3]))
+		rmse[i] = sqrt(1/n_indiv * sum((sim[i, ] - tree_dt[.(sp)][, total_volume_m3])^2))
+		mape[i] = 100/n_indiv * sum(abs((sim[i, ] - tree_dt[.(sp)][, total_volume_m3])/tree_dt[.(sp)][, total_volume_m3]))
 	}
 
 	return(list(rmse = rmse, mape = mape))
