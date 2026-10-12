@@ -95,12 +95,8 @@ generated quantities {
 	vector[N] v_gen;
 	vector[N] v_gen_mean;
 
-	for (i in 1:N_plot)
-	{
-		v_gen_mean[start_index[i]:end_index[i]] = bole_volume_m3[start_index[i]:end_index[i]] ./
-			r_6_params(bole_volume_m3[start_index[i]:end_index[i]], [c[i], j, tau, m[i], n, s]);
-	}
-
 	for (i in 1:N)
 		v_gen[i] = bole_volume_m3[i] ./ r_gen[i];
+
+	v_gen_mean = bole_volume_m3 * (phi - 1) ./ (shape1 - 1);
 }

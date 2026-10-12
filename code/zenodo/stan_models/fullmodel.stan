@@ -78,6 +78,5 @@ generated quantities {
 
 	for (i in 1:N)
 		v_gen[i] = 1/c * bole_volume_m3[i]^( 1 - (log(r_gen[i]) - log(c)) / log(bole_volume_m3[i]) );
-	v_gen_mean = 1/c * bole_volume_m3 .^
-		( 1 - (log(r_6_params(bole_volume_m3, [c, j, tau, m, n, s])) - log(c)) ./ log(bole_volume_m3) );
+	v_gen_mean = bole_volume_m3 * (phi - 1) ./ (shape1 - 1);
 }

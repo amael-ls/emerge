@@ -80,9 +80,8 @@ generated quantities {
 			v_gen[i] = 1/c * bole_volume_m3_new[i]^( 1 - (log(r_gen[i]) - log(c)) / log(bole_volume_m3_new[i]) );
 			log_lik[i] = beta_lpdf(ratio_new[i] | shape1_new[i], shape2_new[i]);
 		}
-		v_gen_mean = 1/c * bole_volume_m3_new .^
-			( 1 - (log(r_6_params(bole_volume_m3_new, [c, j, tau, m, n, s])) - log(c)) ./ log(bole_volume_m3_new) );
 
+		v_gen_mean = bole_volume_m3 * (phi - 1) ./ (shape1_new - 1);
 		sigma_var = shape1_new .* shape2_new ./ ((shape1_new + shape2_new).^2 .* (shape1_new + shape2_new + 1));
 	}
 }
