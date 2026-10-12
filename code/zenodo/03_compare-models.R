@@ -146,7 +146,7 @@ if (!file.exists(paste0(path_output, "rmse.rds")))
 	{
 		print(sp)
 		is_simplif = FALSE
-		if (sp %in% c("Fraxinus excelsior", "Picea abies", "Pinus laricio"))
+		if (sp %in% c("Fraxinus excelsior", "Pinus uncinata"))
 			is_simplif = TRUE
 
 		rmse_ls[[sp]] = RMSE_bayes(sp, tree_dt, path_output, path_models, is_simplif)
